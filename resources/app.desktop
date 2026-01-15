@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Rs Trf
+Comment=strf but rewrite it in rust
+Type=Application
+Icon=com.github.jazzpi.rs-trf
+Exec=rs-trf %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+MimeType=
