@@ -4,7 +4,21 @@ mod app;
 mod config;
 mod i18n;
 
+use clap::Parser;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+pub struct Args {
+    /// Spectrogram files to load
+    #[arg(value_name = "SPECTROGRAM_PATH", required = true)]
+    spectrogram_path: Vec<PathBuf>,
+}
+
 fn main() -> cosmic::iced::Result {
+    // Parse command line arguments
+    let args = Args::parse();
+
     // Get the system's preferred languages.
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
 
@@ -19,5 +33,5 @@ fn main() -> cosmic::iced::Result {
     );
 
     // Starts the application's event loop with `()` as the application's flags.
-    cosmic::app::run::<app::AppModel>(settings, ())
+    cosmic::app::run::<app::AppModel>(settings, args)
 }

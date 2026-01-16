@@ -1,0 +1,15 @@
+{
+  "configurations": [
+    {
+      "name": "Debug executable 'rs-trf'",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["run", "--bin=rs-trf"]
+      },
+      "args": [
+        "/home/jasper/GDrive/RadioDecoding/spectrograms/2025-12-31T11:49:52*"
+      ]
+    }
+  ]
+}

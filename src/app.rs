@@ -9,6 +9,7 @@ use cosmic::iced::{Alignment, Length, Subscription};
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
 use cosmic::{iced_futures, prelude::*};
 use futures_util::SinkExt;
+use rs_trf::spectrogram::Spectrogram;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -34,6 +35,8 @@ pub struct AppModel {
     time: u32,
     /// Toggle the watch subscription
     watch_is_active: bool,
+    /// Spectrogram for plotting
+    spectrogram: Option<Spectrogram>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -44,6 +47,7 @@ pub enum Message {
     ToggleWatch,
     UpdateConfig(Config),
     WatchTick(u32),
+    SpectrogramLoaded(Result<Spectrogram, String>),
 }
 
 /// Create a COSMIC application from the app model
@@ -52,7 +56,7 @@ impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
 
     /// Data that your application receives to its init method.
-    type Flags = ();
+    type Flags = crate::Args;
 
     /// Messages which the application and its widgets will emit.
     type Message = Message;
@@ -69,10 +73,7 @@ impl cosmic::Application for AppModel {
     }
 
     /// Initializes the application with any given flags and startup commands.
-    fn init(
-        core: cosmic::Core,
-        _flags: Self::Flags,
-    ) -> (Self, Task<cosmic::Action<Self::Message>>) {
+    fn init(core: cosmic::Core, flags: Self::Flags) -> (Self, Task<cosmic::Action<Self::Message>>) {
         // Create a nav bar with three page items.
         let mut nav = nav_bar::Model::default();
 
@@ -122,10 +123,15 @@ impl cosmic::Application for AppModel {
                 .unwrap_or_default(),
             time: 0,
             watch_is_active: false,
+            spectrogram: None,
         };
 
-        // Create a startup command that sets the window title.
-        let command = app.update_title();
+        let title = app.update_title();
+        let spectrogram = cosmic::task::future(async move {
+            let spec = rs_trf::spectrogram::load(&flags.spectrogram_path).await;
+            Message::SpectrogramLoaded(spec.map_err(|e| format!("{e:?}")))
+        });
+        let command = cosmic::task::batch(vec![title, spectrogram]);
 
         (app, command)
     }
@@ -285,11 +291,9 @@ impl cosmic::Application for AppModel {
             Message::WatchTick(time) => {
                 self.time = time;
             }
-
             Message::ToggleWatch => {
                 self.watch_is_active = !self.watch_is_active;
             }
-
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
                     // Close the context drawer if the toggled context page is the same.
@@ -300,16 +304,21 @@ impl cosmic::Application for AppModel {
                     self.core.window.show_context = true;
                 }
             }
-
             Message::UpdateConfig(config) => {
                 self.config = config;
             }
-
             Message::LaunchUrl(url) => match open::that_detached(&url) {
                 Ok(()) => {}
                 Err(err) => {
                     eprintln!("failed to open {url:?}: {err}");
                 }
+            },
+            Message::SpectrogramLoaded(result) => match result {
+                Ok(spec) => {
+                    println!("Loaded spectrogram: {spec:?}");
+                    self.spectrogram = Some(spec);
+                }
+                Err(err) => eprintln!("failed to load spectrogram: {err}"),
             },
         }
         Task::none()

@@ -7,7 +7,12 @@ description = "strf but rewrite it in rust"
 repository = "https://github.com/jazzpi/rs-trf"
 
 [dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
 futures-util = "0.3.31"
+glob = "0.3"
+regex = "1.11"
 i18n-embed = { version = "0.16", features = [
     "fluent-system",
     "desktop-requester",
@@ -16,6 +21,7 @@ i18n-embed-fl = "0.10"
 open = "5.3.2"
 rust-embed = "8.8.0"
 tokio = { version = "1.48.0", features = ["full"] }
+ndarray = "0.17.2"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
