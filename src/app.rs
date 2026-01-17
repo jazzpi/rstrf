@@ -6,7 +6,10 @@ use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::iced_widget::{column, text};
+use cosmic::widget::image::viewer;
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
+use cosmic::widget::{container, image};
 use cosmic::{iced_futures, prelude::*};
 use futures_util::SinkExt;
 use rs_trf::spectrogram::Spectrogram;
@@ -37,6 +40,8 @@ pub struct AppModel {
     watch_is_active: bool,
     /// Spectrogram for plotting
     spectrogram: Option<Spectrogram>,
+    /// Rendered spectrogram image handle
+    spectrogram_image: Option<image::Handle>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -48,6 +53,58 @@ pub enum Message {
     UpdateConfig(Config),
     WatchTick(u32),
     SpectrogramLoaded(Result<Spectrogram, String>),
+    SpectrogramRendered(image::Handle),
+}
+
+fn render_spectrogram(spectrogram: Spectrogram) -> Message {
+    let data = spectrogram.data();
+    let (nslices, nchan) = data.dim();
+
+    // TODO: Make min/max configurable via sliders
+    let min_val = data.iter().copied().fold(f32::INFINITY, f32::min);
+    let max_val = data
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max)
+        .min(0.01);
+    let range = max_val - min_val;
+
+    let mut img_data = Vec::with_capacity(nslices * nchan * 4);
+
+    for freq_idx in 0..nchan {
+        for time_idx in 0..nslices {
+            let value = data[[time_idx, freq_idx]];
+            let normalized = if range > 0.0 {
+                ((value - min_val) / range).clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+
+            // TODO: Log scale
+            let (r, g, b) = viridis_color(normalized);
+            img_data.push(r);
+            img_data.push(g);
+            img_data.push(b);
+            img_data.push(255); // Alpha
+        }
+    }
+
+    let handle = image::Handle::from_rgba(nslices as u32, nchan as u32, img_data);
+    Message::SpectrogramRendered(handle)
+}
+
+fn viridis_color(t: f32) -> (u8, u8, u8) {
+    // Polynomial approximation of viridis colormap
+    let r = (0.267004
+        + t * (0.004874 + t * (2.295841 + t * (-5.139501 + t * (3.687970 - t * 1.205134)))))
+        .clamp(0.0, 1.0);
+    let g = (0.004874
+        + t * (0.424485 + t * (1.439978 + t * (-1.768869 + t * (0.664066 - t * 0.023530)))))
+        .clamp(0.0, 1.0);
+    let b = (0.329415 + t * (1.480254 + t * (-2.141231 + t * (0.714629 + t * 0.617008))))
+        .clamp(0.0, 1.0);
+
+    ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
 /// Create a COSMIC application from the app model
@@ -124,6 +181,7 @@ impl cosmic::Application for AppModel {
             time: 0,
             watch_is_active: false,
             spectrogram: None,
+            spectrogram_image: None,
         };
 
         let title = app.update_title();
@@ -183,23 +241,24 @@ impl cosmic::Application for AppModel {
                     .align_y(Alignment::End)
                     .spacing(space_s);
 
-                let counter_label = ["Watch: ", self.time.to_string().as_str()].concat();
-                let section = cosmic::widget::settings::section().add(
-                    cosmic::widget::settings::item::builder(counter_label).control(
-                        widget::button::text(if self.watch_is_active {
-                            "Stop"
-                        } else {
-                            "Start"
-                        })
-                        .on_press(Message::ToggleWatch),
-                    ),
-                );
+                let spectrogram: Element<_> = match &self.spectrogram_image {
+                    Some(image_handle) => viewer(image_handle.clone())
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into(),
+                    None => text(fl!("loading-spectrogram"))
+                        .align_x(cosmic::iced::alignment::Horizontal::Center)
+                        .into(),
+                };
 
-                widget::column::with_capacity(2)
-                    .push(header)
-                    .push(section)
+                let col = column![header, spectrogram]
                     .spacing(space_s)
-                    .height(Length::Fill)
+                    .height(Length::Fill);
+
+                container(col)
+                    .padding(10)
+                    .center(800)
+                    // .style(container::rounded_box)
                     .into()
             }
 
@@ -316,10 +375,21 @@ impl cosmic::Application for AppModel {
             Message::SpectrogramLoaded(result) => match result {
                 Ok(spec) => {
                     println!("Loaded spectrogram: {spec:?}");
+                    let spec_clone = spec.clone();
                     self.spectrogram = Some(spec);
+                    return cosmic::Task::future(async move {
+                        tokio::task::spawn_blocking(move || render_spectrogram(spec_clone))
+                            .await
+                            .unwrap()
+                    })
+                    .map(cosmic::Action::from);
                 }
                 Err(err) => eprintln!("failed to load spectrogram: {err}"),
             },
+            Message::SpectrogramRendered(handle) => {
+                println!("Rendered spectrogram image: {:?}", handle);
+                self.spectrogram_image = Some(handle);
+            }
         }
         Task::none()
     }
