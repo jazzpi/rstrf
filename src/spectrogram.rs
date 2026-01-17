@@ -12,7 +12,7 @@ pub async fn load(paths: &[std::path::PathBuf]) -> Result<Spectrogram> {
         bail!("No files provided");
     }
 
-    println!("Parsing files {:?}", paths);
+    log::debug!("Parsing files {:?}", paths);
     let spectrograms = try_join_all(paths.iter().map(|path| async {
         load_file(path)
             .await
@@ -145,7 +145,7 @@ async fn load_file(path: &std::path::Path) -> Result<Spectrogram> {
     let header = parse_header(&mut reader)
         .await
         .context("Failed to parse header")?;
-    println!("Parsed header: {:?}", header);
+    log::debug!("Parsed header: {:?}", header);
     // File alternates between headers and data blocks of size nchan * 4 bytes (f32)
     let data_block_size = header.nchan * 4;
     let n_blocks = file_size / (data_block_size + HEADER_SIZE);

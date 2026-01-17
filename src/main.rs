@@ -3,6 +3,7 @@
 mod app;
 mod config;
 mod i18n;
+mod widgets;
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -16,6 +17,8 @@ pub struct Args {
 }
 
 fn main() -> cosmic::iced::Result {
+    env_logger::init();
+
     // Parse command line arguments
     let args = Args::parse();
 

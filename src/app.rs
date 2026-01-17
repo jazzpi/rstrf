@@ -7,9 +7,8 @@ use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length, Subscription};
 use cosmic::iced_widget::{column, text};
-use cosmic::widget::image::viewer;
+use cosmic::widget::container;
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
-use cosmic::widget::{container, image};
 use cosmic::{iced_futures, prelude::*};
 use futures_util::SinkExt;
 use rs_trf::spectrogram::Spectrogram;
@@ -40,8 +39,8 @@ pub struct AppModel {
     watch_is_active: bool,
     /// Spectrogram for plotting
     spectrogram: Option<Spectrogram>,
-    /// Rendered spectrogram image handle
-    spectrogram_image: Option<image::Handle>,
+    /// RFPlot widget
+    rfplot: Option<crate::widgets::rfplot::RFPlot>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -53,58 +52,13 @@ pub enum Message {
     UpdateConfig(Config),
     WatchTick(u32),
     SpectrogramLoaded(Result<Spectrogram, String>),
-    SpectrogramRendered(image::Handle),
+    RFPlot(crate::widgets::rfplot::Message),
 }
 
-fn render_spectrogram(spectrogram: Spectrogram) -> Message {
-    let data = spectrogram.data();
-    let (nslices, nchan) = data.dim();
-
-    // TODO: Make min/max configurable via sliders
-    let min_val = data.iter().copied().fold(f32::INFINITY, f32::min);
-    let max_val = data
-        .iter()
-        .copied()
-        .fold(f32::NEG_INFINITY, f32::max)
-        .min(0.01);
-    let range = max_val - min_val;
-
-    let mut img_data = Vec::with_capacity(nslices * nchan * 4);
-
-    for freq_idx in 0..nchan {
-        for time_idx in 0..nslices {
-            let value = data[[time_idx, freq_idx]];
-            let normalized = if range > 0.0 {
-                ((value - min_val) / range).clamp(0.0, 1.0)
-            } else {
-                0.5
-            };
-
-            // TODO: Log scale
-            let (r, g, b) = viridis_color(normalized);
-            img_data.push(r);
-            img_data.push(g);
-            img_data.push(b);
-            img_data.push(255); // Alpha
-        }
+impl From<crate::widgets::rfplot::Message> for Message {
+    fn from(msg: crate::widgets::rfplot::Message) -> Self {
+        Message::RFPlot(msg)
     }
-
-    let handle = image::Handle::from_rgba(nslices as u32, nchan as u32, img_data);
-    Message::SpectrogramRendered(handle)
-}
-
-fn viridis_color(t: f32) -> (u8, u8, u8) {
-    // Polynomial approximation of viridis colormap
-    let r = (0.267004
-        + t * (0.004874 + t * (2.295841 + t * (-5.139501 + t * (3.687970 - t * 1.205134)))))
-        .clamp(0.0, 1.0);
-    let g = (0.004874
-        + t * (0.424485 + t * (1.439978 + t * (-1.768869 + t * (0.664066 - t * 0.023530)))))
-        .clamp(0.0, 1.0);
-    let b = (0.329415 + t * (1.480254 + t * (-2.141231 + t * (0.714629 + t * 0.617008))))
-        .clamp(0.0, 1.0);
-
-    ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
 /// Create a COSMIC application from the app model
@@ -181,7 +135,7 @@ impl cosmic::Application for AppModel {
             time: 0,
             watch_is_active: false,
             spectrogram: None,
-            spectrogram_image: None,
+            rfplot: None,
         };
 
         let title = app.update_title();
@@ -241,17 +195,18 @@ impl cosmic::Application for AppModel {
                     .align_y(Alignment::End)
                     .spacing(space_s);
 
-                let spectrogram: Element<_> = match &self.spectrogram_image {
-                    Some(image_handle) => viewer(image_handle.clone())
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .into(),
+                let rfplot = match &self.rfplot {
+                    Some(rfplot) => rfplot
+                        .view()
+                        // .width(Length::Fill)
+                        // .height(Length::Fill)
+                        .map(Message::RFPlot),
                     None => text(fl!("loading-spectrogram"))
                         .align_x(cosmic::iced::alignment::Horizontal::Center)
                         .into(),
                 };
 
-                let col = column![header, spectrogram]
+                let col = column![header, rfplot]
                     .spacing(space_s)
                     .height(Length::Fill);
 
@@ -369,27 +324,27 @@ impl cosmic::Application for AppModel {
             Message::LaunchUrl(url) => match open::that_detached(&url) {
                 Ok(()) => {}
                 Err(err) => {
-                    eprintln!("failed to open {url:?}: {err}");
+                    log::error!("failed to open {url:?}: {err}");
                 }
             },
             Message::SpectrogramLoaded(result) => match result {
                 Ok(spec) => {
-                    println!("Loaded spectrogram: {spec:?}");
-                    let spec_clone = spec.clone();
+                    log::info!("Loaded spectrogram: {spec:?}");
                     self.spectrogram = Some(spec);
-                    return cosmic::Task::future(async move {
-                        tokio::task::spawn_blocking(move || render_spectrogram(spec_clone))
-                            .await
-                            .unwrap()
-                    })
-                    .map(cosmic::Action::from);
+                    self.rfplot = Some(crate::widgets::rfplot::RFPlot::new(
+                        self.spectrogram.as_ref().cloned().unwrap(),
+                    ));
                 }
-                Err(err) => eprintln!("failed to load spectrogram: {err}"),
+                Err(err) => log::error!("failed to load spectrogram: {err}"),
             },
-            Message::SpectrogramRendered(handle) => {
-                println!("Rendered spectrogram image: {:?}", handle);
-                self.spectrogram_image = Some(handle);
-            }
+            Message::RFPlot(message) => match &mut self.rfplot {
+                Some(rfplot) => {
+                    rfplot.update(message);
+                }
+                None => {
+                    log::error!("RFPlot widget not initialized");
+                }
+            },
         }
         Task::none()
     }
