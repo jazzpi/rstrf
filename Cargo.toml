@@ -2,7 +2,7 @@
 name = "rs-trf"
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "strf but rewrite it in rust"
 repository = "https://github.com/jazzpi/rs-trf"
 

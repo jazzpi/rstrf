@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>com.github.jazzpi.rs-trf</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>GPL-3.0-or-later</project_license>
   <name>Rs Trf</name>
   <summary>strf but rewrite it in rust</summary>
   <icon type="remote" width="64" height="64" scale="1">
@@ -32,4 +32,3 @@
   </keywords>
   <content_rating type="oars-1.1" />
 </component>
-

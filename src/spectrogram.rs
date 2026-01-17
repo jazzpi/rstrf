@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
