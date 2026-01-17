@@ -1,5 +1,6 @@
 struct Uniforms {
-    resolution: vec2f,
+    x_bounds: vec2f,
+    y_bounds: vec2f,
     nslices: u32,
     nchan: u32,
 }
@@ -18,7 +19,6 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    // TODO: Zoom / pan via uniforms
     var xy: vec2f;
     switch in.vertex_index {
         case 0u: { xy = vec2f(0.0, 0.0); }
@@ -28,7 +28,11 @@ fn vs_main(in: VertexIn) -> VertexOut {
         case 4u: { xy = vec2f(1.0, 0.0); }
         default: { xy = vec2f(1.0, 1.0); }
     }
-    return VertexOut(vec4f(xy * 2.0 - 1.0, 0.0, 1.0), xy);
+    let uv = vec2f(
+        mix(uniforms.x_bounds.x, uniforms.x_bounds.y, xy.x),
+        mix(uniforms.y_bounds.x, uniforms.y_bounds.y, xy.y),
+    );
+    return VertexOut(vec4f(xy * 2.0 - 1.0, 0.0, 1.0), uv);
 }
 
 fn viridis_color(t: f32) -> vec3f {
@@ -41,8 +45,9 @@ fn viridis_color(t: f32) -> vec3f {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
-    let time_idx = u32(in.texcoord.x * f32(uniforms.nslices));
-    let freq_idx = u32(in.texcoord.y * f32(uniforms.nchan));
+    // TODO: Handle out-of-bounds
+    let time_idx = clamp(u32(in.texcoord.x * f32(uniforms.nslices)), 0u, uniforms.nslices - 1u);
+    let freq_idx = clamp(u32(in.texcoord.y * f32(uniforms.nchan)), 0u, uniforms.nchan - 1u);
     let idx = time_idx * uniforms.nchan + freq_idx;
 
     let value = spec_data[idx];

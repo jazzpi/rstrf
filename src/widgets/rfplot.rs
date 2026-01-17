@@ -11,26 +11,18 @@ use cosmic::iced::{Length, Rectangle};
 use glam::Vec2;
 use rs_trf::spectrogram::Spectrogram;
 
-const ZOOM_MIN: f32 = 1.0;
-const ZOOM_DEFAULT: f32 = 2.0;
+const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 17.0;
 
-const ZOOM_PIXELS_FACTOR: f32 = 200.0;
 const ZOOM_WHEEL_SCALE: f32 = 0.2;
-
-const ITERS_MIN: u32 = 20;
-const ITERS_DEFAULT: u32 = 20;
-const ITERS_MAX: u32 = 200;
-
-const CENTER_DEFAULT: Vec2 = Vec2::new(-1.5, 0.0);
 
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct Uniforms {
-    resolution: Vec2,
+    x_bounds: Vec2,
+    y_bounds: Vec2,
     nslices: u32,
     nchan: u32,
-    _padding: [u32; 2], // Align to 16 bytes
 }
 
 struct FragmentShaderPipeline {
@@ -153,23 +145,24 @@ impl FragmentShaderPipeline {
 
 #[derive(Debug, Clone, Copy)]
 struct Controls {
-    max_iter: u32,
-    zoom: f32,
+    zoom: Vec2,
     center: Vec2,
 }
 
 impl Controls {
-    fn scale(&self) -> f32 {
-        1.0 / 2.0_f32.powf(self.zoom) / ZOOM_PIXELS_FACTOR
+    fn scale(&self) -> Vec2 {
+        Vec2::new(
+            1.0 / 2.0_f32.powf(self.zoom.x), // / ZOOM_PIXELS_FACTOR,
+            1.0 / 2.0_f32.powf(self.zoom.y), // / ZOOM_PIXELS_FACTOR,
+        )
     }
 }
 
 impl Default for Controls {
     fn default() -> Self {
         Self {
-            max_iter: ITERS_DEFAULT,
-            zoom: ZOOM_DEFAULT,
-            center: CENTER_DEFAULT,
+            zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
+            center: Vec2::new(0.5, 0.5),
         }
     }
 }
@@ -212,13 +205,18 @@ impl shader::Primitive for FragmentShaderPrimitive {
         let spec_data = self.spectrogram.data();
         let (nslices, nchan) = spec_data.dim();
 
+        let center = self.controls.center;
+        let scale = self.controls.scale();
+        let x_bounds = Vec2::new(center.x - scale.x / 2f32, center.x + scale.x / 2f32);
+        let y_bounds = Vec2::new(center.y - scale.y / 2f32, center.y + scale.y / 2f32);
+
         pipeline.update(
             queue,
             &Uniforms {
-                resolution: Vec2::new(bounds.width as f32, bounds.height as f32),
+                x_bounds,
+                y_bounds,
                 nslices: nslices as u32,
                 nchan: nchan as u32,
-                _padding: [0, 0],
             },
         );
     }
@@ -237,10 +235,10 @@ impl shader::Primitive for FragmentShaderPrimitive {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    UpdateMaxIterations(u32),
-    UpdateZoom(f32),
+    UpdateZoomX(f32),
+    UpdateZoomY(f32),
     PanningDelta(Vec2),
-    ZoomDelta(Vec2, Rectangle, f32),
+    ZoomDelta(Vec2, f32),
 }
 
 pub enum MouseInteraction {
@@ -269,22 +267,26 @@ impl RFPlot {
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::UpdateMaxIterations(max_iter) => {
-                self.controls.max_iter = max_iter;
+            Message::UpdateZoomX(zoom_x) => {
+                self.controls.zoom.x = zoom_x;
             }
-            Message::UpdateZoom(zoom) => {
-                self.controls.zoom = zoom;
+            Message::UpdateZoomY(zoom_y) => {
+                self.controls.zoom.y = zoom_y;
             }
             Message::PanningDelta(delta) => {
-                self.controls.center -= 2.0 * delta * self.controls.scale();
+                let scale = self.controls.scale();
+                self.controls.center.x -= delta.x * scale.x;
+                self.controls.center.y -= delta.y * scale.y;
             }
-            Message::ZoomDelta(pos, bounds, delta) => {
+            Message::ZoomDelta(pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
                 let prev_scale = self.controls.scale();
                 let prev_zoom = self.controls.zoom;
-                self.controls.zoom = (prev_zoom + delta).max(ZOOM_MIN).min(ZOOM_MAX);
+                self.controls.zoom = (prev_zoom + Vec2::splat(delta))
+                    .max(Vec2::splat(ZOOM_MIN))
+                    .min(Vec2::splat(ZOOM_MAX));
 
-                let vec = pos - Vec2::new(bounds.width, bounds.height) * 0.5;
+                let vec = pos - self.controls.center;
                 let new_scale = self.controls.scale();
                 self.controls.center += vec * (prev_scale - new_scale) * 2.0;
             }
@@ -301,31 +303,67 @@ impl RFPlot {
     pub fn view(&self) -> Element<'_, Message> {
         let controls = row![
             Self::control(
-                "Max iterations",
-                slider(ITERS_MIN..=ITERS_MAX, self.controls.max_iter, move |iter| {
-                    Message::UpdateMaxIterations(iter)
+                "Zoom Time",
+                slider(ZOOM_MIN..=ZOOM_MAX, self.controls.zoom.x, move |zoom| {
+                    Message::UpdateZoomX(zoom)
                 })
+                .step(0.01)
                 .width(Length::Fill)
             ),
             Self::control(
-                "Zoom",
-                slider(ZOOM_MIN..=ZOOM_MAX, self.controls.zoom, move |zoom| {
-                    Message::UpdateZoom(zoom)
+                "Zoom Freq",
+                slider(ZOOM_MIN..=ZOOM_MAX, self.controls.zoom.y, move |zoom| {
+                    Message::UpdateZoomY(zoom)
                 })
                 .step(0.01)
                 .width(Length::Fill)
             ),
         ];
 
-        let shader = shader(self).width(Length::Fill).height(Length::Fill);
+        let spectrogram = shader(self).width(Length::Fill).height(Length::Fill);
 
-        column![shader, controls]
+        column![spectrogram, controls]
             // .align_items(Alignment::Center)
             .padding(10)
             .spacing(10)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+
+    /// Normalize screen coordinates to [0, 1], assuming (0,0) is top-left. This seems to be the
+    /// case for scrolling events, regardless of the bounds.x/y.
+    fn normalize_scroll_position(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
+        Vec2::new(pos.x / bounds.width, 1.0 - pos.y / bounds.height)
+    }
+
+    /// Normalize screen coordinates to [0, 1], assuming (bounds.x, bounds.y) is top-left. This
+    /// seems to be the case for mouse click & move events.
+    fn normalize_click_position(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
+        Vec2::new(
+            (pos.x - bounds.x) / bounds.width,
+            1.0 - (pos.y - bounds.y) / bounds.height,
+        )
+    }
+
+    fn screen_scroll_to_uv(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
+        let norm = self.normalize_scroll_position(pos, bounds);
+        let center = self.controls.center;
+        let scale = self.controls.scale();
+        Vec2::new(
+            center.x + (norm.x - 0.5) * scale.x,
+            center.y + (norm.y - 0.5) * scale.y,
+        )
+    }
+
+    fn screen_click_to_uv(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
+        let norm = self.normalize_click_position(pos, bounds);
+        let center = self.controls.center;
+        let scale = self.controls.scale();
+        Vec2::new(
+            center.x + (norm.x - 0.5) * scale.x,
+            center.y + (norm.y - 0.5) * scale.y,
+        )
     }
 }
 
@@ -355,15 +393,12 @@ impl shader::Program<Message> for RFPlot {
     ) -> (Status, Option<Message>) {
         if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
             if let Some(pos) = cursor.position_in(bounds) {
-                let pos = Vec2::new(pos.x, pos.y);
+                let pos = self.screen_scroll_to_uv(Vec2::new(pos.x, pos.y), &bounds);
                 let delta = match delta {
                     mouse::ScrollDelta::Lines { x: _, y } => y,
                     mouse::ScrollDelta::Pixels { x: _, y } => y,
                 };
-                return (
-                    Status::Captured,
-                    Some(Message::ZoomDelta(pos, bounds, delta)),
-                );
+                return (Status::Captured, Some(Message::ZoomDelta(pos, delta)));
             }
         }
 
@@ -371,7 +406,15 @@ impl shader::Program<Message> for RFPlot {
             MouseInteraction::Idle => match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                     if let Some(pos) = cursor.position_over(bounds) {
-                        *state = MouseInteraction::Panning(Vec2::new(pos.x, pos.y));
+                        *state = MouseInteraction::Panning(
+                            self.normalize_click_position(Vec2::new(pos.x, pos.y), &bounds),
+                        );
+                        log::debug!(
+                            "Clicked at pos={:?}, norm={:?}, uv={:?}",
+                            pos,
+                            self.normalize_click_position(Vec2::new(pos.x, pos.y), &bounds),
+                            self.screen_click_to_uv(Vec2::new(pos.x, pos.y), &bounds)
+                        );
                         return (Status::Captured, None);
                     }
                 }
@@ -382,7 +425,8 @@ impl shader::Program<Message> for RFPlot {
                     *state = MouseInteraction::Idle;
                 }
                 Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                    let pos = Vec2::new(position.x, position.y);
+                    let pos =
+                        self.normalize_click_position(Vec2::new(position.x, position.y), &bounds);
                     let delta = pos - *prev_pos;
                     *state = MouseInteraction::Panning(pos);
                     return (Status::Captured, Some(Message::PanningDelta(delta)));
