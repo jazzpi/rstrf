@@ -12,6 +12,8 @@ use rstrf::spectrogram::Spectrogram;
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 17.0;
+const POWER_MIN: f32 = -100.0;
+const POWER_MAX: f32 = 60.0;
 
 const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
@@ -22,6 +24,8 @@ mod shader;
 struct Controls {
     zoom: Vec2,
     center: Vec2,
+    min_power: f32,
+    max_power: f32,
 }
 
 impl Controls {
@@ -46,6 +50,8 @@ impl Default for Controls {
         Self {
             zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
             center: Vec2::new(0.5, 0.5),
+            min_power: POWER_MIN,
+            max_power: POWER_MAX,
         }
     }
 }
@@ -96,6 +102,8 @@ pub enum Message {
     ZoomDelta(PlotAbsoluteCoords, f32),
     ZoomDeltaX(f32),
     ZoomDeltaY(f32),
+    UpdateMinPower(f32),
+    UpdateMaxPower(f32),
 }
 
 pub enum MouseInteraction {
@@ -156,6 +164,12 @@ impl RFPlot {
                 let delta = delta * ZOOM_WHEEL_SCALE;
                 self.controls.zoom.y = (self.controls.zoom.y + delta).max(ZOOM_MIN).min(ZOOM_MAX);
             }
+            Message::UpdateMinPower(min_power) => {
+                self.controls.min_power = min_power.min(self.controls.max_power);
+            }
+            Message::UpdateMaxPower(max_power) => {
+                self.controls.max_power = max_power.max(self.controls.min_power);
+            }
         }
     }
 
@@ -186,6 +200,26 @@ impl RFPlot {
                     Message::UpdateZoomY(zoom)
                 })
                 .step(0.01)
+                .width(Length::Fill)
+            ),
+            Self::control(
+                "Min Power",
+                slider(
+                    POWER_MIN..=POWER_MAX,
+                    self.controls.min_power,
+                    move |power| { Message::UpdateMinPower(power) }
+                )
+                .step(0.1)
+                .width(Length::Fill)
+            ),
+            Self::control(
+                "Max Power",
+                slider(
+                    POWER_MIN..=POWER_MAX,
+                    self.controls.max_power,
+                    move |power| { Message::UpdateMaxPower(power) }
+                )
+                .step(0.1)
                 .width(Length::Fill)
             ),
         ];

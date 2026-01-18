@@ -18,6 +18,7 @@ use super::{Controls, Message, MouseInteraction, RFPlot};
 pub struct Uniforms {
     x_bounds: Vec2,
     y_bounds: Vec2,
+    power_bounds: Vec2,
     nslices: u32,
     nchan: u32,
 }
@@ -185,6 +186,7 @@ impl shader::Primitive for Primitive {
             &Uniforms {
                 x_bounds,
                 y_bounds,
+                power_bounds: Vec2::new(self.controls.min_power, self.controls.max_power),
                 nslices: nslices as u32,
                 nchan: nchan as u32,
             },
