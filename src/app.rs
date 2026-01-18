@@ -206,14 +206,10 @@ impl cosmic::Application for AppModel {
                         .into(),
                 };
 
-                let col = column![header, rfplot]
+                column![header, rfplot]
                     .spacing(space_s)
-                    .height(Length::Fill);
-
-                container(col)
-                    .padding(10)
-                    .center(800)
-                    // .style(container::rounded_box)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
                     .into()
             }
 
@@ -247,7 +243,7 @@ impl cosmic::Application for AppModel {
         };
 
         widget::container(content)
-            .width(600)
+            .width(Length::Fill)
             .height(Length::Fill)
             .apply(widget::container)
             .width(Length::Fill)
