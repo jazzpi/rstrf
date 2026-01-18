@@ -7,7 +7,6 @@ use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::{Alignment, Length, Subscription};
 use cosmic::iced_widget::{column, text};
-use cosmic::widget::container;
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
 use cosmic::{iced_futures, prelude::*};
 use futures_util::SinkExt;
@@ -48,7 +47,6 @@ pub struct AppModel {
 pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
-    ToggleWatch,
     UpdateConfig(Config),
     WatchTick(u32),
     SpectrogramLoaded(Result<Spectrogram, String>),
@@ -300,9 +298,6 @@ impl cosmic::Application for AppModel {
         match message {
             Message::WatchTick(time) => {
                 self.time = time;
-            }
-            Message::ToggleWatch => {
-                self.watch_is_active = !self.watch_is_active;
             }
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
