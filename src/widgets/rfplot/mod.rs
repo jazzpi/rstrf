@@ -25,8 +25,7 @@ mod shader;
 struct Controls {
     zoom: Vec2,
     center: Vec2,
-    min_power: f32,
-    max_power: f32,
+    power_bounds: (f32, f32),
 }
 
 impl Controls {
@@ -51,8 +50,7 @@ impl Default for Controls {
         Self {
             zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
             center: Vec2::new(0.5, 0.5),
-            min_power: POWER_MIN,
-            max_power: POWER_MAX,
+            power_bounds: (POWER_MIN, POWER_MAX),
         }
     }
 }
@@ -128,7 +126,10 @@ pub struct RFPlot {
 impl RFPlot {
     pub fn new(spectrogram: Spectrogram) -> Self {
         Self {
-            controls: Controls::default(),
+            controls: Controls {
+                power_bounds: spectrogram.power_bounds,
+                ..Controls::default()
+            },
             spectrogram,
             plot_area_margin: 50.0,
         }
@@ -166,10 +167,10 @@ impl RFPlot {
                 self.controls.zoom.y = (self.controls.zoom.y + delta).max(ZOOM_MIN).min(ZOOM_MAX);
             }
             Message::UpdateMinPower(min_power) => {
-                self.controls.min_power = min_power.min(self.controls.max_power);
+                self.controls.power_bounds.0 = min_power.min(self.controls.power_bounds.1);
             }
             Message::UpdateMaxPower(max_power) => {
-                self.controls.max_power = max_power.max(self.controls.min_power);
+                self.controls.power_bounds.1 = max_power.max(self.controls.power_bounds.0);
             }
         }
     }
@@ -207,7 +208,7 @@ impl RFPlot {
                 "Min Power",
                 slider(
                     POWER_MIN..=POWER_MAX,
-                    self.controls.min_power,
+                    self.controls.power_bounds.0,
                     move |power| { Message::UpdateMinPower(power) }
                 )
                 .step(0.1)
@@ -217,7 +218,7 @@ impl RFPlot {
                 "Max Power",
                 slider(
                     POWER_MIN..=POWER_MAX,
-                    self.controls.max_power,
+                    self.controls.power_bounds.1,
                     move |power| { Message::UpdateMaxPower(power) }
                 )
                 .step(0.1)

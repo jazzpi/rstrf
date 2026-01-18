@@ -196,7 +196,7 @@ impl shader::Primitive for Primitive {
             &Uniforms {
                 x_bounds,
                 y_bounds,
-                power_bounds: Vec2::new(self.controls.min_power, self.controls.max_power),
+                power_bounds: self.controls.power_bounds.into(),
                 nslices: nslices as u32,
                 nchan: nchan as u32,
             },

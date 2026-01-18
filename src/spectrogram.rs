@@ -51,6 +51,7 @@ pub struct Spectrogram {
     pub bw: f32,           // Hz
     pub slice_length: f32, // s
     pub nchan: usize,
+    pub power_bounds: (f32, f32),
     raw_data: Vec<f32>,
 }
 
@@ -72,12 +73,18 @@ impl std::fmt::Debug for Spectrogram {
 
 impl Spectrogram {
     pub(self) fn new(first_header: &Header, raw_data: Vec<f32>) -> Self {
+        let (min, max) = raw_data
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &val| {
+                (min.min(val), max.max(val))
+            });
         Spectrogram {
             start_time: first_header.start_time,
             freq: first_header.freq,
             bw: first_header.bw,
             slice_length: first_header.length,
             nchan: first_header.nchan,
+            power_bounds: (min.log2(), max.log2()),
             raw_data,
         }
     }
@@ -91,6 +98,15 @@ impl Spectrogram {
         let total_slices: usize = components.iter().map(|s| s.raw_data.len() / s.nchan).sum();
         let mut raw_data: Vec<f32> = Vec::with_capacity(total_slices * first.nchan);
         raw_data.extend_from_slice(&components[0].raw_data);
+        let power_bounds =
+            components
+                .iter()
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |bounds, spectrogram| {
+                    (
+                        bounds.0.min(spectrogram.power_bounds.0),
+                        bounds.1.max(spectrogram.power_bounds.1),
+                    )
+                });
 
         for (i, spectrogram) in components.iter().enumerate().skip(1) {
             ensure!(
@@ -117,6 +133,7 @@ impl Spectrogram {
             bw: first.bw,
             slice_length: first.slice_length,
             nchan: first.nchan,
+            power_bounds,
             raw_data,
         })
     }
@@ -187,6 +204,18 @@ async fn load_file(path: &std::path::Path) -> Result<Spectrogram> {
         .await?;
         data_offset += header.nchan;
     }
+
+    let min_max = raw_data
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &val| {
+            (min.min(val), max.max(val))
+        });
+    log::debug!(
+        "Loaded spectrogram with {} slices, min: {}, max: {}",
+        raw_data.len() / header.nchan,
+        min_max.0,
+        min_max.1
+    );
 
     Ok(Spectrogram::new(&header, raw_data))
 }
