@@ -78,6 +78,12 @@ impl Pipeline {
             usage: wgpu::BufferUsages::STORAGE,
         });
 
+        let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("colormap buffer"),
+            contents: bytemuck::cast_slice(&super::colormap::MAGMA),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
         let uniform_bind_group_layout = pipeline.get_bind_group_layout(0);
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shader_quad uniform bind group"),
@@ -90,6 +96,10 @@ impl Pipeline {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: spec_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: colormap_buffer.as_entire_binding(),
                 },
             ],
         });

@@ -17,6 +17,7 @@ const POWER_MAX: f32 = 60.0;
 
 const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
+mod colormap;
 mod plotter;
 mod shader;
 

@@ -8,6 +8,7 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage, read> spec_data: array<f32>;
+@group(0) @binding(2) var<storage, read> color_map: array<vec4f>;
 
 struct VertexIn {
     @builtin(vertex_index) vertex_index: u32,
@@ -56,6 +57,5 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let power = log2(value + 1e-12);
     let normalized = clamp((power - uniforms.power_bounds.x) / (uniforms.power_bounds.y - uniforms.power_bounds.x), 0.0, 1.0);
 
-    let color = viridis_color(normalized);
-    return vec4f(color, 1.0);
+    return color_map[u32(255.0 * normalized)];
 }
