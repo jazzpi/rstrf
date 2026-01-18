@@ -2,13 +2,8 @@ use std::ops::{Add, Sub};
 
 use cosmic::{
     Element,
-    iced::{
-        Length, Padding, Rectangle,
-        event::Status,
-        mouse,
-        widget::{self, column, row, slider, stack, text},
-    },
-    widget::container,
+    iced::{Length, Padding, Rectangle, event::Status, mouse, widget as iw},
+    widget::{container, slider, text},
 };
 use duplicate::duplicate_item;
 use glam::Vec2;
@@ -168,7 +163,7 @@ impl RFPlot {
         label: &'static str,
         control: impl Into<Element<'a, Message>>,
     ) -> Element<'a, Message> {
-        row![text(label), control.into()].spacing(10).into()
+        iw::row![text(label), control.into()].spacing(10).into()
     }
 
     /// Build the RFPlot widget view.
@@ -176,7 +171,7 @@ impl RFPlot {
     /// The plot itself is implemented as a stack of two layers: the spectrogram itself (see
     /// `shader.rs`) and the overlay (see `plotter.rs`).
     pub fn view(&self) -> Element<'_, Message> {
-        let controls = row![
+        let controls = iw::row![
             Self::control(
                 "Zoom Time",
                 slider(ZOOM_MIN..=ZOOM_MAX, self.controls.zoom.x, move |zoom| {
@@ -195,26 +190,23 @@ impl RFPlot {
             ),
         ];
 
-        let spectrogram: Element<'_, Message> = container(
-            widget::shader(self)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .padding(Padding {
-            top: 0.0,
-            right: 0.0,
-            bottom: self.plot_area_margin,
-            left: self.plot_area_margin,
-        })
-        .into();
+        let spectrogram: Element<'_, Message> =
+            container(iw::shader(self).width(Length::Fill).height(Length::Fill))
+                .padding(Padding {
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: self.plot_area_margin,
+                    left: self.plot_area_margin,
+                })
+                .into();
         let plot_overlay: Element<'_, Message> = ChartWidget::new(self)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
 
-        let plot_area: Element<'_, Message> = stack![spectrogram, plot_overlay,].into();
+        let plot_area: Element<'_, Message> = iw::stack![spectrogram, plot_overlay,].into();
 
-        column![plot_area, controls]
+        iw::column![plot_area, controls]
             .padding(10)
             .spacing(10)
             .width(Length::Fill)
