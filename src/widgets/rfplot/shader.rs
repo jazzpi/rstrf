@@ -9,7 +9,7 @@ use cosmic::iced::{
     widget::shader,
 };
 use glam::Vec2;
-use rs_trf::spectrogram::Spectrogram;
+use rstrf::spectrogram::Spectrogram;
 
 use super::{Controls, Message, MouseInteraction, RFPlot};
 

@@ -10,7 +10,7 @@ use cosmic::iced_widget::{column, text};
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
 use cosmic::{iced_futures, prelude::*};
 use futures_util::SinkExt;
-use rs_trf::spectrogram::Spectrogram;
+use rstrf::spectrogram::Spectrogram;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -138,7 +138,7 @@ impl cosmic::Application for AppModel {
 
         let title = app.update_title();
         let spectrogram = cosmic::task::future(async move {
-            let spec = rs_trf::spectrogram::load(&flags.spectrogram_path).await;
+            let spec = rstrf::spectrogram::load(&flags.spectrogram_path).await;
             Message::SpectrogramLoaded(spec.map_err(|e| format!("{e:?}")))
         });
         let command = cosmic::task::batch(vec![title, spectrogram]);

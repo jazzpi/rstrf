@@ -1,4 +1,4 @@
-app-title = Rs Trf
+app-title = rstrf
 about = About
 repository = Repository
 view = View

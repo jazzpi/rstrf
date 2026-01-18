@@ -7,7 +7,7 @@ use cosmic::{
     widget::container,
 };
 use glam::Vec2;
-use rs_trf::spectrogram::Spectrogram;
+use rstrf::spectrogram::Spectrogram;
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 17.0;

@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=Rs Trf
+Name=rstrf
 Comment=strf but rewrite it in rust
 Type=Application
-Icon=com.github.jazzpi.rs-trf
-Exec=rs-trf %F
+Icon=com.github.jazzpi.rstrf
+Exec=rstrf %F
 Terminal=false
 StartupNotify=true
 Categories=COSMIC

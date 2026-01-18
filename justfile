@@ -1,7 +1,7 @@
 # Name of the application's binary.
-name := 'rs-trf'
+name := 'rstrf'
 # The unique ID of the application.
-appid := 'com.github.jazzpi.rs-trf'
+appid := 'com.github.jazzpi.rstrf'
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''
