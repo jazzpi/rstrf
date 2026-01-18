@@ -1,12 +1,15 @@
 use cosmic::{
     Element,
     iced::{
-        Length, Rectangle,
+        Length, Padding, Rectangle,
+        event::Status,
+        mouse,
         widget::{self, column, row, slider, stack, text},
     },
     widget::container,
 };
 use glam::Vec2;
+use plotters_iced::ChartWidget;
 use rstrf::spectrogram::Spectrogram;
 
 const ZOOM_MIN: f32 = 0.0;
@@ -14,7 +17,7 @@ const ZOOM_MAX: f32 = 17.0;
 
 const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
-mod canvas;
+mod plotter;
 mod shader;
 
 #[derive(Debug, Clone, Copy)]
@@ -123,7 +126,7 @@ impl RFPlot {
     /// Build the RFPlot widget view.
     ///
     /// The plot itself is implemented as a stack of two layers: the spectrogram itself (see
-    /// `shader.rs`) and the overlay (see `canvas.rs`).
+    /// `shader.rs`) and the overlay (see `plotter.rs`).
     pub fn view(&self) -> Element<'_, Message> {
         let controls = row![
             Self::control(
@@ -149,14 +152,19 @@ impl RFPlot {
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
-        .padding(50.0)
+        .padding(Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 50.0,
+            left: 50.0,
+        })
         .into();
-        let axes_overlay: Element<'_, Message> = widget::canvas(self)
+        let plot_overlay: Element<'_, Message> = ChartWidget::new(self)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
 
-        let plot_area: Element<'_, Message> = stack![spectrogram, axes_overlay].into();
+        let plot_area: Element<'_, Message> = stack![spectrogram, plot_overlay,].into();
 
         column![plot_area, controls]
             .padding(10)
@@ -199,5 +207,53 @@ impl RFPlot {
             center.x + (norm.x - 0.5) * scale.x,
             center.y + (norm.y - 0.5) * scale.y,
         )
+    }
+
+    fn handle_mouse(
+        &self,
+        state: &mut MouseInteraction,
+        event: mouse::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> (Status, Option<Message>) {
+        if let mouse::Event::WheelScrolled { delta } = event {
+            if let Some(pos) = cursor.position_in(bounds) {
+                let pos = self.screen_scroll_to_uv(Vec2::new(pos.x, pos.y), &bounds);
+                let delta = match delta {
+                    mouse::ScrollDelta::Lines { x: _, y } => y,
+                    mouse::ScrollDelta::Pixels { x: _, y } => y,
+                };
+                return (Status::Captured, Some(Message::ZoomDelta(pos, delta)));
+            }
+        }
+
+        match state {
+            MouseInteraction::Idle => match event {
+                mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                    if let Some(pos) = cursor.position_over(bounds) {
+                        *state = MouseInteraction::Panning(
+                            self.normalize_click_position(Vec2::new(pos.x, pos.y), &bounds),
+                        );
+                        return (Status::Captured, None);
+                    }
+                }
+                _ => {}
+            },
+            MouseInteraction::Panning(prev_pos) => match event {
+                mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    *state = MouseInteraction::Idle;
+                }
+                mouse::Event::CursorMoved { position } => {
+                    let pos =
+                        self.normalize_click_position(Vec2::new(position.x, position.y), &bounds);
+                    let delta = pos - *prev_pos;
+                    *state = MouseInteraction::Panning(pos);
+                    return (Status::Captured, Some(Message::PanningDelta(delta)));
+                }
+                _ => {}
+            },
+        };
+
+        (Status::Captured, None)
     }
 }

@@ -35,6 +35,7 @@
             mesa
             vulkan-loader
             udev
+            fontconfig
           ];
           runtimeDependencies = [
             wayland

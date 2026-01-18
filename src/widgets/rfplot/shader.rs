@@ -227,44 +227,10 @@ impl shader::Program<Message> for RFPlot {
         cursor: mouse::Cursor,
         _shell: &mut Shell<'_, Message>,
     ) -> (Status, Option<Message>) {
-        if let shader::Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
-            if let Some(pos) = cursor.position_in(bounds) {
-                let pos = self.screen_scroll_to_uv(Vec2::new(pos.x, pos.y), &bounds);
-                let delta = match delta {
-                    mouse::ScrollDelta::Lines { x: _, y } => y,
-                    mouse::ScrollDelta::Pixels { x: _, y } => y,
-                };
-                return (Status::Captured, Some(Message::ZoomDelta(pos, delta)));
-            }
+        if let shader::Event::Mouse(event) = event {
+            self.handle_mouse(state, event, bounds, cursor)
+        } else {
+            (Status::Ignored, None)
         }
-
-        match state {
-            MouseInteraction::Idle => match event {
-                shader::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    if let Some(pos) = cursor.position_over(bounds) {
-                        *state = MouseInteraction::Panning(
-                            self.normalize_click_position(Vec2::new(pos.x, pos.y), &bounds),
-                        );
-                        return (Status::Captured, None);
-                    }
-                }
-                _ => {}
-            },
-            MouseInteraction::Panning(prev_pos) => match event {
-                shader::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    *state = MouseInteraction::Idle;
-                }
-                shader::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                    let pos =
-                        self.normalize_click_position(Vec2::new(position.x, position.y), &bounds);
-                    let delta = pos - *prev_pos;
-                    *state = MouseInteraction::Panning(pos);
-                    return (Status::Captured, Some(Message::PanningDelta(delta)));
-                }
-                _ => {}
-            },
-        };
-
-        (Status::Ignored, None)
     }
 }
