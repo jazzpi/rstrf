@@ -56,6 +56,7 @@
               export LD_LIBRARY_PATH="${ldLibraryPath}:$LD_LIBRARY_PATH"
               export WGPU_BACKEND=gl
               export __EGL_VENDOR_LIBRARY_FILENAMES=${mesa}/share/glvnd/egl_vendor.d/50_mesa.json
+              export RUST_LOG="warn,rstrf=debug"
             '';
         };
       }
