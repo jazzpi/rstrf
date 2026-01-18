@@ -2,7 +2,7 @@
 //! plotters plot, which shows axes and (in the future) other overlays.
 
 use cosmic::{
-    iced::{Rectangle, Size, event::Status, mouse},
+    iced::{Rectangle, event::Status, mouse},
     widget::canvas,
 };
 use plotters::prelude::*;
@@ -18,8 +18,8 @@ impl Chart<Message> for RFPlot {
         let x = x * self.spectrogram.length().num_milliseconds() as f32 / 1000.0;
         let y = (y - 0.5) * self.spectrogram.bw;
         let mut chart = chart
-            .x_label_area_size(50)
-            .y_label_area_size(50)
+            .x_label_area_size(self.plot_area_margin)
+            .y_label_area_size(self.plot_area_margin)
             .build_cartesian_2d(x.x..x.y, y.x..y.y)
             .expect("Failed to build chart");
 
@@ -43,6 +43,12 @@ impl Chart<Message> for RFPlot {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<Message>) {
+        let bounds = Rectangle {
+            x: bounds.x + self.plot_area_margin,
+            y: bounds.y,
+            width: bounds.width - self.plot_area_margin,
+            height: bounds.height - self.plot_area_margin,
+        };
         if let canvas::Event::Mouse(event) = event {
             self.handle_mouse(state, event, bounds, cursor)
         } else {

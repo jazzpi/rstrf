@@ -1,3 +1,5 @@
+use std::ops::{Add, Sub};
+
 use cosmic::{
     Element,
     iced::{
@@ -8,6 +10,7 @@ use cosmic::{
     },
     widget::container,
 };
+use duplicate::duplicate_item;
 use glam::Vec2;
 use plotters_iced::ChartWidget;
 use rstrf::spectrogram::Spectrogram;
@@ -52,21 +55,57 @@ impl Default for Controls {
     }
 }
 
-fn interp_bounds(bounds: Vec2, t: f32) -> f32 {
-    bounds.x + (bounds.y - bounds.x) * t
+#[duplicate_item(name; [ScreenCoords]; [PlotRelativeCoords]; [PlotAbsoluteCoords])]
+#[derive(Debug, Clone, Copy)]
+pub struct name(Vec2);
+#[duplicate_item(name; [ScreenCoords]; [PlotRelativeCoords]; [PlotAbsoluteCoords])]
+impl Sub for name {
+    type Output = name;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        name(self.0 - rhs.0)
+    }
+}
+#[duplicate_item(name; [ScreenCoords]; [PlotRelativeCoords]; [PlotAbsoluteCoords])]
+impl Add for name {
+    type Output = name;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        name(self.0 + rhs.0)
+    }
+}
+
+impl ScreenCoords {
+    fn plot_relative(&self, bounds: &Rectangle) -> PlotRelativeCoords {
+        let x = self.0.x / bounds.width;
+        let y = 1.0 - self.0.y / bounds.height;
+        PlotRelativeCoords(Vec2::new(x, y))
+    }
+
+    fn plot_absolute(&self, bounds: &Rectangle, controls: &Controls) -> PlotAbsoluteCoords {
+        let norm_x = self.0.x / bounds.width;
+        let norm_y = 1.0 - self.0.y / bounds.height;
+        let center = controls.center;
+        let scale = controls.scale();
+        let x = center.x + (norm_x - 0.5) * scale.x;
+        let y = center.y + (norm_y - 0.5) * scale.y;
+        PlotAbsoluteCoords(Vec2::new(x, y))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     UpdateZoomX(f32),
     UpdateZoomY(f32),
-    PanningDelta(Vec2),
-    ZoomDelta(Vec2, f32),
+    PanningDelta(PlotRelativeCoords),
+    ZoomDelta(PlotAbsoluteCoords, f32),
+    ZoomDeltaX(f32),
+    ZoomDeltaY(f32),
 }
 
 pub enum MouseInteraction {
     Idle,
-    Panning(Vec2),
+    Panning(PlotRelativeCoords),
 }
 
 impl Default for MouseInteraction {
@@ -78,6 +117,8 @@ impl Default for MouseInteraction {
 pub struct RFPlot {
     controls: Controls,
     spectrogram: Spectrogram,
+    /// The margin on the left/bottom of the plot area (for axes/labels)
+    plot_area_margin: f32,
 }
 
 impl RFPlot {
@@ -85,6 +126,7 @@ impl RFPlot {
         Self {
             controls: Controls::default(),
             spectrogram,
+            plot_area_margin: 50.0,
         }
     }
 
@@ -97,9 +139,7 @@ impl RFPlot {
                 self.controls.zoom.y = zoom_y;
             }
             Message::PanningDelta(delta) => {
-                let scale = self.controls.scale();
-                self.controls.center.x -= delta.x * scale.x;
-                self.controls.center.y -= delta.y * scale.y;
+                self.controls.center -= delta.0 * self.controls.scale();
             }
             Message::ZoomDelta(pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
@@ -109,9 +149,17 @@ impl RFPlot {
                     .max(Vec2::splat(ZOOM_MIN))
                     .min(Vec2::splat(ZOOM_MAX));
 
-                let vec = pos - self.controls.center;
+                let vec = pos.0 - self.controls.center;
                 let new_scale = self.controls.scale();
                 self.controls.center += vec * (prev_scale - new_scale) * 2.0;
+            }
+            Message::ZoomDeltaX(delta) => {
+                let delta = delta * ZOOM_WHEEL_SCALE;
+                self.controls.zoom.x = (self.controls.zoom.x + delta).max(ZOOM_MIN).min(ZOOM_MAX);
+            }
+            Message::ZoomDeltaY(delta) => {
+                let delta = delta * ZOOM_WHEEL_SCALE;
+                self.controls.zoom.y = (self.controls.zoom.y + delta).max(ZOOM_MIN).min(ZOOM_MAX);
             }
         }
     }
@@ -155,8 +203,8 @@ impl RFPlot {
         .padding(Padding {
             top: 0.0,
             right: 0.0,
-            bottom: 50.0,
-            left: 50.0,
+            bottom: self.plot_area_margin,
+            left: self.plot_area_margin,
         })
         .into();
         let plot_overlay: Element<'_, Message> = ChartWidget::new(self)
@@ -174,41 +222,6 @@ impl RFPlot {
             .into()
     }
 
-    /// Normalize screen coordinates to [0, 1], assuming (0,0) is top-left. This seems to be the
-    /// case for scrolling events, regardless of the bounds.x/y.
-    fn normalize_scroll_position(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
-        Vec2::new(pos.x / bounds.width, 1.0 - pos.y / bounds.height)
-    }
-
-    /// Normalize screen coordinates to [0, 1], assuming (bounds.x, bounds.y) is top-left. This
-    /// seems to be the case for mouse click & move events.
-    fn normalize_click_position(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
-        Vec2::new(
-            (pos.x - bounds.x) / bounds.width,
-            1.0 - (pos.y - bounds.y) / bounds.height,
-        )
-    }
-
-    fn screen_scroll_to_uv(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
-        let norm = self.normalize_scroll_position(pos, bounds);
-        let center = self.controls.center;
-        let scale = self.controls.scale();
-        Vec2::new(
-            center.x + (norm.x - 0.5) * scale.x,
-            center.y + (norm.y - 0.5) * scale.y,
-        )
-    }
-
-    fn screen_click_to_uv(&self, pos: Vec2, bounds: &Rectangle) -> Vec2 {
-        let norm = self.normalize_click_position(pos, bounds);
-        let center = self.controls.center;
-        let scale = self.controls.scale();
-        Vec2::new(
-            center.x + (norm.x - 0.5) * scale.x,
-            center.y + (norm.y - 0.5) * scale.y,
-        )
-    }
-
     fn handle_mouse(
         &self,
         state: &mut MouseInteraction,
@@ -216,24 +229,46 @@ impl RFPlot {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<Message>) {
+        let pos = cursor
+            .position_in(bounds)
+            .and_then(|p| Some(ScreenCoords(Vec2::new(p.x, p.y))));
         if let mouse::Event::WheelScrolled { delta } = event {
-            if let Some(pos) = cursor.position_in(bounds) {
-                let pos = self.screen_scroll_to_uv(Vec2::new(pos.x, pos.y), &bounds);
-                let delta = match delta {
-                    mouse::ScrollDelta::Lines { x: _, y } => y,
-                    mouse::ScrollDelta::Pixels { x: _, y } => y,
-                };
-                return (Status::Captured, Some(Message::ZoomDelta(pos, delta)));
+            let delta = match delta {
+                mouse::ScrollDelta::Lines { x: _, y } => y,
+                mouse::ScrollDelta::Pixels { x: _, y } => y,
+            };
+            if let Some(pos) = pos {
+                return (
+                    Status::Captured,
+                    Some(Message::ZoomDelta(
+                        pos.plot_absolute(&bounds, &self.controls),
+                        delta,
+                    )),
+                );
+            } else if cursor.is_over(Rectangle {
+                x: bounds.x - self.plot_area_margin,
+                y: bounds.y,
+                width: self.plot_area_margin,
+                height: bounds.height,
+            }) {
+                // Zooming over y axis
+                return (Status::Captured, Some(Message::ZoomDeltaY(delta)));
+            } else if cursor.is_over(Rectangle {
+                x: bounds.x,
+                y: bounds.y + bounds.height,
+                width: bounds.width,
+                height: self.plot_area_margin,
+            }) {
+                // Zooming over x axis
+                return (Status::Captured, Some(Message::ZoomDeltaX(delta)));
             }
         }
 
         match state {
             MouseInteraction::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    if let Some(pos) = cursor.position_over(bounds) {
-                        *state = MouseInteraction::Panning(
-                            self.normalize_click_position(Vec2::new(pos.x, pos.y), &bounds),
-                        );
+                    if let Some(pos) = pos {
+                        *state = MouseInteraction::Panning(pos.plot_relative(&bounds));
                         return (Status::Captured, None);
                     }
                 }
@@ -244,8 +279,9 @@ impl RFPlot {
                     *state = MouseInteraction::Idle;
                 }
                 mouse::Event::CursorMoved { position } => {
-                    let pos =
-                        self.normalize_click_position(Vec2::new(position.x, position.y), &bounds);
+                    // pos might be None if the cursor is outside bounds
+                    let pos = ScreenCoords(Vec2::new(position.x - bounds.x, position.y - bounds.y))
+                        .plot_relative(&bounds);
                     let delta = pos - *prev_pos;
                     *state = MouseInteraction::Panning(pos);
                     return (Status::Captured, Some(Message::PanningDelta(delta)));
