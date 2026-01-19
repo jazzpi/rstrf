@@ -63,8 +63,8 @@ pub enum Message {
     UpdateZoomY(f32),
     PanningDelta(coord::PlotArea),
     ZoomDelta(coord::PlotArea, f32),
-    ZoomDeltaX(f32),
-    ZoomDeltaY(f32),
+    ZoomDeltaX(coord::PlotArea, f32),
+    ZoomDeltaY(coord::PlotArea, f32),
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
     SetSatellites(Vec<Satellite>),
@@ -144,13 +144,19 @@ impl RFPlot {
                 let new_data = plot_pos.data_normalized(&self.controls);
                 self.controls.center += old_data.0 - new_data.0;
             }
-            Message::ZoomDeltaX(delta) => {
+            Message::ZoomDeltaX(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
+                let old_x = plot_pos.data_normalized(&self.controls).0.x;
                 self.controls.zoom.x = (self.controls.zoom.x + delta).clamp(ZOOM_MIN, ZOOM_MAX);
+                let new_x = plot_pos.data_normalized(&self.controls).0.x;
+                self.controls.center.x += old_x - new_x;
             }
-            Message::ZoomDeltaY(delta) => {
+            Message::ZoomDeltaY(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
+                let old_y = plot_pos.data_normalized(&self.controls).0.y;
                 self.controls.zoom.y = (self.controls.zoom.y + delta).clamp(ZOOM_MIN, ZOOM_MAX);
+                let new_y = plot_pos.data_normalized(&self.controls).0.y;
+                self.controls.center.y += old_y - new_y;
             }
             Message::UpdateMinPower(min_power) => {
                 self.controls.power_bounds.0 = min_power.min(self.controls.power_bounds.1);
@@ -268,42 +274,43 @@ impl RFPlot {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<Message>) {
-        let pos = cursor
-            .position_in(bounds)
-            .and_then(|p| Some(coord::Screen(Vec2::new(p.x, p.y))));
+        let Some(cursor_pos) = cursor.position() else {
+            return (Status::Ignored, None);
+        };
+        let pos = coord::Screen(Vec2::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y));
         if let mouse::Event::WheelScrolled { delta } = event {
             let delta = match delta {
                 mouse::ScrollDelta::Lines { x: _, y } => y,
                 mouse::ScrollDelta::Pixels { x: _, y } => y,
             };
-            if let Some(pos) = pos {
-                return (
-                    Status::Captured,
-                    Some(Message::ZoomDelta(pos.plot(&bounds), delta)),
-                );
-            } else if cursor.is_over(Rectangle {
-                x: bounds.x - self.plot_area_margin,
-                y: bounds.y,
-                width: self.plot_area_margin,
-                height: bounds.height,
-            }) {
-                // Zooming over y axis
-                return (Status::Captured, Some(Message::ZoomDeltaY(delta)));
-            } else if cursor.is_over(Rectangle {
+            let x_axis = Rectangle {
                 x: bounds.x,
                 y: bounds.y + bounds.height,
                 width: bounds.width,
                 height: self.plot_area_margin,
-            }) {
+            };
+            let y_axis = Rectangle {
+                x: bounds.x - self.plot_area_margin,
+                y: bounds.y,
+                width: self.plot_area_margin,
+                height: bounds.height,
+            };
+            let plot_pos = pos.plot(&bounds);
+            if cursor.is_over(bounds) {
+                return (Status::Captured, Some(Message::ZoomDelta(plot_pos, delta)));
+            } else if cursor.is_over(y_axis) {
+                // Zooming over y axis
+                return (Status::Captured, Some(Message::ZoomDeltaY(plot_pos, delta)));
+            } else if cursor.is_over(x_axis) {
                 // Zooming over x axis
-                return (Status::Captured, Some(Message::ZoomDeltaX(delta)));
+                return (Status::Captured, Some(Message::ZoomDeltaX(plot_pos, delta)));
             }
         }
 
         match state {
             MouseInteraction::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    if let Some(pos) = pos {
+                    if cursor.is_over(bounds) {
                         *state = MouseInteraction::Panning(pos.plot(&bounds));
                         return (Status::Captured, None);
                     }
@@ -314,13 +321,10 @@ impl RFPlot {
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
                     *state = MouseInteraction::Idle;
                 }
-                mouse::Event::CursorMoved { position } => {
-                    // pos might be None if the cursor is outside bounds
-                    let pos =
-                        coord::Screen(Vec2::new(position.x - bounds.x, position.y - bounds.y))
-                            .plot(&bounds);
-                    let delta = pos - *prev_pos;
-                    *state = MouseInteraction::Panning(pos);
+                mouse::Event::CursorMoved { position: _ } => {
+                    let plot_pos = pos.plot(&bounds);
+                    let delta = plot_pos - *prev_pos;
+                    *state = MouseInteraction::Panning(plot_pos);
                     return (Status::Captured, Some(Message::PanningDelta(delta)));
                 }
                 _ => {}
