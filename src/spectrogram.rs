@@ -76,6 +76,7 @@ impl Spectrogram {
     pub(self) fn new(first_header: &Header, raw_data: Vec<f32>) -> Self {
         let (min, max) = raw_data
             .iter()
+            .filter(|&&v| v > 0.0)
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &val| {
                 (min.min(val), max.max(val))
             });
