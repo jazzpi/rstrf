@@ -37,14 +37,6 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return VertexOut(vec4f(xy * 2.0 - 1.0, 0.0, 1.0), uv);
 }
 
-fn viridis_color(t: f32) -> vec3f {
-    // TODO: Use a texture instead?
-    let r = 0.267004 + t * (0.004874 + t * (2.295841 + t * (-5.139501 + t * (3.687970 - t * 1.205134))));
-    let g = 0.004874 + t * (0.424485 + t * (1.439978 + t * (-1.768869 + t * (0.664066 - t * 0.023530))));
-    let b = 0.329415 + t * (1.480254 + t * (-2.141231 + t * (0.714629 + t * 0.617008)));
-    return clamp(vec3f(r, g, b), vec3f(0.0), vec3f(1.0));
-}
-
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
     // TODO: Handle out-of-bounds
@@ -57,5 +49,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let power = log2(value + 1e-12);
     let normalized = clamp((power - uniforms.power_bounds.x) / (uniforms.power_bounds.y - uniforms.power_bounds.x), 0.0, 1.0);
 
-    return color_map[u32(255.0 * normalized)];
+    let color_index = normalized * 255.0;
+    let lower_idx = u32(floor(color_index));
+    let upper_idx = min(lower_idx + 1u, 255u);
+    let frac = fract(color_index);
+
+    let color_lower = color_map[lower_idx];
+    let color_upper = color_map[upper_idx];
+
+    return mix(color_lower, color_upper, frac);
 }
