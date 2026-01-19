@@ -36,6 +36,7 @@
             vulkan-loader
             udev
             fontconfig
+            openblas
           ];
           runtimeDependencies = [
             wayland
@@ -44,6 +45,7 @@
             libglvnd
             vulkan-loader
             udev
+            openblas
           ];
           RUSTC_VERSION = "stable";
           shellHook =

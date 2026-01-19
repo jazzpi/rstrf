@@ -5,6 +5,7 @@ use cosmic::{
     iced::{Rectangle, event::Status, mouse},
     widget::canvas,
 };
+use itertools::izip;
 use plotters::prelude::*;
 use plotters_iced::Chart;
 
@@ -34,6 +35,36 @@ impl Chart<Message> for RFPlot {
             .y_desc("Frequency offset [kHz]")
             .draw()
             .expect("Failed to draw mesh");
+
+        if let Some(satellite_predictions) = &self.satellite_predictions {
+            let time = &satellite_predictions.times;
+            for sat in &self.satellites {
+                let id = sat.norad_id();
+                log::trace!("Plotting satellite {}", id);
+                let freq = &satellite_predictions
+                    .frequencies
+                    .get(&id)
+                    .expect("Missing frequency prediction for satellite");
+                let za = &satellite_predictions
+                    .zenith_angles
+                    .get(&id)
+                    .expect("Missing zenith angle prediction for satellite");
+
+                chart
+                    .draw_series(LineSeries::new(
+                        izip!(time.iter(), freq.iter(), za.iter()).filter_map(|(&t, &f, &za)| {
+                            if za < std::f64::consts::FRAC_PI_2 {
+                                Some((t as f32, (f - sat.tx_freq) as f32))
+                            } else {
+                                None
+                            }
+                        }),
+                        &RED,
+                    ))
+                    .expect(format!("Could not draw line for satellite {}", id).as_str())
+                    .label(format!("{:06}", id));
+            }
+        }
     }
 
     fn update(

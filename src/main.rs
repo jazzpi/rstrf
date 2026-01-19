@@ -15,8 +15,11 @@ pub struct Args {
     #[arg(value_name = "SPECTROGRAM_PATH", required = true)]
     spectrogram_path: Vec<PathBuf>,
     /// TLE file to load
-    #[arg(short, long, value_name = "TLE_PATH")]
+    #[arg(short, long, value_name = "TLE_PATH", requires = "frequencies_path")]
     tle_path: Option<PathBuf>,
+    /// Frequencies file to load
+    #[arg(short, long, value_name = "FREQUENCIES_PATH", requires = "tle_path")]
+    frequencies_path: Option<PathBuf>,
 }
 
 fn main() -> cosmic::iced::Result {

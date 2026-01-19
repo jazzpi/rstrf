@@ -1,14 +1,19 @@
-use std::ops::{Add, Sub};
+use std::{
+    collections::HashMap,
+    ops::{Add, Sub},
+};
 
+use chrono::{DateTime, Utc};
 use cosmic::{
-    Element,
+    Element, Task,
     iced::{Length, Padding, Rectangle, event::Status, mouse, widget as iw},
     widget::{container, slider, text},
 };
 use duplicate::duplicate_item;
 use glam::Vec2;
+use ndarray::Array1;
 use plotters_iced::ChartWidget;
-use rstrf::{orbit::Satellite, spectrogram::Spectrogram};
+use rstrf::{orbit::Satellite, spectrogram::Spectrogram, util::minmax};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 17.0;
@@ -104,6 +109,7 @@ pub enum Message {
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
     SetSatellites(Vec<Satellite>),
+    SetSatellitePredictions(Option<Predictions>),
 }
 
 pub enum MouseInteraction {
@@ -123,6 +129,24 @@ pub struct RFPlot {
     /// The margin on the left/bottom of the plot area (for axes/labels)
     plot_area_margin: f32,
     satellites: Vec<Satellite>,
+    satellite_predictions: Option<Predictions>,
+}
+
+#[derive(Clone)]
+pub struct Predictions {
+    times: Array1<f64>,
+    frequencies: HashMap<u64, Array1<f64>>,
+    zenith_angles: HashMap<u64, Array1<f64>>,
+}
+
+impl std::fmt::Debug for Predictions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Predictions")
+            .field("times", &minmax(&self.times))
+            .field("frequencies", &self.frequencies.len())
+            .field("zenith_angles", &self.zenith_angles.len())
+            .finish()
+    }
 }
 
 impl RFPlot {
@@ -135,10 +159,12 @@ impl RFPlot {
             spectrogram,
             plot_area_margin: 50.0,
             satellites: Vec::new(),
+            satellite_predictions: None,
         }
     }
 
-    pub fn update(&mut self, message: Message) {
+    #[must_use]
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::UpdateZoomX(zoom_x) => {
                 self.controls.zoom.x = zoom_x;
@@ -177,9 +203,30 @@ impl RFPlot {
             }
             Message::SetSatellites(satellites) => {
                 self.satellites = satellites;
+                // TODO: clear previous predictions here?
                 log::debug!("Using {} satellites", self.satellites.len());
+                let satellites = self.satellites.clone();
+                let start_time = self.spectrogram.start_time;
+                let length_s = self.spectrogram.length().num_milliseconds() as f64 / 1000.0;
+                return cosmic::task::future(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        predict_satellites(satellites, start_time, length_s)
+                    })
+                    .await;
+                    match result {
+                        Ok(predictions) => Message::SetSatellitePredictions(Some(predictions)),
+                        Err(e) => {
+                            log::error!("Failed to predict satellite passes: {}", e);
+                            Message::SetSatellitePredictions(None)
+                        }
+                    }
+                });
+            }
+            Message::SetSatellitePredictions(predictions) => {
+                self.satellite_predictions = predictions;
             }
         }
+        Task::none()
     }
 
     fn control<'a>(
@@ -326,5 +373,35 @@ impl RFPlot {
         };
 
         (Status::Captured, None)
+    }
+}
+
+fn predict_satellites(
+    satellites: Vec<Satellite>,
+    start_time: DateTime<Utc>,
+    length_s: f64,
+) -> Predictions {
+    let times = ndarray::Array1::linspace(
+        0.0, length_s, 1000, // TODO: number of points
+    );
+    // TODO: Make this configurable
+    const SITE: rstrf::orbit::Site = rstrf::orbit::Site {
+        latitude: 78.2244_f64.to_radians(),
+        longitude: 15.3952_f64.to_radians(),
+        altitude: 0.474,
+    };
+    // TODO: Parallelize predictions?
+    let (frequencies, zenith_angles) = satellites
+        .iter()
+        .map(|sat| {
+            let id = sat.norad_id();
+            let (freq, za) = sat.predict_pass(start_time, times.view(), SITE);
+            ((id, freq), (id, za))
+        })
+        .unzip();
+    Predictions {
+        times,
+        frequencies,
+        zenith_angles,
     }
 }

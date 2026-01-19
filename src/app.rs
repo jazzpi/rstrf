@@ -148,8 +148,15 @@ impl cosmic::Application for AppModel {
         });
         let mut tasks = vec![title, spectrogram];
         if let Some(path) = flags.tle_path {
+            let freqs_path = flags
+                .frequencies_path
+                .expect("frequencies_path should be present when tle_path is present");
             tasks.push(cosmic::task::future(async move {
-                let satellites = rstrf::orbit::load(&path).await;
+                let satellites: anyhow::Result<_> = async {
+                    let freqs = rstrf::orbit::load_frequencies(&freqs_path).await?;
+                    rstrf::orbit::load_tles(&path, freqs).await
+                }
+                .await;
                 Message::SatellitesLoaded(satellites.map_err(|e| format!("{e:?}")))
             }));
         }
@@ -337,7 +344,10 @@ impl cosmic::Application for AppModel {
                     self.rfplot = Some(crate::widgets::rfplot::RFPlot::new(
                         self.spectrogram.as_ref().cloned().unwrap(),
                     ));
-                    self.set_rfplot_satellites();
+                    return self
+                        .set_rfplot_satellites()
+                        .map(Message::from)
+                        .map(cosmic::Action::from);
                 }
                 Err(err) => log::error!("failed to load spectrogram: {err}"),
             },
@@ -345,13 +355,19 @@ impl cosmic::Application for AppModel {
                 Ok(satellites) => {
                     log::info!("Loaded {} TLEs", satellites.len());
                     self.satellites = satellites;
-                    self.set_rfplot_satellites();
+                    return self
+                        .set_rfplot_satellites()
+                        .map(Message::from)
+                        .map(cosmic::Action::from);
                 }
                 Err(err) => log::error!("failed to load TLEs: {err}"),
             },
             Message::RFPlot(message) => match &mut self.rfplot {
                 Some(rfplot) => {
-                    rfplot.update(message);
+                    return rfplot
+                        .update(message)
+                        .map(Message::from)
+                        .map(cosmic::Action::from);
                 }
                 None => {
                     log::error!("RFPlot widget not initialized");
@@ -387,11 +403,13 @@ impl AppModel {
         }
     }
 
-    fn set_rfplot_satellites(&mut self) {
-        if let Some(rfplot) = &mut self.rfplot {
-            rfplot.update(crate::widgets::rfplot::Message::SetSatellites(
+    #[must_use]
+    fn set_rfplot_satellites(&mut self) -> Task<crate::widgets::rfplot::Message> {
+        match &mut self.rfplot {
+            Some(rfplot) => rfplot.update(crate::widgets::rfplot::Message::SetSatellites(
                 self.satellites.clone(),
-            ));
+            )),
+            None => Task::none(),
         }
     }
 }

@@ -30,6 +30,8 @@ plotters-iced = { git = "https://github.com/jazzpi/plotters-cosmic-iced.git", ve
 plotters = "0.3.7"
 duplicate = "2.0.1"
 sgp4 = "2.3.0"
+ndarray-linalg = { version = "0.18.1", features = ["openblas-system"] }
+itertools = "0.14.0"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
