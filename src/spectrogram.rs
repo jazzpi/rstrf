@@ -67,6 +67,7 @@ impl std::fmt::Debug for Spectrogram {
                 "nslices",
                 &(self.raw_data.len() as usize / self.nchan as usize),
             )
+            .field("power_bounds", &self.power_bounds)
             .finish()
     }
 }
