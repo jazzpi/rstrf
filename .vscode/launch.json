@@ -18,7 +18,9 @@
         "/home/jasper/GDrive/RadioDecoding/spectrograms/2025-12-31T11:49:52_000007.bin",
         "/home/jasper/GDrive/RadioDecoding/spectrograms/2025-12-31T11:49:52_000008.bin",
         "/home/jasper/GDrive/RadioDecoding/spectrograms/2025-12-31T11:49:52_000009.bin",
-        "/home/jasper/GDrive/RadioDecoding/spectrograms/2025-12-31T11:49:52_000010.bin"
+        "/home/jasper/GDrive/RadioDecoding/spectrograms/2025-12-31T11:49:52_000010.bin",
+        "-c",
+        "/home/jasper/GDrive/RadioDecoding/t15_0119.tle"
       ]
     }
   ]

@@ -14,6 +14,9 @@ pub struct Args {
     /// Spectrogram files to load
     #[arg(value_name = "SPECTROGRAM_PATH", required = true)]
     spectrogram_path: Vec<PathBuf>,
+    /// TLE file to load
+    #[arg(short, long, value_name = "TLE_PATH")]
+    tle_path: Option<PathBuf>,
 }
 
 fn main() -> cosmic::iced::Result {

@@ -8,7 +8,7 @@ use cosmic::{
 use duplicate::duplicate_item;
 use glam::Vec2;
 use plotters_iced::ChartWidget;
-use rstrf::spectrogram::Spectrogram;
+use rstrf::{orbit::Satellite, spectrogram::Spectrogram};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 17.0;
@@ -103,6 +103,7 @@ pub enum Message {
     ZoomDeltaY(f32),
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
+    SetSatellites(Vec<Satellite>),
 }
 
 pub enum MouseInteraction {
@@ -121,6 +122,7 @@ pub struct RFPlot {
     spectrogram: Spectrogram,
     /// The margin on the left/bottom of the plot area (for axes/labels)
     plot_area_margin: f32,
+    satellites: Vec<Satellite>,
 }
 
 impl RFPlot {
@@ -132,6 +134,7 @@ impl RFPlot {
             },
             spectrogram,
             plot_area_margin: 50.0,
+            satellites: Vec::new(),
         }
     }
 
@@ -171,6 +174,10 @@ impl RFPlot {
             }
             Message::UpdateMaxPower(max_power) => {
                 self.controls.power_bounds.1 = max_power.max(self.controls.power_bounds.0);
+            }
+            Message::SetSatellites(satellites) => {
+                self.satellites = satellites;
+                log::debug!("Using {} satellites", self.satellites.len());
             }
         }
     }

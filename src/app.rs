@@ -10,6 +10,7 @@ use cosmic::iced_widget::{column, text};
 use cosmic::widget::{self, about::About, icon, menu, nav_bar};
 use cosmic::{iced_futures, prelude::*};
 use futures_util::SinkExt;
+use rstrf::orbit::Satellite;
 use rstrf::spectrogram::Spectrogram;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -40,6 +41,8 @@ pub struct AppModel {
     spectrogram: Option<Spectrogram>,
     /// RFPlot widget
     rfplot: Option<crate::widgets::rfplot::RFPlot>,
+    /// Loaded TLEs
+    satellites: Vec<Satellite>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -50,6 +53,7 @@ pub enum Message {
     UpdateConfig(Config),
     WatchTick(u32),
     SpectrogramLoaded(Result<Spectrogram, String>),
+    SatellitesLoaded(Result<Vec<Satellite>, String>),
     RFPlot(crate::widgets::rfplot::Message),
 }
 
@@ -134,6 +138,7 @@ impl cosmic::Application for AppModel {
             watch_is_active: false,
             spectrogram: None,
             rfplot: None,
+            satellites: Vec::new(),
         };
 
         let title = app.update_title();
@@ -141,7 +146,14 @@ impl cosmic::Application for AppModel {
             let spec = rstrf::spectrogram::load(&flags.spectrogram_path).await;
             Message::SpectrogramLoaded(spec.map_err(|e| format!("{e:?}")))
         });
-        let command = cosmic::task::batch(vec![title, spectrogram]);
+        let mut tasks = vec![title, spectrogram];
+        if let Some(path) = flags.tle_path {
+            tasks.push(cosmic::task::future(async move {
+                let satellites = rstrf::orbit::load(&path).await;
+                Message::SatellitesLoaded(satellites.map_err(|e| format!("{e:?}")))
+            }));
+        }
+        let command = cosmic::task::batch(tasks);
 
         (app, command)
     }
@@ -325,8 +337,17 @@ impl cosmic::Application for AppModel {
                     self.rfplot = Some(crate::widgets::rfplot::RFPlot::new(
                         self.spectrogram.as_ref().cloned().unwrap(),
                     ));
+                    self.set_rfplot_satellites();
                 }
                 Err(err) => log::error!("failed to load spectrogram: {err}"),
+            },
+            Message::SatellitesLoaded(result) => match result {
+                Ok(satellites) => {
+                    log::info!("Loaded {} TLEs", satellites.len());
+                    self.satellites = satellites;
+                    self.set_rfplot_satellites();
+                }
+                Err(err) => log::error!("failed to load TLEs: {err}"),
             },
             Message::RFPlot(message) => match &mut self.rfplot {
                 Some(rfplot) => {
@@ -363,6 +384,14 @@ impl AppModel {
             self.set_window_title(window_title, id)
         } else {
             Task::none()
+        }
+    }
+
+    fn set_rfplot_satellites(&mut self) {
+        if let Some(rfplot) = &mut self.rfplot {
+            rfplot.update(crate::widgets::rfplot::Message::SetSatellites(
+                self.satellites.clone(),
+            ));
         }
     }
 }

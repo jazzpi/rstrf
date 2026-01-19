@@ -29,6 +29,7 @@ log = "0.4.29"
 plotters-iced = { git = "https://github.com/jazzpi/plotters-cosmic-iced.git", version = "0.11.0" }
 plotters = "0.3.7"
 duplicate = "2.0.1"
+sgp4 = "2.3.0"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
