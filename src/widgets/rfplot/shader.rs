@@ -1,10 +1,7 @@
 //! This module contains the WGPU shader implementation for the RFPlot widget. The shader is
 //! responsible for rendering the spectrogram itself.
 use cosmic::iced::{
-    Rectangle,
-    advanced::Shell,
-    event::Status,
-    mouse,
+    Rectangle, mouse,
     wgpu::{self, util::DeviceExt},
     widget::shader,
 };
@@ -229,20 +226,5 @@ impl shader::Program<Message> for RFPlot {
             self.controls,
             self.spectrogram.clone(), // TODO
         )
-    }
-
-    fn update(
-        &self,
-        state: &mut Self::State,
-        event: shader::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-        _shell: &mut Shell<'_, Message>,
-    ) -> (Status, Option<Message>) {
-        if let shader::Event::Mouse(event) = event {
-            self.handle_mouse(state, event, bounds, cursor)
-        } else {
-            (Status::Ignored, None)
-        }
     }
 }

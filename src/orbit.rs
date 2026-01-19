@@ -7,6 +7,8 @@ use ndarray_linalg::Norm;
 use sgp4::Prediction;
 use tokio::io::AsyncBufReadExt;
 
+use super::util::minmax;
+
 /// Loads frequencies from a strf-style frequencies.txt file
 pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashMap<u64, f64>> {
     let file = tokio::fs::File::open(path).await?;
@@ -214,4 +216,51 @@ pub fn gmst_deriv_days(time: &NaiveDateTime) -> f64 {
     let t_0 = sgp4::julian_years_since_j2000(time) / 100.0;
     (360.98564736629_f64).to_radians() + 2.0 * (0.003875_f64).to_radians() * t_0
         - 3.0 * (2.6e-8_f64).to_radians() * t_0 * t_0
+}
+
+pub fn predict_satellites(
+    satellites: Vec<Satellite>,
+    start_time: DateTime<Utc>,
+    length_s: f64,
+) -> Predictions {
+    let times = ndarray::Array1::linspace(
+        0.0, length_s, 1000, // TODO: number of points
+    );
+    // TODO: Make this configurable
+    const SITE: Site = Site {
+        latitude: 78.2244_f64.to_radians(),
+        longitude: 15.3952_f64.to_radians(),
+        altitude: 0.474,
+    };
+    // TODO: Parallelize predictions?
+    let (frequencies, zenith_angles) = satellites
+        .iter()
+        .map(|sat| {
+            let id = sat.norad_id();
+            let (freq, za) = sat.predict_pass(start_time, times.view(), SITE);
+            ((id, freq), (id, za))
+        })
+        .unzip();
+    Predictions {
+        times,
+        frequencies,
+        zenith_angles,
+    }
+}
+
+#[derive(Clone)]
+pub struct Predictions {
+    pub times: Array1<f64>,
+    pub frequencies: HashMap<u64, Array1<f64>>,
+    pub zenith_angles: HashMap<u64, Array1<f64>>,
+}
+
+impl std::fmt::Debug for Predictions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Predictions")
+            .field("times", &minmax(&self.times))
+            .field("frequencies", &self.frequencies.len())
+            .field("zenith_angles", &self.zenith_angles.len())
+            .finish()
+    }
 }

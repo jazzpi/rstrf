@@ -19,10 +19,6 @@ pub struct DataNormalized(pub Vec2);
 /// Coordinates in data space
 pub struct DataAbsolute(pub Vec2);
 
-trait Coord {
-    fn vec(&self) -> Vec2;
-}
-
 #[duplicate_item(name; [Screen]; [PlotArea]; [DataNormalized]; [DataAbsolute])]
 impl Sub for name {
     type Output = name;
