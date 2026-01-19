@@ -59,10 +59,31 @@ impl Chart<Message> for RFPlot {
                                 None
                             }
                         }),
-                        &RED,
+                        &GREEN,
                     ))
                     .expect(format!("Could not draw line for satellite {}", id).as_str())
                     .label(format!("{:06}", id));
+
+                let first_visible =
+                    izip!(time.iter(), freq.iter(), za.iter()).position(|(&t, &f, &za)| {
+                        t > x.x.into()
+                            && t < x.y.into()
+                            && f > y.x as f64 + sat.tx_freq
+                            && f < y.y as f64 + sat.tx_freq
+                            && za < std::f64::consts::FRAC_PI_2
+                    });
+                let Some(first_visible) = first_visible else {
+                    continue;
+                };
+                let first_time = (time[first_visible] as f32).max(x.x);
+                let first_freq = (freq[first_visible] - sat.tx_freq) as f32;
+                chart
+                    .draw_series(vec![Text::new(
+                        format!("{:06}", id),
+                        (first_time, first_freq),
+                        ("sans-serif", 12).into_font().color(&GREEN),
+                    )])
+                    .expect(format!("Could not draw label for satellite {}", id).as_str());
             }
         }
     }
