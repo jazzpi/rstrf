@@ -3,6 +3,7 @@ use cosmic::{
     iced::{Length, Padding, widget as iw},
     widget::container,
 };
+use glam::Vec2;
 use plotters_iced::ChartWidget;
 use rstrf::{orbit, spectrogram::Spectrogram};
 
@@ -53,6 +54,7 @@ pub struct RFPlot {
     satellites: Vec<orbit::Satellite>,
     satellite_predictions: Option<orbit::Predictions>,
     track_points: Vec<coord::DataAbsolute>,
+    signals: Vec<coord::DataAbsolute>,
 }
 
 impl RFPlot {
@@ -64,6 +66,7 @@ impl RFPlot {
             satellites: Vec::new(),
             satellite_predictions: None,
             track_points: Vec::new(),
+            signals: Vec::new(),
         }
     }
 

@@ -7,10 +7,13 @@ use cosmic::{
     iced::{Rectangle, event::Status, keyboard, mouse},
     widget::canvas,
 };
+use find_peaks::PeakFinder;
 use glam::Vec2;
 use itertools::{Itertools, izip};
+use ndarray::s;
 use plotters::prelude::*;
 use plotters_iced::Chart;
+use rstrf::util::to_index;
 
 use super::{
     MouseInteraction, RFPlot, control,
@@ -20,6 +23,8 @@ use super::{
 #[derive(Debug, Clone)]
 pub enum Message {
     AddTrackPoint(coord::DataAbsolute),
+    FindSignals,
+    FoundSignals(Vec<coord::DataAbsolute>),
 }
 
 const TRACK_BW: f32 = 5e3; // Hz
@@ -156,6 +161,17 @@ impl RFPlot {
                     e
                 )
             })?;
+
+        chart
+            .draw_series(self.signals.iter().filter_map(|pos| {
+                if bounds.contains(&pos.0) {
+                    Some(Circle::new(pos.0.into(), 5, WHITE.filled()))
+                } else {
+                    log::debug!("Out of bounds: {:?}, {:?}", pos, bounds);
+                    None
+                }
+            }))
+            .map_err(|e| format!("Could not draw track points: {:?}", e))?;
         Ok(())
     }
 
@@ -258,24 +274,24 @@ impl RFPlot {
             .position_in(bounds)
             .map(|pos| coord::Screen::new(pos.x, pos.y));
 
-        match key.as_ref() {
-            keyboard::Key::Character("r") => {
+        match (key.as_ref(), plot_pos) {
+            (keyboard::Key::Character("r"), _) => {
                 (Status::Captured, Some(control::Message::ResetView.into()))
             }
-            keyboard::Key::Character("s") => match plot_pos {
-                Some(plot_pos) => (
-                    Status::Captured,
-                    Some(
-                        Message::AddTrackPoint(plot_pos.data_absolute(
-                            &bounds,
-                            &self.controls,
-                            &self.spectrogram,
-                        ))
-                        .into(),
-                    ),
+            (keyboard::Key::Character("s"), Some(plot_pos)) => (
+                Status::Captured,
+                Some(
+                    Message::AddTrackPoint(plot_pos.data_absolute(
+                        &bounds,
+                        &self.controls,
+                        &self.spectrogram,
+                    ))
+                    .into(),
                 ),
-                None => (Status::Ignored, None),
-            },
+            ),
+            (keyboard::Key::Character("f"), _) => {
+                (Status::Captured, Some(Message::FindSignals.into()))
+            }
             _ => (Status::Ignored, None),
         }
     }
@@ -292,9 +308,86 @@ impl RFPlot {
                     Ok(idx) => self.track_points[idx] = pos,
                     Err(idx) => self.track_points.insert(idx, pos),
                 }
+                Task::none()
+            }
+            Message::FindSignals => {
+                if self.track_points.len() < 2 {
+                    Task::none()
+                } else {
+                    let data = self.spectrogram.data();
+                    let (nt, nf) = data.dim();
+                    let t_scale = nt as f32 / self.spectrogram.length().as_seconds_f32();
+                    let bw = self.spectrogram.bw;
+                    let f_scale = nf as f32 / bw;
+                    let half_bw_idx = (TRACK_BW * 0.5 * f_scale) as usize;
+                    let track_points = self
+                        .track_points
+                        .iter()
+                        .map(|p| {
+                            (
+                                // TODO: This will clamp x/y to bounds individually -> might change slope
+                                // for out-of-bounds points
+                                to_index(p.0.x * t_scale, nt),
+                                to_index((p.0.y + bw / 2.0) * f_scale, nf),
+                            )
+                        })
+                        .collect_vec();
+                    let t_range =
+                        track_points.first().unwrap().0..(track_points.last().unwrap().0 + 1);
+                    let data = data.slice(s![t_range.clone(), ..]).to_owned();
+                    cosmic::task::future(async move {
+                        tokio::task::spawn_blocking(move || {
+                            let peaks = track_points
+                                .iter()
+                                .tuple_windows()
+                                .flat_map(|(a, b)| {
+                                    let slope = (b.1 as f32 - a.1 as f32) / (b.0 as f32 - a.0 as f32);
+                                    (a.0..=b.0)
+                                        .map(|t_idx| {
+                                            let center_f =
+                                                (a.1 as f32 + slope * (t_idx - a.0) as f32).round()
+                                                    as usize;
+                                            let f_range = center_f.saturating_sub(half_bw_idx)
+                                                ..(center_f + half_bw_idx).min(nf - 1);
+                                                log::debug!(
+                                                    "a: {:?}, b: {:?}, slope: {}, t_idx: {}, center_f: {}, f_range: {:?}",
+                                                    a, b, slope, t_idx, center_f, f_range
+                                                );
+                                            let slice =
+                                                data.slice(s![t_idx - t_range.start, f_range.clone()]);
+                                            PeakFinder::new(slice.as_slice().unwrap())
+                                                .with_min_height(5.0)
+                                                .find_peaks()
+                                                .iter()
+                                                .map(|p| {
+                                                    coord::DataAbsolute::new(
+                                                        t_idx as f32 / t_scale,
+                                                        ((p.middle_position() + f_range.start) as f32 / f_scale)
+                                                            - bw / 2.0,
+                                                    )
+                                                })
+                                                .collect_vec()
+                                        })
+                                        // looks dumb but without this we get ownership issues for
+                                        // `slope` for some reason
+                                        .collect_vec()
+                                        .into_iter()
+                                        .flatten()
+                                })
+                                .collect_vec();
+                            log::info!("Found {} signal peaks", peaks.len());
+                            Message::FoundSignals(peaks)
+                        })
+                        .await
+                        .unwrap()
+                    })
+                }
+            }
+            Message::FoundSignals(signals) => {
+                self.signals = signals;
+                Task::none()
             }
         }
-        Task::none()
     }
 }
 

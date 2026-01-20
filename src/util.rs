@@ -12,3 +12,7 @@ pub fn minmax(arr: &Array1<f64>) -> (f64, f64) {
             })
     }
 }
+
+pub fn to_index(value: f32, max: usize) -> usize {
+    value.round().clamp(0.0, (max - 1) as f32) as usize
+}

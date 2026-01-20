@@ -33,6 +33,7 @@ sgp4 = "2.3.0"
 ndarray-linalg = { version = "0.18.1", features = ["openblas-system"] }
 itertools = "0.14.0"
 copy-range = "0.1.1"
+find_peaks = "0.1.5"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
@@ -63,3 +64,7 @@ features = [
 # libcosmic = { path = "../libcosmic" }
 # cosmic-config = { path = "../libcosmic/cosmic-config" }
 # cosmic-theme = { path = "../libcosmic/cosmic-theme" }
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
