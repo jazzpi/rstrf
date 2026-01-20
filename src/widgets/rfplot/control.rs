@@ -105,7 +105,7 @@ impl Controls {
                 "Min Power",
                 slider(
                     self.power_bounds.0..=self.power_bounds.1,
-                    self.power_bounds.0,
+                    self.power_range.0,
                     move |power| { Message::UpdateMinPower(power) }
                 )
                 .step(0.1)
@@ -115,7 +115,7 @@ impl Controls {
                 "Max Power",
                 slider(
                     self.power_bounds.0..=self.power_bounds.1,
-                    self.power_bounds.1,
+                    self.power_range.1,
                     move |power| { Message::UpdateMaxPower(power) }
                 )
                 .step(0.1)
