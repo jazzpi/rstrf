@@ -3,7 +3,8 @@
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
-use ndarray::ArrayView2;
+use ndarray::{Array2, ArrayView2, Axis};
+use ndarray_stats::QuantileExt;
 use tokio::io::AsyncReadExt;
 
 /// Loads a spectrogram from the given file paths
@@ -47,12 +48,13 @@ impl Header {
 #[derive(Clone)]
 pub struct Spectrogram {
     pub start_time: DateTime<Utc>,
-    pub freq: f32,         // Hz
-    pub bw: f32,           // Hz
-    pub slice_length: f32, // s
     pub nchan: usize,
-    pub power_bounds: (f32, f32),
-    raw_data: Vec<f32>,
+    pub nslices: usize,
+    pub freq: f32,                // Hz
+    pub bw: f32,                  // Hz
+    pub slice_length: f32,        // s
+    pub power_bounds: (f32, f32), // dB
+    pub data: Array2<f32>,        // dB
 }
 
 impl std::fmt::Debug for Spectrogram {
@@ -63,32 +65,29 @@ impl std::fmt::Debug for Spectrogram {
             .field("bw", &self.bw)
             .field("slice_length", &self.slice_length)
             .field("nchan", &self.nchan)
-            .field(
-                "nslices",
-                &(self.raw_data.len() as usize / self.nchan as usize),
-            )
+            .field("nslices", &self.nslices)
             .field("power_bounds", &self.power_bounds)
             .finish()
     }
 }
 
 impl Spectrogram {
-    pub(self) fn new(first_header: &Header, raw_data: Vec<f32>) -> Self {
-        let (min, max) = raw_data
-            .iter()
-            .filter(|&&v| v > 0.0)
-            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &val| {
-                (min.min(val), max.max(val))
-            });
-        Spectrogram {
+    pub(self) fn new(first_header: &Header, raw_data: Vec<f32>) -> anyhow::Result<Self> {
+        let nslices = raw_data.len() / first_header.nchan;
+        let data = Array2::from_shape_vec((nslices, first_header.nchan), raw_data)?
+            .mapv(|v| 10.0 * (v + 1e-12).log10());
+        let min = *data.min()?;
+        let max = *data.max()?;
+        Ok(Spectrogram {
             start_time: first_header.start_time,
             freq: first_header.freq,
             bw: first_header.bw,
             slice_length: first_header.length,
             nchan: first_header.nchan,
-            power_bounds: (min.log2(), max.log2()),
-            raw_data,
-        }
+            nslices,
+            power_bounds: (min, max),
+            data,
+        })
     }
 
     pub fn concatenate(components: &[Spectrogram]) -> Result<Spectrogram> {
@@ -97,19 +96,6 @@ impl Spectrogram {
         }
 
         let first = &components[0];
-        let total_slices: usize = components.iter().map(|s| s.raw_data.len() / s.nchan).sum();
-        let mut raw_data: Vec<f32> = Vec::with_capacity(total_slices * first.nchan);
-        raw_data.extend_from_slice(&components[0].raw_data);
-        let power_bounds =
-            components
-                .iter()
-                .fold((f32::INFINITY, f32::NEG_INFINITY), |bounds, spectrogram| {
-                    (
-                        bounds.0.min(spectrogram.power_bounds.0),
-                        bounds.1.max(spectrogram.power_bounds.1),
-                    )
-                });
-
         for (i, spectrogram) in components.iter().enumerate().skip(1) {
             ensure!(
                 spectrogram.freq == first.freq
@@ -126,8 +112,24 @@ impl Spectrogram {
                     < 10,
                 "Non-contiguous spectrograms during concatenation"
             );
-            raw_data.extend_from_slice(&spectrogram.raw_data);
         }
+
+        let data = ndarray::concatenate(
+            Axis(0),
+            &components.iter().map(|s| s.data.view()).collect::<Vec<_>>(),
+        )
+        .context("Failed to concatenate spectrograms")?;
+
+        let nslices: usize = components.iter().map(|s| s.nslices).sum();
+        let power_bounds =
+            components
+                .iter()
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |bounds, spectrogram| {
+                    (
+                        bounds.0.min(spectrogram.power_bounds.0),
+                        bounds.1.max(spectrogram.power_bounds.1),
+                    )
+                });
 
         Ok(Spectrogram {
             start_time: first.start_time,
@@ -135,20 +137,18 @@ impl Spectrogram {
             bw: first.bw,
             slice_length: first.slice_length,
             nchan: first.nchan,
+            nslices,
             power_bounds,
-            raw_data,
+            data,
         })
     }
 
     pub fn data(&self) -> ArrayView2<'_, f32> {
-        let nslices = self.raw_data.len() / self.nchan;
-        ArrayView2::from_shape((nslices, self.nchan), &self.raw_data).unwrap()
+        self.data.view()
     }
 
     pub fn length(&self) -> Duration {
-        Duration::milliseconds(
-            (self.slice_length * 1000.0) as i64 * (self.raw_data.len() as i64 / self.nchan as i64),
-        )
+        Duration::milliseconds((self.slice_length * 1000.0) as i64 * self.nslices as i64)
     }
 
     pub fn end_time(&self) -> DateTime<Utc> {
@@ -219,7 +219,7 @@ async fn load_file(path: &std::path::Path) -> Result<Spectrogram> {
         min_max.1
     );
 
-    Ok(Spectrogram::new(&header, raw_data))
+    Spectrogram::new(&header, raw_data)
 }
 
 async fn parse_header<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Result<Header> {

@@ -46,8 +46,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 
     let value = spec_data[idx];
 
-    let power = log2(value + 1e-12);
-    let normalized = clamp((power - uniforms.power_bounds.x) / (uniforms.power_bounds.y - uniforms.power_bounds.x), 0.0, 1.0);
+    let normalized = clamp((value - uniforms.power_bounds.x) / (uniforms.power_bounds.y - uniforms.power_bounds.x), 0.0, 1.0);
 
     let color_index = normalized * 255.0;
     let lower_idx = u32(floor(color_index));
