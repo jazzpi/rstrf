@@ -5,6 +5,8 @@ use cosmic::{
 };
 use glam::Vec2;
 
+use crate::widgets::rfplot::coord::Coord;
+
 use super::coord;
 
 const ZOOM_MIN: f32 = 0.0;
@@ -14,12 +16,12 @@ const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Controls {
-    pub zoom: Vec2,
-    pub center: Vec2,
+    zoom: Vec2,
+    center: coord::DataNormalized,
     /// Possible power range
     power_bounds: (f32, f32),
     /// Current power range for display
-    pub power_range: (f32, f32),
+    power_range: (f32, f32),
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +40,7 @@ impl Controls {
     pub fn new(power_bounds: (f32, f32)) -> Self {
         Self {
             zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
-            center: Vec2::new(0.5, 0.5),
+            center: coord::DataNormalized::new(0.5, 0.5),
             power_bounds,
             power_range: power_bounds,
         }
@@ -54,9 +56,23 @@ impl Controls {
     pub fn bounds(&self) -> (Vec2, Vec2) {
         let half_scale = self.scale() / 2.0;
         (
-            Vec2::new(self.center.x - half_scale.x, self.center.x + half_scale.x),
-            Vec2::new(self.center.y - half_scale.y, self.center.y + half_scale.y),
+            Vec2::new(
+                self.center.0.x - half_scale.x,
+                self.center.0.x + half_scale.x,
+            ),
+            Vec2::new(
+                self.center.0.y - half_scale.y,
+                self.center.0.y + half_scale.y,
+            ),
         )
+    }
+
+    pub fn center(&self) -> coord::DataNormalized {
+        self.center
+    }
+
+    pub fn power_range(&self) -> (f32, f32) {
+        self.power_range
     }
 
     fn control<'a>(
@@ -118,7 +134,7 @@ impl Controls {
                 self.zoom.y = zoom_y;
             }
             Message::PanningDelta(delta) => {
-                self.center -= delta.0 * self.scale();
+                self.center -= coord::DataNormalized(delta.0 * self.scale());
             }
             Message::ZoomDelta(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
@@ -128,21 +144,21 @@ impl Controls {
                 self.zoom = (prev_zoom + Vec2::splat(delta))
                     .clamp(Vec2::splat(ZOOM_MIN), Vec2::splat(ZOOM_MAX));
                 let new_data = plot_pos.data_normalized(&self);
-                self.center += old_data.0 - new_data.0;
+                self.center += old_data - new_data;
             }
             Message::ZoomDeltaX(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
                 let old_x = plot_pos.data_normalized(&self).0.x;
                 self.zoom.x = (self.zoom.x + delta).clamp(ZOOM_MIN, ZOOM_MAX);
                 let new_x = plot_pos.data_normalized(&self).0.x;
-                self.center.x += old_x - new_x;
+                self.center.0.x += old_x - new_x;
             }
             Message::ZoomDeltaY(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
                 let old_y = plot_pos.data_normalized(&self).0.y;
                 self.zoom.y = (self.zoom.y + delta).clamp(ZOOM_MIN, ZOOM_MAX);
                 let new_y = plot_pos.data_normalized(&self).0.y;
-                self.center.y += old_y - new_y;
+                self.center.0.y += old_y - new_y;
             }
             Message::UpdateMinPower(min_power) => {
                 self.power_range.0 = min_power.min(self.power_range.1);

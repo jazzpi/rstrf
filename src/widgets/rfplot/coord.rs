@@ -67,6 +67,6 @@ impl Screen {
 
 impl PlotArea {
     pub fn data_normalized(&self, controls: &Controls) -> DataNormalized {
-        DataNormalized(controls.center + (self.0 - Vec2::splat(0.5)) * controls.scale())
+        controls.center() + DataNormalized((self.0 - Vec2::splat(0.5)) * controls.scale())
     }
 }
