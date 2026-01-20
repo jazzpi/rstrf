@@ -73,7 +73,7 @@ impl RFPlot {
                 log::debug!("Using {} satellites", self.satellites.len());
                 let satellites = self.satellites.clone();
                 let start_time = self.spectrogram.start_time;
-                let length_s = self.spectrogram.length().num_milliseconds() as f64 / 1000.0;
+                let length_s = self.spectrogram.length().as_seconds_f64();
                 return cosmic::task::future(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         orbit::predict_satellites(satellites, start_time, length_s)

@@ -20,7 +20,7 @@ impl RFPlot {
         mut chart: ChartBuilder<DB>,
     ) -> Result<(), String> {
         let (x, y) = self.controls.bounds();
-        let x = x * self.spectrogram.length().num_milliseconds() as f32 / 1000.0;
+        let x = x * self.spectrogram.length().as_seconds_f32();
         let y = (y - 0.5) * self.spectrogram.bw;
         let mut chart = chart
             .x_label_area_size(self.plot_area_margin)
