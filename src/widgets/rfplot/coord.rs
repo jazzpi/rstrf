@@ -1,7 +1,7 @@
-use std::ops::{Add, Sub};
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use cosmic::iced::Rectangle;
-use duplicate::duplicate_item;
+use duplicate::duplicate;
 use glam::Vec2;
 
 use super::Controls;
@@ -19,20 +19,37 @@ pub struct DataNormalized(pub Vec2);
 /// Coordinates in data space
 pub struct DataAbsolute(pub Vec2);
 
-#[duplicate_item(name; [Screen]; [PlotArea]; [DataNormalized]; [DataAbsolute])]
-impl Sub for name {
-    type Output = name;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        name(self.0 - rhs.0)
-    }
+pub trait Coord {
+    fn new(x: f32, y: f32) -> Self;
 }
-#[duplicate_item(name; [Screen]; [PlotArea]; [DataNormalized]; [DataAbsolute])]
-impl Add for name {
-    type Output = name;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        name(self.0 + rhs.0)
+duplicate! {
+    [name; [Screen]; [PlotArea]; [DataNormalized]; [DataAbsolute]]
+
+    impl Coord for name {
+        fn new(x: f32, y: f32) -> Self {
+            Self(Vec2::new(x, y))
+        }
+    }
+
+    duplicate! {
+        [trait_name fn_name; [Add] [add]; [Sub] [sub]]
+        impl trait_name for name {
+            type Output = name;
+
+            fn fn_name(self, rhs: Self) -> Self::Output {
+                Self(self.0.fn_name(rhs.0))
+            }
+        }
+    }
+
+    duplicate! {
+        [trait_name fn_name; [AddAssign] [add_assign]; [SubAssign] [sub_assign]]
+        impl trait_name for name {
+            fn fn_name(&mut self, rhs: Self) {
+                self.0.fn_name(rhs.0);
+            }
+        }
     }
 }
 
