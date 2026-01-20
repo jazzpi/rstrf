@@ -5,7 +5,7 @@ use cosmic::{
 };
 use glam::Vec2;
 
-use crate::widgets::rfplot::coord::Coord;
+use crate::widgets::rfplot::coord::{Bounds, Coord};
 
 use super::coord;
 
@@ -54,17 +54,11 @@ impl Controls {
         )
     }
 
-    pub fn bounds(&self) -> (Vec2, Vec2) {
+    pub fn bounds(&self) -> Bounds {
         let half_scale = self.scale() / 2.0;
-        (
-            Vec2::new(
-                self.center.0.x - half_scale.x,
-                self.center.0.x + half_scale.x,
-            ),
-            Vec2::new(
-                self.center.0.y - half_scale.y,
-                self.center.0.y + half_scale.y,
-            ),
+        Bounds::new(
+            (self.center.0.x - half_scale.x)..(self.center.0.x + half_scale.x),
+            (self.center.0.y - half_scale.y)..(self.center.0.y + half_scale.y),
         )
     }
 

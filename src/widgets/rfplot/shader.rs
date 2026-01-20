@@ -8,7 +8,7 @@ use cosmic::iced::{
 use glam::Vec2;
 use rstrf::spectrogram::Spectrogram;
 
-use super::{Controls, Message, MouseInteraction, RFPlot, coord};
+use super::{Controls, Message, MouseInteraction, RFPlot};
 
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
@@ -186,13 +186,13 @@ impl shader::Primitive for Primitive {
         let spec_data = self.spectrogram.data();
         let (nslices, nchan) = spec_data.dim();
 
-        let (x_bounds, y_bounds) = self.controls.bounds();
+        let bounds = self.controls.bounds();
 
         pipeline.update(
             queue,
             &Uniforms {
-                x_bounds,
-                y_bounds,
+                x_bounds: (bounds.x.start, bounds.x.end).into(),
+                y_bounds: (bounds.y.start, bounds.y.end).into(),
                 power_bounds: self.controls.power_range().into(),
                 nslices: nslices as u32,
                 nchan: nchan as u32,

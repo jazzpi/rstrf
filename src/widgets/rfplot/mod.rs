@@ -17,6 +17,7 @@ mod shader;
 #[derive(Debug, Clone)]
 pub enum Message {
     Control(control::Message),
+    Plot(plot::Message),
     SetSatellites(Vec<orbit::Satellite>),
     SetSatellitePredictions(Option<orbit::Predictions>),
 }
@@ -24,6 +25,12 @@ pub enum Message {
 impl From<control::Message> for Message {
     fn from(message: control::Message) -> Self {
         Message::Control(message)
+    }
+}
+
+impl From<plot::Message> for Message {
+    fn from(message: plot::Message) -> Self {
+        Message::Plot(message)
     }
 }
 
@@ -45,6 +52,7 @@ pub struct RFPlot {
     plot_area_margin: f32,
     satellites: Vec<orbit::Satellite>,
     satellite_predictions: Option<orbit::Predictions>,
+    track_points: Vec<coord::DataAbsolute>,
 }
 
 impl RFPlot {
@@ -55,15 +63,15 @@ impl RFPlot {
             plot_area_margin: 50.0,
             satellites: Vec::new(),
             satellite_predictions: None,
+            track_points: Vec::new(),
         }
     }
 
     #[must_use]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Control(message) => {
-                return self.controls.update(message).map(Message::from);
-            }
+            Message::Control(message) => self.controls.update(message).map(Message::from),
+            Message::Plot(message) => self.update_plot(message).map(Message::from),
             Message::SetSatellites(satellites) => {
                 self.satellites = satellites;
                 // TODO: clear previous predictions here?
@@ -71,7 +79,7 @@ impl RFPlot {
                 let satellites = self.satellites.clone();
                 let start_time = self.spectrogram.start_time;
                 let length_s = self.spectrogram.length().as_seconds_f64();
-                return cosmic::task::future(async move {
+                cosmic::task::future(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         orbit::predict_satellites(satellites, start_time, length_s)
                     })
@@ -83,13 +91,13 @@ impl RFPlot {
                             Message::SetSatellitePredictions(None)
                         }
                     }
-                });
+                })
             }
             Message::SetSatellitePredictions(predictions) => {
                 self.satellite_predictions = predictions;
+                Task::none()
             }
         }
-        Task::none()
     }
 
     /// Build the RFPlot widget view.

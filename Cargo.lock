@@ -1061,6 +1061,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "copy-range"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "660cbf03f75e28f252bea61cdafb8efd6f8e49dac6873ab376233e9b3e99f66c"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4889,6 +4895,7 @@ dependencies = [
  "bytemuck",
  "chrono",
  "clap",
+ "copy-range",
  "duplicate",
  "env_logger",
  "futures-util",

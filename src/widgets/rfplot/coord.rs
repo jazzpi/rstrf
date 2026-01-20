@@ -1,10 +1,12 @@
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
+use copy_range::CopyRange;
 use cosmic::iced::Rectangle;
 use duplicate::duplicate;
 use glam::Vec2;
+use itertools::izip;
 
-use super::Controls;
+use super::{Controls, Spectrogram};
 
 #[derive(Debug, Clone, Copy)]
 /// Screen coordinates in pixels
@@ -63,10 +65,102 @@ impl Screen {
     pub fn data_normalized(&self, bounds: &Rectangle, controls: &Controls) -> DataNormalized {
         self.plot(bounds).data_normalized(controls)
     }
+
+    pub fn data_absolute(
+        &self,
+        bounds: &Rectangle,
+        controls: &Controls,
+        spectrogram: &Spectrogram,
+    ) -> DataAbsolute {
+        self.data_normalized(bounds, controls)
+            .data_absolute(spectrogram)
+    }
 }
 
 impl PlotArea {
     pub fn data_normalized(&self, controls: &Controls) -> DataNormalized {
         controls.center() + DataNormalized((self.0 - Vec2::splat(0.5)) * controls.scale())
+    }
+}
+
+impl DataNormalized {
+    pub fn data_absolute(&self, spectrogram: &Spectrogram) -> DataAbsolute {
+        DataAbsolute::new(
+            self.0.x * spectrogram.length().as_seconds_f32(),
+            (self.0.y - 0.5) * spectrogram.bw,
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Bounds {
+    pub x: CopyRange<f32>,
+    pub y: CopyRange<f32>,
+}
+
+impl Bounds {
+    pub fn new(x: impl Into<CopyRange<f32>>, y: impl Into<CopyRange<f32>>) -> Self {
+        Self {
+            x: x.into(),
+            y: y.into(),
+        }
+    }
+
+    pub fn contains(&self, point: &Vec2) -> bool {
+        point.x >= self.x.start
+            && point.x <= self.x.end
+            && point.y >= self.y.start
+            && point.y <= self.y.end
+    }
+}
+
+duplicate! {
+    [trait_name fn_name; [Add] [add];[Sub] [sub]; [Mul] [mul]]
+    impl trait_name<Vec2> for Bounds {
+        type Output = Bounds;
+
+        fn fn_name(self, rhs: Vec2) -> Self::Output {
+            Bounds::new(
+                (self.x.start.fn_name(rhs.x))..(self.x.end.fn_name(rhs.x)),
+                (self.y.start.fn_name(rhs.y))..(self.y.end.fn_name(rhs.y)),
+            )
+        }
+    }
+}
+
+pub fn clip_line(bounds: &Bounds, a: Vec2, b: Vec2) -> Option<(Vec2, Vec2)> {
+    // https://en.wikipedia.org/wiki/Liang%E2%80%93Barsky_algorithm
+    let delta = b - a;
+
+    let pv = [-delta.x, delta.x, -delta.y, delta.y];
+    let qv = [
+        a.x - bounds.x.start,
+        bounds.x.end - a.x,
+        a.y - bounds.y.start,
+        bounds.y.end - a.y,
+    ];
+
+    let mut u1 = 0f32;
+    let mut u2 = 1f32;
+    for (&p, &q) in izip!(pv.iter(), qv.iter()) {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            } else {
+                continue;
+            }
+        }
+        let u = q / p;
+        if p < 0.0 {
+            u1 = u1.max(u);
+        } else {
+            u2 = u2.min(u);
+        }
+    }
+
+    if u1 > u2 {
+        None
+    } else {
+        Some((a + delta * u1, a + delta * u2))
     }
 }
