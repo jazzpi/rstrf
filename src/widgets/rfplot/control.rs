@@ -32,6 +32,7 @@ pub enum Message {
     ZoomDelta(coord::PlotArea, f32),
     ZoomDeltaX(coord::PlotArea, f32),
     ZoomDeltaY(coord::PlotArea, f32),
+    ResetView,
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
 }
@@ -159,6 +160,10 @@ impl Controls {
                 self.zoom.y = (self.zoom.y + delta).clamp(ZOOM_MIN, ZOOM_MAX);
                 let new_y = plot_pos.data_normalized(&self).0.y;
                 self.center.0.y += old_y - new_y;
+            }
+            Message::ResetView => {
+                self.zoom = Vec2::new(ZOOM_MIN, ZOOM_MIN);
+                self.center = coord::DataNormalized::new(0.5, 0.5);
             }
             Message::UpdateMinPower(min_power) => {
                 self.power_range.0 = min_power.min(self.power_range.1);

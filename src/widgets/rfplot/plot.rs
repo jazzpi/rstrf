@@ -3,7 +3,7 @@
 //! (like panning/zooming).
 
 use cosmic::{
-    iced::{Rectangle, event::Status, mouse},
+    iced::{Rectangle, event::Status, keyboard, mouse},
     widget::canvas,
 };
 use glam::Vec2;
@@ -11,7 +11,10 @@ use itertools::izip;
 use plotters::prelude::*;
 use plotters_iced::Chart;
 
-use super::{Message, MouseInteraction, RFPlot, control, coord};
+use super::{
+    Message, MouseInteraction, RFPlot, control,
+    coord::{self, Coord},
+};
 
 impl RFPlot {
     fn build_chart<DB: DrawingBackend>(
@@ -160,6 +163,36 @@ impl RFPlot {
 
         (Status::Captured, None)
     }
+
+    fn handle_keyboard(
+        &self,
+        _state: &mut MouseInteraction,
+        event: keyboard::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> (Status, Option<control::Message>) {
+        use control::Message;
+
+        let keyboard::Event::KeyReleased {
+            key,
+            modified_key,
+            physical_key,
+            location,
+            modifiers,
+        } = event
+        else {
+            return (Status::Ignored, None);
+        };
+
+        let plot_pos = cursor
+            .position_in(bounds)
+            .map(|pos| coord::Screen::new(pos.x, pos.y));
+
+        match key.as_ref() {
+            keyboard::Key::Character("r") => (Status::Captured, Some(Message::ResetView)),
+            _ => (Status::Ignored, None),
+        }
+    }
 }
 
 impl Chart<Message> for RFPlot {
@@ -185,13 +218,15 @@ impl Chart<Message> for RFPlot {
             width: bounds.width - self.plot_area_margin,
             height: bounds.height - self.plot_area_margin,
         };
-        if let canvas::Event::Mouse(event) = event {
-            let (status, msg) = self.handle_mouse(state, event, bounds, cursor);
-            (status, msg.map(Message::from))
-        } else {
-            log::debug!("{:?}", event);
-            (Status::Ignored, None)
-        }
+        let (status, msg) = match event {
+            canvas::Event::Mouse(event) => self.handle_mouse(state, event, bounds, cursor),
+            canvas::Event::Keyboard(event) => self.handle_keyboard(state, event, bounds, cursor),
+            _ => {
+                log::debug!("{:?}", event);
+                (Status::Ignored, None)
+            }
+        };
+        (status, msg.map(Message::from))
     }
 
     fn mouse_interaction(
