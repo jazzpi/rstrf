@@ -50,10 +50,7 @@ pub struct RFPlot {
 impl RFPlot {
     pub fn new(spectrogram: Spectrogram) -> Self {
         Self {
-            controls: Controls {
-                power_bounds: spectrogram.power_bounds,
-                ..Controls::default()
-            },
+            controls: Controls::new(spectrogram.power_bounds),
             spectrogram,
             plot_area_margin: 50.0,
             satellites: Vec::new(),

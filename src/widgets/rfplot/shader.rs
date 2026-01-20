@@ -193,7 +193,7 @@ impl shader::Primitive for Primitive {
             &Uniforms {
                 x_bounds,
                 y_bounds,
-                power_bounds: self.controls.power_bounds.into(),
+                power_bounds: self.controls.power_range.into(),
                 nslices: nslices as u32,
                 nchan: nchan as u32,
             },

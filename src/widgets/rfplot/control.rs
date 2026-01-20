@@ -8,9 +8,7 @@ use glam::Vec2;
 use super::coord;
 
 const ZOOM_MIN: f32 = 0.0;
-const ZOOM_MAX: f32 = 17.0;
-const POWER_MIN: f32 = -100.0;
-const POWER_MAX: f32 = 60.0;
+const ZOOM_MAX: f32 = 8.0;
 
 const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
@@ -18,7 +16,10 @@ const ZOOM_WHEEL_SCALE: f32 = 0.2;
 pub struct Controls {
     pub zoom: Vec2,
     pub center: Vec2,
-    pub power_bounds: (f32, f32),
+    /// Possible power range
+    power_bounds: (f32, f32),
+    /// Current power range for display
+    pub power_range: (f32, f32),
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,15 @@ pub enum Message {
 }
 
 impl Controls {
+    pub fn new(power_bounds: (f32, f32)) -> Self {
+        Self {
+            zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
+            center: Vec2::new(0.5, 0.5),
+            power_bounds,
+            power_range: power_bounds,
+        }
+    }
+
     pub fn scale(&self) -> Vec2 {
         Vec2::new(
             1.0 / 2.0_f32.powf(self.zoom.x),
@@ -76,17 +86,21 @@ impl Controls {
             ),
             Self::control(
                 "Min Power",
-                slider(POWER_MIN..=POWER_MAX, self.power_bounds.0, move |power| {
-                    Message::UpdateMinPower(power)
-                })
+                slider(
+                    self.power_bounds.0..=self.power_bounds.1,
+                    self.power_bounds.0,
+                    move |power| { Message::UpdateMinPower(power) }
+                )
                 .step(0.1)
                 .width(Length::Fill)
             ),
             Self::control(
                 "Max Power",
-                slider(POWER_MIN..=POWER_MAX, self.power_bounds.1, move |power| {
-                    Message::UpdateMaxPower(power)
-                })
+                slider(
+                    self.power_bounds.0..=self.power_bounds.1,
+                    self.power_bounds.1,
+                    move |power| { Message::UpdateMaxPower(power) }
+                )
                 .step(0.1)
                 .width(Length::Fill)
             ),
@@ -131,22 +145,12 @@ impl Controls {
                 self.center.y += old_y - new_y;
             }
             Message::UpdateMinPower(min_power) => {
-                self.power_bounds.0 = min_power.min(self.power_bounds.1);
+                self.power_range.0 = min_power.min(self.power_range.1);
             }
             Message::UpdateMaxPower(max_power) => {
-                self.power_bounds.1 = max_power.max(self.power_bounds.0);
+                self.power_range.1 = max_power.max(self.power_range.0);
             }
         }
         Task::none()
-    }
-}
-
-impl Default for Controls {
-    fn default() -> Self {
-        Self {
-            zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
-            center: Vec2::new(0.5, 0.5),
-            power_bounds: (POWER_MIN, POWER_MAX),
-        }
     }
 }
