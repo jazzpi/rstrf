@@ -166,6 +166,28 @@ impl Controls {
                 self.power_range.1 = max_power.max(self.power_range.0);
             }
         }
+        self.snap_to_bounds();
         Task::none()
+    }
+
+    /// Ensure that the current view bounds are within [0, 1] in both axes.
+    fn snap_to_bounds(&mut self) {
+        let bounds = self.bounds().0;
+        let dx = if bounds.x < 0.0 {
+            -bounds.x
+        } else if bounds.x + bounds.width > 1.0 {
+            1.0 - (bounds.x + bounds.width)
+        } else {
+            0.0
+        };
+        let dy = if bounds.y < 0.0 {
+            -bounds.y
+        } else if bounds.y + bounds.height > 1.0 {
+            1.0 - (bounds.y + bounds.height)
+        } else {
+            0.0
+        };
+        self.center.0.x += dx;
+        self.center.0.y += dy;
     }
 }

@@ -60,13 +60,6 @@ pub struct RFPlot {
     crosshair: Option<data_absolute::Point>,
 }
 
-#[derive(Debug, Clone)]
-struct Signal {
-    peak: data_absolute::Point,
-    top: data_absolute::Point,
-    bottom: data_absolute::Point,
-}
-
 impl RFPlot {
     pub fn new(spectrogram: Spectrogram) -> Self {
         Self {
