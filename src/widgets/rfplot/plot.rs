@@ -8,9 +8,9 @@ use cosmic::{
     iced::{Rectangle, event::Status, keyboard, mouse},
     widget::canvas,
 };
-use find_peaks::PeakFinder;
 use itertools::{Itertools, izip};
 use ndarray::s;
+use ndarray_stats::QuantileExt;
 use plotters::prelude::*;
 use plotters_iced::Chart;
 use rstrf::{
@@ -31,7 +31,8 @@ pub enum Message {
     UpdateCrosshair(Option<plot_area::Point>),
 }
 
-const TRACK_BW: f32 = 5e3; // Hz
+// TODO: make this configurable
+const TRACK_BW: f32 = 10e3; // Hz
 
 fn clamp_line_to_plot(
     bounds: &data_absolute::Rectangle,
@@ -136,7 +137,7 @@ impl RFPlot {
                     &bounds,
                     self.track_points
                         .iter()
-                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y + TRACK_BW)),
+                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y + TRACK_BW / 2.0)),
                 )
                 .map(|v| v.into()),
                 &YELLOW,
@@ -153,7 +154,7 @@ impl RFPlot {
                     &bounds,
                     self.track_points
                         .iter()
-                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y - TRACK_BW)),
+                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y - TRACK_BW / 2.0)),
                 )
                 .map(|v| v.into()),
                 &YELLOW,
@@ -421,7 +422,8 @@ impl RFPlot {
                                 .iter()
                                 .tuple_windows()
                                 .flat_map(|(a, b)| {
-                                    let slope = (b.1 as f32 - a.1 as f32) / (b.0 as f32 - a.0 as f32);
+                                    let slope =
+                                        (b.1 as f32 - a.1 as f32) / (b.0 as f32 - a.0 as f32);
                                     (a.0..=b.0)
                                         .map(|t_idx| {
                                             let center_f =
@@ -429,24 +431,32 @@ impl RFPlot {
                                                     as usize;
                                             let f_range = center_f.saturating_sub(half_bw_idx)
                                                 ..(center_f + half_bw_idx).min(nf - 1);
-                                                log::debug!(
-                                                    "a: {:?}, b: {:?}, slope: {}, t_idx: {}, center_f: {}, f_range: {:?}",
-                                                    a, b, slope, t_idx, center_f, f_range
-                                                );
-                                            let slice =
-                                                data.slice(s![t_idx - t_range.start, f_range.clone()]);
-                                            PeakFinder::new(slice.as_slice().unwrap())
-                                                .with_min_height(5.0)
-                                                .find_peaks()
-                                                .iter()
-                                                .map(|p| {
-                                                    data_absolute::Point::new(
-                                                        t_idx as f32 / t_scale,
-                                                        ((p.middle_position() + f_range.start) as f32 / f_scale)
-                                                            - bw / 2.0,
-                                                    )
-                                                })
-                                                .collect_vec()
+                                            // This approximates the rfplot fit_trace() algorithm.
+                                            // That works on non-log data, and for some reason it
+                                            // doesn't seem to work very well with log-scale data.
+                                            let slice = data
+                                                .slice(s![t_idx - t_range.start, f_range.clone()])
+                                                .mapv(|v| 10.0_f32.powf(v / 10.0));
+
+                                            let max = slice.max().ok()?;
+                                            let sum = slice.sum() - max;
+                                            let sq_sum = slice.mapv(|v| v * v).sum() - max * max;
+                                            let mean = sum / (slice.len() as f32 - 1.0);
+                                            let std_dev = ((sq_sum / (slice.len() as f32 - 1.0))
+                                                - (mean * mean))
+                                                .sqrt();
+                                            let sigma = (max - mean) / std_dev;
+                                            // TODO: make this configurable
+                                            if sigma > 5.0 {
+                                                Some(data_absolute::Point::new(
+                                                    t_idx as f32 / t_scale,
+                                                    ((slice.argmax().ok()? + f_range.start) as f32
+                                                        / f_scale)
+                                                        - bw / 2.0,
+                                                ))
+                                            } else {
+                                                None
+                                            }
                                         })
                                         // looks dumb but without this we get ownership issues for
                                         // `slope` for some reason

@@ -33,7 +33,6 @@ sgp4 = "2.3.0"
 ndarray-linalg = { version = "0.18.1", features = ["openblas-system"] }
 itertools = "0.14.0"
 copy-range = "0.1.1"
-find_peaks = "0.1.5"
 ndarray-stats = "0.7.0"
 
 [dependencies.libcosmic]
