@@ -191,8 +191,8 @@ impl shader::Primitive for Primitive {
         pipeline.update(
             queue,
             &Uniforms {
-                x_bounds: (bounds.x.start, bounds.x.end).into(),
-                y_bounds: (bounds.y.start, bounds.y.end).into(),
+                x_bounds: (bounds.0.x, bounds.0.x + bounds.0.width).into(),
+                y_bounds: (bounds.0.y, bounds.0.y + bounds.0.height).into(),
                 power_bounds: self.controls.power_range().into(),
                 nslices: nslices as u32,
                 nchan: nchan as u32,

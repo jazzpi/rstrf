@@ -7,6 +7,8 @@ use ndarray::{Array2, ArrayView2, Axis};
 use ndarray_stats::QuantileExt;
 use tokio::io::AsyncReadExt;
 
+use crate::coord::data_absolute;
+
 /// Loads a spectrogram from the given file paths
 pub async fn load(paths: &[std::path::PathBuf]) -> Result<Spectrogram> {
     if paths.is_empty() {
@@ -153,6 +155,13 @@ impl Spectrogram {
 
     pub fn end_time(&self) -> DateTime<Utc> {
         self.start_time + self.length()
+    }
+
+    pub fn bounds(&self) -> data_absolute::Rectangle {
+        data_absolute::Rectangle::new(
+            data_absolute::Point::new(0.0, -self.bw / 2.0),
+            data_absolute::Size::new(self.length().as_seconds_f32(), self.bw),
+        )
     }
 }
 

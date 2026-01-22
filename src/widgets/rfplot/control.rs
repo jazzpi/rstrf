@@ -4,10 +4,7 @@ use cosmic::{
     widget::{slider, text},
 };
 use glam::Vec2;
-
-use crate::widgets::rfplot::coord::{Bounds, Coord};
-
-use super::coord;
+use rstrf::coord::{PlotAreaToDataNormalized, data_normalized, plot_area};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 8.0;
@@ -16,8 +13,8 @@ const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Controls {
-    zoom: Vec2,
-    center: coord::DataNormalized,
+    log_scale: Vec2,
+    center: data_normalized::Point,
     /// Possible power range
     power_bounds: (f32, f32),
     /// Current power range for display
@@ -28,10 +25,10 @@ pub struct Controls {
 pub enum Message {
     UpdateZoomX(f32),
     UpdateZoomY(f32),
-    PanningDelta(coord::PlotArea),
-    ZoomDelta(coord::PlotArea, f32),
-    ZoomDeltaX(coord::PlotArea, f32),
-    ZoomDeltaY(coord::PlotArea, f32),
+    PanningDelta(plot_area::Vector),
+    ZoomDelta(plot_area::Point, f32),
+    ZoomDeltaX(plot_area::Point, f32),
+    ZoomDeltaY(plot_area::Point, f32),
     ResetView,
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
@@ -40,30 +37,33 @@ pub enum Message {
 impl Controls {
     pub fn new(power_bounds: (f32, f32)) -> Self {
         Self {
-            zoom: Vec2::new(ZOOM_MIN, ZOOM_MIN),
-            center: coord::DataNormalized::new(0.5, 0.5),
+            log_scale: Vec2::new(ZOOM_MIN, ZOOM_MIN),
+            center: data_normalized::Point::new(0.5, 0.5),
             power_bounds,
             power_range: power_bounds,
         }
     }
 
-    pub fn scale(&self) -> Vec2 {
-        Vec2::new(
-            1.0 / 2.0_f32.powf(self.zoom.x),
-            1.0 / 2.0_f32.powf(self.zoom.y),
+    pub fn size(&self) -> data_normalized::Size {
+        data_normalized::Size::new(
+            1.0 / 2.0_f32.powf(self.log_scale.x),
+            1.0 / 2.0_f32.powf(self.log_scale.y),
         )
     }
 
-    pub fn bounds(&self) -> Bounds {
-        let half_scale = self.scale() / 2.0;
-        Bounds::new(
-            (self.center.0.x - half_scale.x)..(self.center.0.x + half_scale.x),
-            (self.center.0.y - half_scale.y)..(self.center.0.y + half_scale.y),
+    pub fn bounds(&self) -> data_normalized::Rectangle {
+        let size = self.size();
+        data_normalized::Rectangle::new(
+            data_normalized::Point::new(
+                self.center.0.x - size.0.width / 2.0,
+                self.center.0.y - size.0.height / 2.0,
+            ),
+            size,
         )
     }
 
-    pub fn center(&self) -> coord::DataNormalized {
-        self.center
+    pub fn to_data_normalized(&self) -> PlotAreaToDataNormalized {
+        PlotAreaToDataNormalized::new(&self.bounds())
     }
 
     pub fn power_range(&self) -> (f32, f32) {
@@ -81,7 +81,7 @@ impl Controls {
         iw::row![
             Self::control(
                 "Zoom Time",
-                slider(ZOOM_MIN..=ZOOM_MAX, self.zoom.x, move |zoom| {
+                slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.x, move |zoom| {
                     Message::UpdateZoomX(zoom)
                 })
                 .step(0.01)
@@ -89,7 +89,7 @@ impl Controls {
             ),
             Self::control(
                 "Zoom Freq",
-                slider(ZOOM_MIN..=ZOOM_MAX, self.zoom.y, move |zoom| {
+                slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.y, move |zoom| {
                     Message::UpdateZoomY(zoom)
                 })
                 .step(0.01)
@@ -123,41 +123,41 @@ impl Controls {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::UpdateZoomX(zoom_x) => {
-                self.zoom.x = zoom_x;
+                self.log_scale.x = zoom_x;
             }
             Message::UpdateZoomY(zoom_y) => {
-                self.zoom.y = zoom_y;
+                self.log_scale.y = zoom_y;
             }
             Message::PanningDelta(delta) => {
-                self.center -= coord::DataNormalized(delta.0 * self.scale());
+                self.center -= delta * self.to_data_normalized();
             }
             Message::ZoomDelta(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
 
-                let old_data = plot_pos.data_normalized(&self);
-                let prev_zoom = self.zoom;
-                self.zoom = (prev_zoom + Vec2::splat(delta))
+                let old_data = plot_pos * self.to_data_normalized();
+                let prev_zoom = self.log_scale;
+                self.log_scale = (prev_zoom + Vec2::splat(delta))
                     .clamp(Vec2::splat(ZOOM_MIN), Vec2::splat(ZOOM_MAX));
-                let new_data = plot_pos.data_normalized(&self);
+                let new_data = plot_pos * self.to_data_normalized();
                 self.center += old_data - new_data;
             }
             Message::ZoomDeltaX(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
-                let old_x = plot_pos.data_normalized(&self).0.x;
-                self.zoom.x = (self.zoom.x + delta).clamp(ZOOM_MIN, ZOOM_MAX);
-                let new_x = plot_pos.data_normalized(&self).0.x;
+                let old_x = (plot_pos * self.to_data_normalized()).0.x;
+                self.log_scale.x = (self.log_scale.x + delta).clamp(ZOOM_MIN, ZOOM_MAX);
+                let new_x = (plot_pos * self.to_data_normalized()).0.x;
                 self.center.0.x += old_x - new_x;
             }
             Message::ZoomDeltaY(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
-                let old_y = plot_pos.data_normalized(&self).0.y;
-                self.zoom.y = (self.zoom.y + delta).clamp(ZOOM_MIN, ZOOM_MAX);
-                let new_y = plot_pos.data_normalized(&self).0.y;
+                let old_y = (plot_pos * self.to_data_normalized()).0.y;
+                self.log_scale.y = (self.log_scale.y + delta).clamp(ZOOM_MIN, ZOOM_MAX);
+                let new_y = (plot_pos * self.to_data_normalized()).0.y;
                 self.center.0.y += old_y - new_y;
             }
             Message::ResetView => {
-                self.zoom = Vec2::new(ZOOM_MIN, ZOOM_MIN);
-                self.center = coord::DataNormalized::new(0.5, 0.5);
+                self.log_scale = Vec2::new(ZOOM_MIN, ZOOM_MIN);
+                self.center = data_normalized::Point::new(0.5, 0.5);
             }
             Message::UpdateMinPower(min_power) => {
                 self.power_range.0 = min_power.min(self.power_range.1);

@@ -2,41 +2,44 @@
 //! itself (like axes and overlays). It is also responsible for the user interaction with the plot
 //! (like panning/zooming).
 
+use copy_range::CopyRange;
 use cosmic::{
     Task,
     iced::{Rectangle, event::Status, keyboard, mouse},
     widget::canvas,
 };
 use find_peaks::PeakFinder;
-use glam::Vec2;
 use itertools::{Itertools, izip};
 use ndarray::s;
 use plotters::prelude::*;
 use plotters_iced::Chart;
-use rstrf::util::to_index;
-
-use super::{
-    MouseInteraction, RFPlot, control,
-    coord::{self, Coord, clip_line},
+use rstrf::{
+    coord::{
+        DataNormalizedToDataAbsolute, ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, screen,
+    },
+    util::{clip_line, to_index},
 };
+
+use super::{MouseInteraction, RFPlot, control};
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    AddTrackPoint(coord::DataAbsolute),
+    AddTrackPoint(data_absolute::Point),
     FindSignals,
-    FoundSignals(Vec<coord::DataAbsolute>),
+    FoundSignals(Vec<data_absolute::Point>),
 }
 
 const TRACK_BW: f32 = 5e3; // Hz
 
 fn clamp_line_to_plot(
-    bounds: &coord::Bounds,
-    points: impl Iterator<Item = Vec2>,
-) -> impl Iterator<Item = Vec2> {
+    bounds: &data_absolute::Rectangle,
+    points: impl Iterator<Item = data_absolute::Point>,
+) -> impl Iterator<Item = data_absolute::Point> {
     points
         .tuple_windows()
-        .filter_map(|(a, b)| clip_line(bounds, a, b))
+        .filter_map(|(a, b)| clip_line(&bounds.0, a.0, b.0))
         .flat_map(|(a, b)| vec![a, b])
+        .map(|p| data_absolute::Point(p))
 }
 
 impl RFPlot {
@@ -45,15 +48,14 @@ impl RFPlot {
         _state: &MouseInteraction,
         mut chart: ChartBuilder<DB>,
     ) -> Result<(), String> {
-        let bounds = (self.controls.bounds() - Vec2::new(0.0, 0.5))
-            * Vec2::new(
-                self.spectrogram.length().as_seconds_f32(),
-                self.spectrogram.bw,
-            );
+        let bounds =
+            self.controls.bounds() * DataNormalizedToDataAbsolute::new(&self.spectrogram.bounds());
+        let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
+        let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
         let mut chart = chart
             .x_label_area_size(self.plot_area_margin)
             .y_label_area_size(self.plot_area_margin)
-            .build_cartesian_2d(bounds.x.into_std(), bounds.y.into_std())
+            .build_cartesian_2d(x.into_std(), y.into_std())
             .map_err(|e| format!("Failed to build chart: {:?}", e))?;
 
         chart
@@ -98,14 +100,14 @@ impl RFPlot {
 
                 let first_visible =
                     izip!(time.iter(), freq.iter(), za.iter()).position(|(&t, &f, &za)| {
-                        bounds.x.contains(&(t as f32))
-                            && bounds.y.contains(&((f - sat.tx_freq) as f32))
+                        x.contains(&(t as f32))
+                            && y.contains(&((f - sat.tx_freq) as f32))
                             && za < std::f64::consts::FRAC_PI_2
                     });
                 let Some(first_visible) = first_visible else {
                     continue;
                 };
-                let first_time = (time[first_visible] as f32).max(bounds.x.start);
+                let first_time = (time[first_visible] as f32).max(x.start);
                 let first_freq = (freq[first_visible] - sat.tx_freq) as f32;
                 chart
                     .draw_series(vec![Text::new(
@@ -119,10 +121,9 @@ impl RFPlot {
 
         chart
             .draw_series(self.track_points.iter().filter_map(|pos| {
-                if bounds.contains(&pos.0) {
-                    Some(Circle::new(pos.0.into(), 5, YELLOW.filled()))
+                if bounds.contains(*pos) {
+                    Some(Circle::new(pos.into(), 5, YELLOW.filled()))
                 } else {
-                    log::debug!("Out of bounds: {:?}, {:?}", pos, bounds);
                     None
                 }
             }))
@@ -133,7 +134,7 @@ impl RFPlot {
                     &bounds,
                     self.track_points
                         .iter()
-                        .map(|pos| Vec2::new(pos.0.x, pos.0.y + TRACK_BW)),
+                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y + TRACK_BW)),
                 )
                 .map(|v| v.into()),
                 &YELLOW,
@@ -150,7 +151,7 @@ impl RFPlot {
                     &bounds,
                     self.track_points
                         .iter()
-                        .map(|pos| Vec2::new(pos.0.x, pos.0.y - TRACK_BW)),
+                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y - TRACK_BW)),
                 )
                 .map(|v| v.into()),
                 &YELLOW,
@@ -164,10 +165,9 @@ impl RFPlot {
 
         chart
             .draw_series(self.signals.iter().filter_map(|pos| {
-                if bounds.contains(&pos.0) {
-                    Some(Circle::new(pos.0.into(), 5, WHITE.filled()))
+                if bounds.contains(*pos) {
+                    Some(Circle::new(pos.into(), 5, WHITE.filled()))
                 } else {
-                    log::debug!("Out of bounds: {:?}, {:?}", pos, bounds);
                     None
                 }
             }))
@@ -186,7 +186,8 @@ impl RFPlot {
         let Some(cursor_pos) = cursor.position() else {
             return (Status::Ignored, None);
         };
-        let pos = coord::Screen(Vec2::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y));
+        let pos = screen::Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
+        let plot_pos = pos * ScreenToPlotArea::new(&screen::Size(bounds.size()));
         if let mouse::Event::WheelScrolled { delta } = event {
             let delta = match delta {
                 mouse::ScrollDelta::Lines { x: _, y } => y,
@@ -204,7 +205,6 @@ impl RFPlot {
                 width: self.plot_area_margin,
                 height: bounds.height,
             };
-            let plot_pos = pos.plot(&bounds);
             if cursor.is_over(bounds) {
                 return (
                     Status::Captured,
@@ -229,7 +229,7 @@ impl RFPlot {
             MouseInteraction::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     if cursor.is_over(bounds) {
-                        *state = MouseInteraction::Panning(pos.plot(&bounds));
+                        *state = MouseInteraction::Panning(plot_pos);
                         return (Status::Captured, None);
                     }
                 }
@@ -240,7 +240,6 @@ impl RFPlot {
                     *state = MouseInteraction::Idle;
                 }
                 mouse::Event::CursorMoved { position: _ } => {
-                    let plot_pos = pos.plot(&bounds);
                     let delta = plot_pos - *prev_pos;
                     *state = MouseInteraction::Panning(plot_pos);
                     return (Status::Captured, Some(CMessage::PanningDelta(delta).into()));
@@ -270,22 +269,24 @@ impl RFPlot {
             return (Status::Ignored, None);
         };
 
-        let plot_pos = cursor
+        let pos = cursor
             .position_in(bounds)
-            .map(|pos| coord::Screen::new(pos.x, pos.y));
+            .map(|pos| screen::Point::new(pos.x, pos.y));
 
-        match (key.as_ref(), plot_pos) {
+        match (key.as_ref(), pos) {
             (keyboard::Key::Character("r"), _) => {
                 (Status::Captured, Some(control::Message::ResetView.into()))
             }
-            (keyboard::Key::Character("s"), Some(plot_pos)) => (
+            (keyboard::Key::Character("s"), Some(pos)) => (
                 Status::Captured,
                 Some(
-                    Message::AddTrackPoint(plot_pos.data_absolute(
-                        &bounds,
-                        &self.controls,
-                        &self.spectrogram,
-                    ))
+                    Message::AddTrackPoint(
+                        pos * ScreenToDataAbsolute::new(
+                            &screen::Size(bounds.size()),
+                            &self.controls.bounds(),
+                            &self.spectrogram.bounds(),
+                        ),
+                    )
                     .into(),
                 ),
             ),
@@ -360,7 +361,7 @@ impl RFPlot {
                                                 .find_peaks()
                                                 .iter()
                                                 .map(|p| {
-                                                    coord::DataAbsolute::new(
+                                                    data_absolute::Point::new(
                                                         t_idx as f32 / t_scale,
                                                         ((p.middle_position() + f_range.start) as f32 / f_scale)
                                                             - bw / 2.0,

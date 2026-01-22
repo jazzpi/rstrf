@@ -3,15 +3,17 @@ use cosmic::{
     iced::{Length, Padding, widget as iw},
     widget::container,
 };
-use glam::Vec2;
 use plotters_iced::ChartWidget;
-use rstrf::{orbit, spectrogram::Spectrogram};
+use rstrf::{
+    coord::{data_absolute, plot_area},
+    orbit,
+    spectrogram::Spectrogram,
+};
 
 use crate::widgets::rfplot::control::Controls;
 
 mod colormap;
 mod control;
-mod coord;
 mod plot;
 mod shader;
 
@@ -37,7 +39,7 @@ impl From<plot::Message> for Message {
 
 pub enum MouseInteraction {
     Idle,
-    Panning(coord::PlotArea),
+    Panning(plot_area::Point),
 }
 
 impl Default for MouseInteraction {
@@ -53,8 +55,8 @@ pub struct RFPlot {
     plot_area_margin: f32,
     satellites: Vec<orbit::Satellite>,
     satellite_predictions: Option<orbit::Predictions>,
-    track_points: Vec<coord::DataAbsolute>,
-    signals: Vec<coord::DataAbsolute>,
+    track_points: Vec<data_absolute::Point>,
+    signals: Vec<data_absolute::Point>,
 }
 
 impl RFPlot {
