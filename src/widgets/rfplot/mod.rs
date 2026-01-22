@@ -57,6 +57,14 @@ pub struct RFPlot {
     satellite_predictions: Option<orbit::Predictions>,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
+    crosshair: Option<data_absolute::Point>,
+}
+
+#[derive(Debug, Clone)]
+struct Signal {
+    peak: data_absolute::Point,
+    top: data_absolute::Point,
+    bottom: data_absolute::Point,
 }
 
 impl RFPlot {
@@ -69,6 +77,7 @@ impl RFPlot {
             satellite_predictions: None,
             track_points: Vec::new(),
             signals: Vec::new(),
+            crosshair: None,
         }
     }
 

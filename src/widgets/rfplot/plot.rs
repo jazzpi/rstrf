@@ -15,7 +15,8 @@ use plotters::prelude::*;
 use plotters_iced::Chart;
 use rstrf::{
     coord::{
-        DataNormalizedToDataAbsolute, ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, screen,
+        DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute, ScreenToDataAbsolute,
+        ScreenToPlotArea, data_absolute, plot_area, screen,
     },
     util::{clip_line, to_index},
 };
@@ -27,6 +28,7 @@ pub enum Message {
     AddTrackPoint(data_absolute::Point),
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
+    UpdateCrosshair(Option<plot_area::Point>),
 }
 
 const TRACK_BW: f32 = 5e3; // Hz
@@ -172,6 +174,70 @@ impl RFPlot {
                 }
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
+        if let Some(crosshair) = &self.crosshair {
+            if bounds.contains(*crosshair) {
+                let style = ShapeStyle {
+                    color: WHITE.mix(0.5),
+                    filled: false,
+                    stroke_width: 1,
+                };
+                // Vertical line
+                chart
+                    .draw_series(LineSeries::new(
+                        vec![
+                            data_absolute::Point::new(crosshair.0.x, bounds.0.y),
+                            data_absolute::Point::new(crosshair.0.x, bounds.0.y + bounds.0.height),
+                        ]
+                        .into_iter()
+                        .map(|p| p.into()),
+                        style.clone(),
+                    ))
+                    .map_err(|e| format!("Could not draw crosshair vertical line: {:?}", e))?;
+                // Horizontal line
+                chart
+                    .draw_series(LineSeries::new(
+                        vec![
+                            data_absolute::Point::new(bounds.0.x, crosshair.0.y),
+                            data_absolute::Point::new(bounds.0.x + bounds.0.width, crosshair.0.y),
+                        ]
+                        .into_iter()
+                        .map(|p| p.into()),
+                        style,
+                    ))
+                    .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
+                let power = self.spectrogram.data()[(
+                    to_index(
+                        crosshair.0.x
+                            * (self.spectrogram.data().dim().0 as f32
+                                / self.spectrogram.length().as_seconds_f32()),
+                        self.spectrogram.data().dim().0,
+                    ),
+                    to_index(
+                        (crosshair.0.y + self.spectrogram.bw / 2.0)
+                            * (self.spectrogram.data().dim().1 as f32 / self.spectrogram.bw),
+                        self.spectrogram.data().dim().1,
+                    ),
+                )];
+                let crosshair_pos = plot_area::Point::new(0.01, 0.99)
+                    * PlotAreaToDataAbsolute::new(
+                        &self.controls.bounds(),
+                        &self.spectrogram.bounds(),
+                    );
+                chart
+                    .draw_series(vec![Text::new(
+                        format!(
+                            "t = {:.01} s\nf = {:.01} kHz\nP = {:.01} dB",
+                            crosshair.0.x,
+                            crosshair.0.y / 1e3,
+                            power
+                        ),
+                        crosshair_pos.into(),
+                        ("sans-serif", 12).into_font().color(&WHITE),
+                    )])
+                    .expect("Could not draw crosshair label");
+            }
+        }
+
         Ok(())
     }
 
@@ -231,6 +297,19 @@ impl RFPlot {
                     if cursor.is_over(bounds) {
                         *state = MouseInteraction::Panning(plot_pos);
                         return (Status::Captured, None);
+                    }
+                }
+                mouse::Event::CursorMoved { position: _ } => {
+                    if cursor.is_over(bounds) {
+                        return (
+                            Status::Captured,
+                            Some(Message::UpdateCrosshair(Some(plot_pos)).into()),
+                        );
+                    } else {
+                        return (
+                            Status::Captured,
+                            Some(Message::UpdateCrosshair(None).into()),
+                        );
                     }
                 }
                 _ => {}
@@ -386,6 +465,15 @@ impl RFPlot {
             }
             Message::FoundSignals(signals) => {
                 self.signals = signals;
+                Task::none()
+            }
+            Message::UpdateCrosshair(plot_pos) => {
+                self.crosshair = plot_pos.map(|p| {
+                    p * PlotAreaToDataAbsolute::new(
+                        &self.controls.bounds(),
+                        &self.spectrogram.bounds(),
+                    )
+                });
                 Task::none()
             }
         }
