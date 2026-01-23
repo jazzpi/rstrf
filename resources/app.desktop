@@ -2,7 +2,7 @@
 Name=rstrf
 Comment=strf but rewrite it in rust
 Type=Application
-Icon=com.github.jazzpi.rstrf
+Icon=de.jazzpi.rstrf
 Exec=rstrf %F
 Terminal=false
 StartupNotify=true
