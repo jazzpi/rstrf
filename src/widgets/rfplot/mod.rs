@@ -1,9 +1,8 @@
-use cosmic::{
-    Element, Task,
-    iced::{Length, Padding, widget as iw},
-    widget::container,
+use iced::{
+    Element, Length, Padding, Task,
+    widget::{self, container},
 };
-use plotters_iced::ChartWidget;
+use plotters_iced2::ChartWidget;
 use rstrf::{
     coord::{data_absolute, plot_area},
     orbit,
@@ -86,7 +85,7 @@ impl RFPlot {
                 let satellites = self.satellites.clone();
                 let start_time = self.spectrogram.start_time;
                 let length_s = self.spectrogram.length().as_seconds_f64();
-                cosmic::task::future(async move {
+                Task::future(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         orbit::predict_satellites(satellites, start_time, length_s)
                     })
@@ -114,23 +113,26 @@ impl RFPlot {
     pub fn view(&self) -> Element<'_, Message> {
         let controls = self.controls.view().map(Message::from);
 
-        let spectrogram: Element<'_, Message> =
-            container(iw::shader(self).width(Length::Fill).height(Length::Fill))
-                .padding(Padding {
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: self.plot_area_margin,
-                    left: self.plot_area_margin,
-                })
-                .into();
+        let spectrogram: Element<'_, Message> = container(
+            widget::shader(self)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .padding(Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: self.plot_area_margin,
+            left: self.plot_area_margin,
+        })
+        .into();
         let plot_overlay: Element<'_, Message> = ChartWidget::new(self)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
 
-        let plot_area: Element<'_, Message> = iw::stack![spectrogram, plot_overlay,].into();
+        let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay,].into();
 
-        iw::column![plot_area, controls]
+        widget::column![plot_area, controls]
             .padding(10)
             .spacing(10)
             .width(Length::Fill)

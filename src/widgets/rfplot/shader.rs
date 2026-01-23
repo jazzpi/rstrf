@@ -1,11 +1,11 @@
 //! This module contains the WGPU shader implementation for the RFPlot widget. The shader is
 //! responsible for rendering the spectrogram itself.
-use cosmic::iced::{
+use glam::Vec2;
+use iced::{
     Rectangle, mouse,
     wgpu::{self, util::DeviceExt},
     widget::shader,
 };
-use glam::Vec2;
 use rstrf::spectrogram::Spectrogram;
 
 use super::{Controls, Message, MouseInteraction, RFPlot};
@@ -20,27 +20,28 @@ pub struct Uniforms {
     nchan: u32,
 }
 
-struct Pipeline {
+pub struct Pipeline {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+    spectrogram_bind_group: Option<wgpu::BindGroup>,
 }
 
-impl Pipeline {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, spec: Spectrogram) -> Self {
+impl shader::Pipeline for Pipeline {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("FragmentShaderPipeline shader"),
+            label: Some("spectrogram.shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
                 "shader.wgsl"
             ))),
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("FragmentShaderPipeline"),
+            label: Some("spectrogram.pipeline"),
             layout: None,
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
@@ -49,7 +50,7 @@ impl Pipeline {
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
@@ -62,28 +63,21 @@ impl Pipeline {
         });
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shader_quad uniform buffer"),
+            label: Some("spectrogram.buffer.uniform"),
             size: std::mem::size_of::<Uniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let spec_data = spec.data();
-        let spec_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("spectrogram buffer"),
-            contents: bytemuck::cast_slice(spec_data.as_slice().unwrap()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
         let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("colormap buffer"),
+            label: Some("spectrogram.buffer.colormap"),
             contents: bytemuck::cast_slice(&super::colormap::MAGMA),
             usage: wgpu::BufferUsages::STORAGE,
         });
 
         let uniform_bind_group_layout = pipeline.get_bind_group_layout(0);
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shader_quad uniform bind group"),
+            label: Some("spectrogram.bind_group.static_size"),
             layout: &uniform_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -92,10 +86,6 @@ impl Pipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: spec_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
                     resource: colormap_buffer.as_entire_binding(),
                 },
             ],
@@ -105,23 +95,50 @@ impl Pipeline {
             pipeline,
             uniform_buffer,
             uniform_bind_group,
+            spectrogram_bind_group: None,
         }
     }
+}
 
-    fn update(&mut self, queue: &wgpu::Queue, uniforms: &Uniforms) {
+impl Pipeline {
+    fn update_uniforms(&mut self, queue: &wgpu::Queue, uniforms: &Uniforms) {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(uniforms));
+    }
+
+    fn set_spectrogram(&mut self, device: &wgpu::Device, spec: &Spectrogram) {
+        let spec_data = spec.data();
+        let spec_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("spectrogram.buffer.spectrogram"),
+            contents: bytemuck::cast_slice(spec_data.as_slice().unwrap()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let spectrogram_bind_group_layout = self.pipeline.get_bind_group_layout(1);
+        let spectrogram_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("spectrogram.bind_group.spectrogram"),
+            layout: &spectrogram_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: spec_buffer.as_entire_binding(),
+            }],
+        });
+        self.spectrogram_bind_group = Some(spectrogram_bind_group);
     }
 
     fn render(
         &self,
-        target: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
-        viewport: Rectangle<u32>,
+        target: &wgpu::TextureView,
+        clip_bounds: &Rectangle<u32>,
     ) {
+        let Some(spectrogram_bind_group) = &self.spectrogram_bind_group else {
+            return;
+        };
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("fill color test"),
+            label: Some("spectrogram.pipeline.pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -133,16 +150,18 @@ impl Pipeline {
             occlusion_query_set: None,
         });
 
-        pass.set_pipeline(&self.pipeline);
         pass.set_viewport(
-            viewport.x as f32,
-            viewport.y as f32,
-            viewport.width as f32,
-            viewport.height as f32,
+            clip_bounds.x as f32,
+            clip_bounds.y as f32,
+            clip_bounds.width as f32,
+            clip_bounds.height as f32,
             0.0,
             1.0,
         );
+
+        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+        pass.set_bind_group(1, spectrogram_bind_group, &[]);
 
         pass.draw(0..6, 0..1);
     }
@@ -164,51 +183,42 @@ impl Primitive {
 }
 
 impl shader::Primitive for Primitive {
+    type Pipeline = Pipeline;
+
     fn prepare(
         &self,
-        device: &cosmic::iced::wgpu::Device,
-        queue: &cosmic::iced::wgpu::Queue,
-        format: cosmic::iced::wgpu::TextureFormat,
-        storage: &mut shader::Storage,
+        pipeline: &mut Self::Pipeline,
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
         _bounds: &Rectangle,
         _viewport: &shader::Viewport,
     ) {
-        if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(
-                device,
-                format,
-                self.spectrogram.clone(), // TODO
-            ));
+        if pipeline.spectrogram_bind_group.is_none() {
+            pipeline.set_spectrogram(device, &self.spectrogram);
         }
-
-        let pipeline = storage.get_mut::<Pipeline>().unwrap();
-
-        let spec_data = self.spectrogram.data();
-        let (nslices, nchan) = spec_data.dim();
 
         let bounds = self.controls.bounds();
 
-        pipeline.update(
+        pipeline.update_uniforms(
             queue,
             &Uniforms {
                 x_bounds: (bounds.0.x, bounds.0.x + bounds.0.width).into(),
                 y_bounds: (bounds.0.y, bounds.0.y + bounds.0.height).into(),
                 power_bounds: self.controls.power_range().into(),
-                nslices: nslices as u32,
-                nchan: nchan as u32,
+                nslices: self.spectrogram.nslices as u32,
+                nchan: self.spectrogram.nchan as u32,
             },
         );
     }
 
     fn render(
         &self,
+        pipeline: &Self::Pipeline,
         encoder: &mut wgpu::CommandEncoder,
-        storage: &shader::Storage,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        let pipeline = storage.get::<Pipeline>().unwrap();
-        pipeline.render(target, encoder, *clip_bounds);
+        pipeline.render(encoder, target, clip_bounds);
     }
 }
 

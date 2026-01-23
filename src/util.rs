@@ -1,4 +1,4 @@
-use cosmic::iced::{Point, Rectangle};
+use iced::{Point, Rectangle};
 use itertools::izip;
 use ndarray::Array1;
 

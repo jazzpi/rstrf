@@ -1,6 +1,5 @@
 //! This module contains newtype wrappers for the iced Point/Vector types. The wrappers allow
 //! type-stated transformations between different coordinate systems used in RFPlot.
-use cosmic::iced;
 use glam::{Mat4, Quat, Vec3, Vec4};
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
@@ -8,7 +7,6 @@ use duplicate::{duplicate, duplicate_item};
 
 #[duplicate_item(name; [screen]; [plot_area]; [data_normalized]; [data_absolute])]
 pub mod name {
-    use cosmic::iced;
     use duplicate::duplicate_item;
     #[derive(Debug, Clone, Copy)]
     pub struct Point(pub iced::Point);
@@ -95,7 +93,6 @@ duplicate! {
         }
     }
 
-    // libcosmic's iced doesn't have AddAssign/SubAssign impls
     #[duplicate_item(
         trait_name fn_name;
         [AddAssign] [add_assign];
@@ -103,10 +100,12 @@ duplicate! {
     )]
     impl trait_name<name::Vector> for name::Point {
         fn fn_name(&mut self, rhs: name::Vector) {
-            self.0.x.fn_name(rhs.0.x);
-            self.0.y.fn_name(rhs.0.y);
+            self.0.fn_name(rhs.0);
         }
     }
+
+    // TODO: Now that we don't use libcosmic's iced anymore, we should be able to add a few more
+    // trait impls
 }
 
 #[duplicate_item(

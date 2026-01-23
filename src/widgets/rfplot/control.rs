@@ -1,9 +1,8 @@
-use cosmic::{
-    Element, Task,
-    iced::{Length, widget as iw},
-    widget::{slider, text},
-};
 use glam::Vec2;
+use iced::{
+    Element, Length, Task,
+    widget::{self, slider, text},
+};
 use rstrf::coord::{PlotAreaToDataNormalized, data_normalized, plot_area};
 
 const ZOOM_MIN: f32 = 0.0;
@@ -74,11 +73,11 @@ impl Controls {
         label: &'static str,
         control: impl Into<Element<'a, Message>>,
     ) -> Element<'a, Message> {
-        iw::row![text(label), control.into()].spacing(10).into()
+        widget::row![text(label), control.into()].spacing(10).into()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        iw::row![
+        widget::row![
             Self::control(
                 "Zoom Time",
                 slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.x, move |zoom| {

@@ -7,8 +7,8 @@ struct Uniforms {
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> spec_data: array<f32>;
-@group(0) @binding(2) var<storage, read> color_map: array<vec4f>;
+@group(0) @binding(1) var<storage, read> color_map: array<vec4f>;
+@group(1) @binding(0) var<storage, read> spec_data: array<f32>;
 
 struct VertexIn {
     @builtin(vertex_index) vertex_index: u32,

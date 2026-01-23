@@ -3,16 +3,12 @@
 //! (like panning/zooming).
 
 use copy_range::CopyRange;
-use cosmic::{
-    Task,
-    iced::{Rectangle, event::Status, keyboard, mouse},
-    widget::canvas,
-};
+use iced::{Rectangle, Task, event::Status, keyboard, mouse, widget::canvas};
 use itertools::{Itertools, izip};
 use ndarray::s;
 use ndarray_stats::QuantileExt;
 use plotters::prelude::*;
-use plotters_iced::Chart;
+use plotters_iced2::Chart;
 use rstrf::{
     coord::{
         DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute, ScreenToDataAbsolute,
@@ -245,7 +241,7 @@ impl RFPlot {
     fn handle_mouse(
         &self,
         state: &mut MouseInteraction,
-        event: mouse::Event,
+        event: &mouse::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
@@ -275,19 +271,19 @@ impl RFPlot {
             if cursor.is_over(bounds) {
                 return (
                     Status::Captured,
-                    Some(CMessage::ZoomDelta(plot_pos, delta).into()),
+                    Some(CMessage::ZoomDelta(plot_pos, *delta).into()),
                 );
             } else if cursor.is_over(y_axis) {
                 // Zooming over y axis
                 return (
                     Status::Captured,
-                    Some(CMessage::ZoomDeltaY(plot_pos, delta).into()),
+                    Some(CMessage::ZoomDeltaY(plot_pos, *delta).into()),
                 );
             } else if cursor.is_over(x_axis) {
                 // Zooming over x axis
                 return (
                     Status::Captured,
-                    Some(CMessage::ZoomDeltaX(plot_pos, delta).into()),
+                    Some(CMessage::ZoomDeltaX(plot_pos, *delta).into()),
                 );
             }
         }
@@ -334,7 +330,7 @@ impl RFPlot {
     fn handle_keyboard(
         &self,
         _state: &mut MouseInteraction,
-        event: keyboard::Event,
+        event: &keyboard::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
@@ -416,7 +412,7 @@ impl RFPlot {
                     let t_range =
                         track_points.first().unwrap().0..(track_points.last().unwrap().0 + 1);
                     let data = data.slice(s![t_range.clone(), ..]).to_owned();
-                    cosmic::task::future(async move {
+                    Task::future(async move {
                         tokio::task::spawn_blocking(move || {
                             let peaks = track_points
                                 .iter()
@@ -503,7 +499,7 @@ impl Chart<super::Message> for RFPlot {
     fn update(
         &self,
         state: &mut Self::State,
-        event: canvas::Event,
+        event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
