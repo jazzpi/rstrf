@@ -5,6 +5,7 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 description = "strf but rewrite it in rust"
 repository = "https://github.com/jazzpi/rstrf"
+default-run = "rstrf"
 
 [dependencies]
 anyhow = "1.0"
@@ -36,6 +37,7 @@ ndarray-stats = "0.7.0"
 iced = { version = "0.14.0", features = ["canvas", "tokio"] }
 # TODO: Switch to upstream version when https://github.com/GyulyVGC/plotters-iced2/pull/11 is merged
 plotters-iced2 = { git = "https://github.com/jazzpi/plotters-iced", version = "0.14.0" }
+scirs2-ndimage = "0.1.3"
 
 [profile.release-with-debug]
 inherits = "release"

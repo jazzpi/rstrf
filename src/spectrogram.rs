@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
 use ndarray::{Array2, ArrayView2, Axis};
 use ndarray_stats::QuantileExt;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::coord::data_absolute;
 
@@ -24,6 +24,49 @@ pub async fn load(paths: &[std::path::PathBuf]) -> Result<Spectrogram> {
     .await?;
 
     Spectrogram::concatenate(&spectrograms)
+}
+
+/// Writes a spectrogram to the given file path
+pub async fn save(spectrogram: &Spectrogram, path: &std::path::Path) -> Result<()> {
+    let mut file = tokio::fs::File::create(path).await?;
+    let mut writer = tokio::io::BufWriter::new(&mut file);
+
+    let header = |nslice: usize| {
+        let mut start = (spectrogram.start_time
+            + Duration::milliseconds((spectrogram.slice_length * 1000.0) as i64 * nslice as i64))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        // Remove trailing Z for compatibility with STRF
+        start.pop();
+
+        let header = format!(
+            r#"HEADER
+UTC_START    {}
+FREQ         {} Hz
+BW           {} Hz
+LENGTH       {} s
+NCHAN        {}
+NSUB         {}
+END
+"#,
+            start,
+            spectrogram.freq,
+            spectrogram.bw,
+            spectrogram.slice_length,
+            spectrogram.nchan,
+            spectrogram.nslices
+        );
+        format!("{:256}", header)
+    };
+
+    for (i, slice) in spectrogram.data().outer_iter().enumerate() {
+        writer.write(header(i).as_bytes()).await?;
+        for &value in slice.iter() {
+            let linear_value = 10f32.powf(value / 10.0);
+            writer.write_f32_le(linear_value).await?;
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -147,6 +190,20 @@ impl Spectrogram {
 
     pub fn data(&self) -> ArrayView2<'_, f32> {
         self.data.view()
+    }
+
+    pub fn set_data(&mut self, data: Array2<f32>) -> anyhow::Result<()> {
+        ensure!(
+            data.dim() == (self.nslices, self.nchan),
+            "Data shape mismatch: expected ({}, {}), got ({}, {})",
+            self.nslices,
+            self.nchan,
+            data.dim().0,
+            data.dim().1
+        );
+
+        self.data = data;
+        Ok(())
     }
 
     pub fn length(&self) -> Duration {
