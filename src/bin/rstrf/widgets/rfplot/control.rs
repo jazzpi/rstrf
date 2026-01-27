@@ -10,6 +10,9 @@ const ZOOM_MAX: f32 = 8.0;
 
 const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
+const SIGMA_MIN: f32 = 0.1;
+const SIGMA_MAX: f32 = 20.0;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Controls {
     log_scale: Vec2,
@@ -18,6 +21,8 @@ pub struct Controls {
     power_bounds: (f32, f32),
     /// Current power range for display
     power_range: (f32, f32),
+    /// Threshold for signal detection
+    signal_sigma: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +36,7 @@ pub enum Message {
     ResetView,
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
+    UpdateSignalSigma(f32),
 }
 
 impl Controls {
@@ -40,6 +46,7 @@ impl Controls {
             center: data_normalized::Point::new(0.5, 0.5),
             power_bounds,
             power_range: power_bounds,
+            signal_sigma: 5.0,
         }
     }
 
@@ -67,6 +74,10 @@ impl Controls {
 
     pub fn power_range(&self) -> (f32, f32) {
         self.power_range
+    }
+
+    pub fn signal_sigma(&self) -> f32 {
+        self.signal_sigma
     }
 
     fn control<'a>(
@@ -111,6 +122,14 @@ impl Controls {
                     self.power_range.1,
                     move |power| { Message::UpdateMaxPower(power) }
                 )
+                .step(0.1)
+                .width(Length::Fill)
+            ),
+            Self::control(
+                "Signal Thresh",
+                slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, move |sigma| {
+                    Message::UpdateSignalSigma(sigma)
+                })
                 .step(0.1)
                 .width(Length::Fill)
             ),
@@ -163,6 +182,9 @@ impl Controls {
             }
             Message::UpdateMaxPower(max_power) => {
                 self.power_range.1 = max_power.max(self.power_range.0);
+            }
+            Message::UpdateSignalSigma(sigma) => {
+                self.signal_sigma = sigma;
             }
         }
         self.snap_to_bounds();

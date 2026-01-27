@@ -406,13 +406,14 @@ impl Overlay {
                 } else {
                     let spectrogram = shared.spectrogram.clone();
                     let track_points = self.track_points.clone();
+                    let sigma = shared.controls.signal_sigma();
                     Task::future(async move {
                         tokio::task::spawn_blocking(move || {
                             let signals = signal::find_signals(
                                 &spectrogram,
                                 &track_points,
                                 TRACK_BW,
-                                signal::SignalDetectionMethod::FitTrace,
+                                signal::SignalDetectionMethod::FitTrace { sigma },
                             );
                             let signals = match signals {
                                 Err(e) => {

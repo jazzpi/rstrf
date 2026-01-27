@@ -11,7 +11,7 @@ pub enum SignalDetectionMethod {
     /// This finds the frequency with the maximum power at each time slice. If this power deviates
     /// from the mean (over the track window) by more than the threshold, the point is marked as a
     /// signal.
-    FitTrace,
+    FitTrace { sigma: f32 },
 }
 
 /// Finds signals in a spectrogram.
@@ -55,7 +55,7 @@ pub fn find_signals(
                     let slice = data.slice(s![t_idx, f_range.clone()]);
 
                     let slice_signals = match method {
-                        SignalDetectionMethod::FitTrace => find_signals_ft(slice),
+                        SignalDetectionMethod::FitTrace { sigma } => find_signals_ft(slice, sigma),
                     }?;
 
                     let signals_abs = slice_signals
@@ -78,7 +78,7 @@ pub fn find_signals(
     Ok(signals)
 }
 
-fn find_signals_ft(data: ArrayView1<f32>) -> anyhow::Result<Vec<usize>> {
+fn find_signals_ft(data: ArrayView1<f32>, sigma_threshold: f32) -> anyhow::Result<Vec<usize>> {
     // fit_trace works on non-log data, so we need to convert back here
     let data = data.mapv(|v| 10.0_f32.powf(v / 10.0));
     let max_idx = data.argmax()?;
@@ -88,8 +88,7 @@ fn find_signals_ft(data: ArrayView1<f32>) -> anyhow::Result<Vec<usize>> {
     let mean = sum / (data.len() as f32 - 1.0);
     let std_dev = ((sq_sum / (data.len() as f32 - 1.0)) - (mean * mean)).sqrt();
     let sigma = (max - mean) / std_dev;
-    // TODO: make this configurable
-    if sigma > 5.0 {
+    if sigma > sigma_threshold {
         Ok(vec![max_idx])
     } else {
         Ok(Vec::new())
