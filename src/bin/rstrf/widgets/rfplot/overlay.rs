@@ -5,8 +5,6 @@
 use copy_range::CopyRange;
 use iced::{Rectangle, Task, event::Status, keyboard, mouse, widget::canvas};
 use itertools::{Itertools, izip};
-use ndarray::s;
-use ndarray_stats::QuantileExt;
 use plotters::prelude::*;
 use plotters_iced2::Chart;
 use rstrf::{
@@ -14,7 +12,7 @@ use rstrf::{
         DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute, ScreenToDataAbsolute,
         ScreenToPlotArea, data_absolute, plot_area, screen,
     },
-    orbit,
+    orbit, signal,
     util::{clip_line, to_index},
 };
 
@@ -406,78 +404,27 @@ impl Overlay {
                 if self.track_points.len() < 2 {
                     Task::none()
                 } else {
-                    let data = shared.spectrogram.data();
-                    let (nt, nf) = data.dim();
-                    let t_scale = nt as f32 / shared.spectrogram.length().as_seconds_f32();
-                    let bw = shared.spectrogram.bw;
-                    let f_scale = nf as f32 / bw;
-                    let half_bw_idx = (TRACK_BW * 0.5 * f_scale) as usize;
-                    let track_points = self
-                        .track_points
-                        .iter()
-                        .map(|p| {
-                            (
-                                // TODO: This will clamp x/y to bounds individually -> might change slope
-                                // for out-of-bounds points
-                                to_index(p.0.x * t_scale, nt),
-                                to_index((p.0.y + bw / 2.0) * f_scale, nf),
-                            )
-                        })
-                        .collect_vec();
-                    let t_range =
-                        track_points.first().unwrap().0..(track_points.last().unwrap().0 + 1);
-                    let data = data.slice(s![t_range.clone(), ..]).to_owned();
+                    let spectrogram = shared.spectrogram.clone();
+                    let track_points = self.track_points.clone();
                     Task::future(async move {
                         tokio::task::spawn_blocking(move || {
-                            let peaks = track_points
-                                .iter()
-                                .tuple_windows()
-                                .flat_map(|(a, b)| {
-                                    let slope =
-                                        (b.1 as f32 - a.1 as f32) / (b.0 as f32 - a.0 as f32);
-                                    (a.0..=b.0)
-                                        .map(|t_idx| {
-                                            let center_f =
-                                                (a.1 as f32 + slope * (t_idx - a.0) as f32).round()
-                                                    as usize;
-                                            let f_range = center_f.saturating_sub(half_bw_idx)
-                                                ..(center_f + half_bw_idx).min(nf - 1);
-                                            // This approximates the rfplot fit_trace() algorithm.
-                                            // That works on non-log data, and for some reason it
-                                            // doesn't seem to work very well with log-scale data.
-                                            let slice = data
-                                                .slice(s![t_idx - t_range.start, f_range.clone()])
-                                                .mapv(|v| 10.0_f32.powf(v / 10.0));
-
-                                            let max = slice.max().ok()?;
-                                            let sum = slice.sum() - max;
-                                            let sq_sum = slice.mapv(|v| v * v).sum() - max * max;
-                                            let mean = sum / (slice.len() as f32 - 1.0);
-                                            let std_dev = ((sq_sum / (slice.len() as f32 - 1.0))
-                                                - (mean * mean))
-                                                .sqrt();
-                                            let sigma = (max - mean) / std_dev;
-                                            // TODO: make this configurable
-                                            if sigma > 5.0 {
-                                                Some(data_absolute::Point::new(
-                                                    t_idx as f32 / t_scale,
-                                                    ((slice.argmax().ok()? + f_range.start) as f32
-                                                        / f_scale)
-                                                        - bw / 2.0,
-                                                ))
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        // looks dumb but without this we get ownership issues for
-                                        // `slope` for some reason
-                                        .collect_vec()
-                                        .into_iter()
-                                        .flatten()
-                                })
-                                .collect_vec();
-                            log::info!("Found {} signal peaks", peaks.len());
-                            Message::FoundSignals(peaks)
+                            let signals = signal::find_signals(
+                                &spectrogram,
+                                &track_points,
+                                TRACK_BW,
+                                signal::SignalDetectionMethod::FitTrace,
+                            );
+                            let signals = match signals {
+                                Err(e) => {
+                                    log::error!("Error finding signals: {}", e);
+                                    Vec::new()
+                                }
+                                Ok(signals) => {
+                                    log::info!("Found {} signal peaks", signals.len());
+                                    signals
+                                }
+                            };
+                            Message::FoundSignals(signals)
                         })
                         .await
                         .unwrap()

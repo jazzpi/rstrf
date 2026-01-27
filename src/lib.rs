@@ -2,5 +2,6 @@
 
 pub mod coord;
 pub mod orbit;
+pub mod signal;
 pub mod spectrogram;
 pub mod util;
