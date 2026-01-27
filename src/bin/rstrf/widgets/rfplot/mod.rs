@@ -9,13 +9,13 @@ use crate::widgets::rfplot::control::Controls;
 
 mod colormap;
 mod control;
-pub mod plot;
+pub mod overlay;
 mod shader;
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Control(control::Message),
-    Plot(plot::Message),
+    Overlay(overlay::Message),
 }
 
 impl From<control::Message> for Message {
@@ -24,9 +24,9 @@ impl From<control::Message> for Message {
     }
 }
 
-impl From<plot::Message> for Message {
-    fn from(message: plot::Message) -> Self {
-        Message::Plot(message)
+impl From<overlay::Message> for Message {
+    fn from(message: overlay::Message) -> Self {
+        Message::Overlay(message)
     }
 }
 
@@ -50,7 +50,7 @@ struct SharedState {
 
 pub struct RFPlot {
     shared: SharedState,
-    plot: plot::Plot,
+    overlay: overlay::Overlay,
 }
 
 impl RFPlot {
@@ -62,7 +62,7 @@ impl RFPlot {
         };
         Self {
             shared,
-            plot: plot::Plot::default(),
+            overlay: overlay::Overlay::default(),
         }
     }
 
@@ -70,14 +70,17 @@ impl RFPlot {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Control(message) => self.shared.controls.update(message).map(Message::from),
-            Message::Plot(message) => self.plot.update(message, &self.shared).map(Message::from),
+            Message::Overlay(message) => self
+                .overlay
+                .update(message, &self.shared)
+                .map(Message::from),
         }
     }
 
     /// Build the RFPlot widget view.
     ///
     /// The plot itself is implemented as a stack of two layers: the spectrogram itself (see
-    /// `shader.rs`) and the overlay (see `plot.rs`).
+    /// `shader.rs`) and the overlay (see `overlay.rs`).
     pub fn view(&self) -> Element<'_, Message> {
         let controls = self.shared.controls.view().map(Message::from);
 

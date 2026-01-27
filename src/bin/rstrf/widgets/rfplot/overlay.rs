@@ -45,7 +45,7 @@ fn clamp_line_to_plot(
 }
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct Plot {
+pub(super) struct Overlay {
     satellites: Vec<orbit::Satellite>,
     satellite_predictions: Option<orbit::Predictions>,
     track_points: Vec<data_absolute::Point>,
@@ -53,7 +53,7 @@ pub(super) struct Plot {
     crosshair: Option<data_absolute::Point>,
 }
 
-impl Plot {
+impl Overlay {
     fn build_chart<DB: DrawingBackend>(
         &self,
         _state: &MouseInteraction,
@@ -530,7 +530,7 @@ impl Chart<super::Message> for RFPlot {
     type State = MouseInteraction;
 
     fn build_chart<DB: DrawingBackend>(&self, state: &Self::State, chart: ChartBuilder<DB>) {
-        match self.plot.build_chart(state, chart, &self.shared) {
+        match self.overlay.build_chart(state, chart, &self.shared) {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -551,11 +551,11 @@ impl Chart<super::Message> for RFPlot {
         };
         match event {
             canvas::Event::Mouse(event) => {
-                self.plot
+                self.overlay
                     .handle_mouse(state, event, bounds, cursor, &self.shared)
             }
             canvas::Event::Keyboard(event) => {
-                self.plot
+                self.overlay
                     .handle_keyboard(state, event, bounds, cursor, &self.shared)
             }
             _ => {
