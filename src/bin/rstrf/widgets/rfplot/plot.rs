@@ -14,10 +14,11 @@ use rstrf::{
         DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute, ScreenToDataAbsolute,
         ScreenToPlotArea, data_absolute, plot_area, screen,
     },
+    orbit,
     util::{clip_line, to_index},
 };
 
-use super::{MouseInteraction, RFPlot, control};
+use super::{MouseInteraction, RFPlot, SharedState, control};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -25,6 +26,8 @@ pub enum Message {
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
+    SetSatellites(Vec<orbit::Satellite>),
+    SetSatellitePredictions(Option<orbit::Predictions>),
 }
 
 // TODO: make this configurable
@@ -41,19 +44,29 @@ fn clamp_line_to_plot(
         .map(|p| data_absolute::Point(p))
 }
 
-impl RFPlot {
+#[derive(Debug, Default, Clone)]
+pub(super) struct Plot {
+    satellites: Vec<orbit::Satellite>,
+    satellite_predictions: Option<orbit::Predictions>,
+    track_points: Vec<data_absolute::Point>,
+    signals: Vec<data_absolute::Point>,
+    crosshair: Option<data_absolute::Point>,
+}
+
+impl Plot {
     fn build_chart<DB: DrawingBackend>(
         &self,
         _state: &MouseInteraction,
         mut chart: ChartBuilder<DB>,
+        shared: &SharedState,
     ) -> Result<(), String> {
-        let bounds =
-            self.controls.bounds() * DataNormalizedToDataAbsolute::new(&self.spectrogram.bounds());
+        let bounds = shared.controls.bounds()
+            * DataNormalizedToDataAbsolute::new(&shared.spectrogram.bounds());
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
         let mut chart = chart
-            .x_label_area_size(self.plot_area_margin)
-            .y_label_area_size(self.plot_area_margin)
+            .x_label_area_size(shared.plot_area_margin)
+            .y_label_area_size(shared.plot_area_margin)
             .build_cartesian_2d(x.into_std(), y.into_std())
             .map_err(|e| format!("Failed to build chart: {:?}", e))?;
 
@@ -202,23 +215,23 @@ impl RFPlot {
                         style,
                     ))
                     .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
-                let power = self.spectrogram.data()[(
+                let power = shared.spectrogram.data()[(
                     to_index(
                         crosshair.0.x
-                            * (self.spectrogram.data().dim().0 as f32
-                                / self.spectrogram.length().as_seconds_f32()),
-                        self.spectrogram.data().dim().0,
+                            * (shared.spectrogram.data().dim().0 as f32
+                                / shared.spectrogram.length().as_seconds_f32()),
+                        shared.spectrogram.data().dim().0,
                     ),
                     to_index(
-                        (crosshair.0.y + self.spectrogram.bw / 2.0)
-                            * (self.spectrogram.data().dim().1 as f32 / self.spectrogram.bw),
-                        self.spectrogram.data().dim().1,
+                        (crosshair.0.y + shared.spectrogram.bw / 2.0)
+                            * (shared.spectrogram.data().dim().1 as f32 / shared.spectrogram.bw),
+                        shared.spectrogram.data().dim().1,
                     ),
                 )];
                 let crosshair_pos = plot_area::Point::new(0.01, 0.99)
                     * PlotAreaToDataAbsolute::new(
-                        &self.controls.bounds(),
-                        &self.spectrogram.bounds(),
+                        &shared.controls.bounds(),
+                        &shared.spectrogram.bounds(),
                     );
                 chart
                     .draw_series(vec![Text::new(
@@ -244,6 +257,7 @@ impl RFPlot {
         event: &mouse::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
+        shared: &SharedState,
     ) -> (Status, Option<super::Message>) {
         use control::Message as CMessage;
         let Some(cursor_pos) = cursor.position() else {
@@ -260,12 +274,12 @@ impl RFPlot {
                 x: bounds.x,
                 y: bounds.y + bounds.height,
                 width: bounds.width,
-                height: self.plot_area_margin,
+                height: shared.plot_area_margin,
             };
             let y_axis = Rectangle {
-                x: bounds.x - self.plot_area_margin,
+                x: bounds.x - shared.plot_area_margin,
                 y: bounds.y,
-                width: self.plot_area_margin,
+                width: shared.plot_area_margin,
                 height: bounds.height,
             };
             if cursor.is_over(bounds) {
@@ -333,6 +347,7 @@ impl RFPlot {
         event: &keyboard::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
+        shared: &SharedState,
     ) -> (Status, Option<super::Message>) {
         let keyboard::Event::KeyReleased {
             key,
@@ -359,8 +374,8 @@ impl RFPlot {
                     Message::AddTrackPoint(
                         pos * ScreenToDataAbsolute::new(
                             &screen::Size(bounds.size()),
-                            &self.controls.bounds(),
-                            &self.spectrogram.bounds(),
+                            &shared.controls.bounds(),
+                            &shared.spectrogram.bounds(),
                         ),
                     )
                     .into(),
@@ -374,7 +389,7 @@ impl RFPlot {
     }
 
     #[must_use]
-    pub fn update_plot(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message, shared: &SharedState) -> Task<Message> {
         match message {
             Message::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
@@ -391,10 +406,10 @@ impl RFPlot {
                 if self.track_points.len() < 2 {
                     Task::none()
                 } else {
-                    let data = self.spectrogram.data();
+                    let data = shared.spectrogram.data();
                     let (nt, nf) = data.dim();
-                    let t_scale = nt as f32 / self.spectrogram.length().as_seconds_f32();
-                    let bw = self.spectrogram.bw;
+                    let t_scale = nt as f32 / shared.spectrogram.length().as_seconds_f32();
+                    let bw = shared.spectrogram.bw;
                     let f_scale = nf as f32 / bw;
                     let half_bw_idx = (TRACK_BW * 0.5 * f_scale) as usize;
                     let track_points = self
@@ -476,10 +491,35 @@ impl RFPlot {
             Message::UpdateCrosshair(plot_pos) => {
                 self.crosshair = plot_pos.map(|p| {
                     p * PlotAreaToDataAbsolute::new(
-                        &self.controls.bounds(),
-                        &self.spectrogram.bounds(),
+                        &shared.controls.bounds(),
+                        &shared.spectrogram.bounds(),
                     )
                 });
+                Task::none()
+            }
+            Message::SetSatellites(satellites) => {
+                self.satellites = satellites;
+                // TODO: clear previous predictions here?
+                log::debug!("Using {} satellites", self.satellites.len());
+                let satellites = self.satellites.clone();
+                let start_time = shared.spectrogram.start_time;
+                let length_s = shared.spectrogram.length().as_seconds_f64();
+                Task::future(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        orbit::predict_satellites(satellites, start_time, length_s)
+                    })
+                    .await;
+                    match result {
+                        Ok(predictions) => Message::SetSatellitePredictions(Some(predictions)),
+                        Err(e) => {
+                            log::error!("Failed to predict satellite passes: {}", e);
+                            Message::SetSatellitePredictions(None)
+                        }
+                    }
+                })
+            }
+            Message::SetSatellitePredictions(predictions) => {
+                self.satellite_predictions = predictions;
                 Task::none()
             }
         }
@@ -490,7 +530,7 @@ impl Chart<super::Message> for RFPlot {
     type State = MouseInteraction;
 
     fn build_chart<DB: DrawingBackend>(&self, state: &Self::State, chart: ChartBuilder<DB>) {
-        match self.build_chart(state, chart) {
+        match self.plot.build_chart(state, chart, &self.shared) {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -504,14 +544,20 @@ impl Chart<super::Message> for RFPlot {
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
         let bounds = Rectangle {
-            x: bounds.x + self.plot_area_margin,
+            x: bounds.x + self.shared.plot_area_margin,
             y: bounds.y,
-            width: bounds.width - self.plot_area_margin,
-            height: bounds.height - self.plot_area_margin,
+            width: bounds.width - self.shared.plot_area_margin,
+            height: bounds.height - self.shared.plot_area_margin,
         };
         match event {
-            canvas::Event::Mouse(event) => self.handle_mouse(state, event, bounds, cursor),
-            canvas::Event::Keyboard(event) => self.handle_keyboard(state, event, bounds, cursor),
+            canvas::Event::Mouse(event) => {
+                self.plot
+                    .handle_mouse(state, event, bounds, cursor, &self.shared)
+            }
+            canvas::Event::Keyboard(event) => {
+                self.plot
+                    .handle_keyboard(state, event, bounds, cursor, &self.shared)
+            }
             _ => {
                 log::debug!("{:?}", event);
                 (Status::Ignored, None)

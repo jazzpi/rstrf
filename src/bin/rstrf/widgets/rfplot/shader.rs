@@ -233,8 +233,8 @@ impl shader::Program<Message> for RFPlot {
         _bounds: Rectangle,
     ) -> Self::Primitive {
         Primitive::new(
-            self.controls,
-            self.spectrogram.clone(), // TODO
+            self.shared.controls,
+            self.shared.spectrogram.clone(), // TODO
         )
     }
 }

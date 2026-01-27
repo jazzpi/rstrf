@@ -3,25 +3,19 @@ use iced::{
     widget::{self, container},
 };
 use plotters_iced2::ChartWidget;
-use rstrf::{
-    coord::{data_absolute, plot_area},
-    orbit,
-    spectrogram::Spectrogram,
-};
+use rstrf::{coord::plot_area, spectrogram::Spectrogram};
 
 use crate::widgets::rfplot::control::Controls;
 
 mod colormap;
 mod control;
-mod plot;
+pub mod plot;
 mod shader;
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Control(control::Message),
     Plot(plot::Message),
-    SetSatellites(Vec<orbit::Satellite>),
-    SetSatellitePredictions(Option<orbit::Predictions>),
 }
 
 impl From<control::Message> for Message {
@@ -47,62 +41,36 @@ impl Default for MouseInteraction {
     }
 }
 
-pub struct RFPlot {
-    controls: Controls,
-    spectrogram: Spectrogram,
+struct SharedState {
+    pub controls: Controls,
+    pub spectrogram: Spectrogram,
     /// The margin on the left/bottom of the plot area (for axes/labels)
-    plot_area_margin: f32,
-    satellites: Vec<orbit::Satellite>,
-    satellite_predictions: Option<orbit::Predictions>,
-    track_points: Vec<data_absolute::Point>,
-    signals: Vec<data_absolute::Point>,
-    crosshair: Option<data_absolute::Point>,
+    pub plot_area_margin: f32,
+}
+
+pub struct RFPlot {
+    shared: SharedState,
+    plot: plot::Plot,
 }
 
 impl RFPlot {
     pub fn new(spectrogram: Spectrogram) -> Self {
-        Self {
+        let shared = SharedState {
             controls: Controls::new(spectrogram.power_bounds),
             spectrogram,
             plot_area_margin: 50.0,
-            satellites: Vec::new(),
-            satellite_predictions: None,
-            track_points: Vec::new(),
-            signals: Vec::new(),
-            crosshair: None,
+        };
+        Self {
+            shared,
+            plot: plot::Plot::default(),
         }
     }
 
     #[must_use]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Control(message) => self.controls.update(message).map(Message::from),
-            Message::Plot(message) => self.update_plot(message).map(Message::from),
-            Message::SetSatellites(satellites) => {
-                self.satellites = satellites;
-                // TODO: clear previous predictions here?
-                log::debug!("Using {} satellites", self.satellites.len());
-                let satellites = self.satellites.clone();
-                let start_time = self.spectrogram.start_time;
-                let length_s = self.spectrogram.length().as_seconds_f64();
-                Task::future(async move {
-                    let result = tokio::task::spawn_blocking(move || {
-                        orbit::predict_satellites(satellites, start_time, length_s)
-                    })
-                    .await;
-                    match result {
-                        Ok(predictions) => Message::SetSatellitePredictions(Some(predictions)),
-                        Err(e) => {
-                            log::error!("Failed to predict satellite passes: {}", e);
-                            Message::SetSatellitePredictions(None)
-                        }
-                    }
-                })
-            }
-            Message::SetSatellitePredictions(predictions) => {
-                self.satellite_predictions = predictions;
-                Task::none()
-            }
+            Message::Control(message) => self.shared.controls.update(message).map(Message::from),
+            Message::Plot(message) => self.plot.update(message, &self.shared).map(Message::from),
         }
     }
 
@@ -111,7 +79,7 @@ impl RFPlot {
     /// The plot itself is implemented as a stack of two layers: the spectrogram itself (see
     /// `shader.rs`) and the overlay (see `plot.rs`).
     pub fn view(&self) -> Element<'_, Message> {
-        let controls = self.controls.view().map(Message::from);
+        let controls = self.shared.controls.view().map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)
@@ -121,8 +89,8 @@ impl RFPlot {
         .padding(Padding {
             top: 0.0,
             right: 0.0,
-            bottom: self.plot_area_margin,
-            left: self.plot_area_margin,
+            bottom: self.shared.plot_area_margin,
+            left: self.shared.plot_area_margin,
         })
         .into();
         let plot_overlay: Element<'_, Message> = ChartWidget::new(self)

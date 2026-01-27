@@ -156,9 +156,10 @@ impl AppModel {
     #[must_use]
     fn set_rfplot_satellites(&mut self) -> Task<crate::widgets::rfplot::Message> {
         match &mut self.rfplot {
-            Some(rfplot) => rfplot.update(crate::widgets::rfplot::Message::SetSatellites(
-                self.satellites.clone(),
-            )),
+            Some(rfplot) => rfplot.update(
+                crate::widgets::rfplot::plot::Message::SetSatellites(self.satellites.clone())
+                    .into(),
+            ),
             None => Task::none(),
         }
     }
