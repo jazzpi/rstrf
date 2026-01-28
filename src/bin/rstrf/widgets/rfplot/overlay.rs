@@ -28,9 +28,6 @@ pub enum Message {
     SetSatellitePredictions(Option<orbit::Predictions>),
 }
 
-// TODO: make this configurable
-const TRACK_BW: f32 = 10e3; // Hz
-
 fn clamp_line_to_plot(
     bounds: &data_absolute::Rectangle,
     points: impl Iterator<Item = data_absolute::Point>,
@@ -142,9 +139,12 @@ impl Overlay {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    self.track_points
-                        .iter()
-                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y + TRACK_BW / 2.0)),
+                    self.track_points.iter().map(|pos| {
+                        data_absolute::Point::new(
+                            pos.0.x,
+                            pos.0.y + shared.controls.track_bw() / 2.0,
+                        )
+                    }),
                 )
                 .map(|v| v.into()),
                 &YELLOW,
@@ -159,9 +159,12 @@ impl Overlay {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    self.track_points
-                        .iter()
-                        .map(|pos| data_absolute::Point::new(pos.0.x, pos.0.y - TRACK_BW / 2.0)),
+                    self.track_points.iter().map(|pos| {
+                        data_absolute::Point::new(
+                            pos.0.x,
+                            pos.0.y - shared.controls.track_bw() / 2.0,
+                        )
+                    }),
                 )
                 .map(|v| v.into()),
                 &YELLOW,
@@ -407,12 +410,13 @@ impl Overlay {
                     let spectrogram = shared.spectrogram.clone();
                     let track_points = self.track_points.clone();
                     let sigma = shared.controls.signal_sigma();
+                    let track_bw = shared.controls.track_bw();
                     Task::future(async move {
                         tokio::task::spawn_blocking(move || {
                             let signals = signal::find_signals(
                                 &spectrogram,
                                 &track_points,
-                                TRACK_BW,
+                                track_bw,
                                 signal::SignalDetectionMethod::FitTrace { sigma },
                             );
                             let signals = match signals {

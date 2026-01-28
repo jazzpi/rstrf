@@ -13,6 +13,9 @@ const ZOOM_WHEEL_SCALE: f32 = 0.2;
 const SIGMA_MIN: f32 = 0.1;
 const SIGMA_MAX: f32 = 20.0;
 
+const TRACK_BW_MIN: f32 = 1e3;
+const TRACK_BW_MAX: f32 = 100e3;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Controls {
     log_scale: Vec2,
@@ -23,6 +26,8 @@ pub struct Controls {
     power_range: (f32, f32),
     /// Threshold for signal detection
     signal_sigma: f32,
+    /// Bandwidth around track points
+    track_bw: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +42,7 @@ pub enum Message {
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
     UpdateSignalSigma(f32),
+    UpdateTrackBW(f32),
 }
 
 impl Controls {
@@ -47,6 +53,7 @@ impl Controls {
             power_bounds,
             power_range: power_bounds,
             signal_sigma: 5.0,
+            track_bw: 10e3,
         }
     }
 
@@ -78,6 +85,10 @@ impl Controls {
 
     pub fn signal_sigma(&self) -> f32 {
         self.signal_sigma
+    }
+
+    pub fn track_bw(&self) -> f32 {
+        self.track_bw
     }
 
     fn control<'a>(
@@ -133,6 +144,14 @@ impl Controls {
                 .step(0.1)
                 .width(Length::Fill)
             ),
+            Self::control(
+                "Track BW",
+                slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, move |bw| {
+                    Message::UpdateTrackBW(bw)
+                })
+                .step(100.0)
+                .width(Length::Fill)
+            ),
         ]
         .into()
     }
@@ -185,6 +204,9 @@ impl Controls {
             }
             Message::UpdateSignalSigma(sigma) => {
                 self.signal_sigma = sigma;
+            }
+            Message::UpdateTrackBW(bw) => {
+                self.track_bw = bw;
             }
         }
         self.snap_to_bounds();
