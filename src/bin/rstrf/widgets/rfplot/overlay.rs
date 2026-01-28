@@ -9,11 +9,11 @@ use plotters::prelude::*;
 use plotters_iced2::Chart;
 use rstrf::{
     coord::{
-        DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute, ScreenToDataAbsolute,
-        ScreenToPlotArea, data_absolute, plot_area, screen,
+        DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
+        ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
     orbit, signal,
-    util::{clip_line, to_index},
+    util::clip_line,
 };
 
 use super::{MouseInteraction, RFPlot, SharedState, control};
@@ -216,18 +216,12 @@ impl Overlay {
                         style,
                     ))
                     .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
+                let crosshair_norm =
+                    *crosshair * DataAbsoluteToDataNormalized::new(&shared.spectrogram.bounds());
+                let dim = shared.spectrogram.data().dim();
                 let power = shared.spectrogram.data()[(
-                    to_index(
-                        crosshair.0.x
-                            * (shared.spectrogram.data().dim().0 as f32
-                                / shared.spectrogram.length().as_seconds_f32()),
-                        shared.spectrogram.data().dim().0,
-                    ),
-                    to_index(
-                        (crosshair.0.y + shared.spectrogram.bw / 2.0)
-                            * (shared.spectrogram.data().dim().1 as f32 / shared.spectrogram.bw),
-                        shared.spectrogram.data().dim().1,
-                    ),
+                    ((crosshair_norm.0.x * (dim.0 as f32)).floor() as usize).clamp(0, dim.0 - 1),
+                    ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
                 )];
                 let crosshair_pos = plot_area::Point::new(0.01, 0.99)
                     * PlotAreaToDataAbsolute::new(
