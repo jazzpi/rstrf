@@ -82,10 +82,9 @@ impl Overlay {
             for sat in &self.satellites {
                 let id = sat.norad_id();
                 log::trace!("Plotting satellite {}", id);
-                let freq = &satellite_predictions
-                    .frequencies
-                    .get(&id)
-                    .expect("Missing frequency prediction for satellite");
+                let Some(freq) = &satellite_predictions.frequencies.get(&id) else {
+                    continue;
+                };
                 let za = &satellite_predictions
                     .zenith_angles
                     .get(&id)

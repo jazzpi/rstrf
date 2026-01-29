@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::config::Config;
-use crate::widgets::sat_manager::SatManager;
+use crate::widgets::rfplot::{self, RFPlot};
+use crate::widgets::sat_manager::{self, SatManager};
 use crate::{Args, fl};
 use iced::Application;
 use iced::alignment::Horizontal;
@@ -20,11 +21,9 @@ pub struct AppModel {
     /// Spectrogram for plotting
     spectrogram: Option<Spectrogram>,
     /// RFPlot widget
-    rfplot: Option<crate::widgets::rfplot::RFPlot>,
+    rfplot: Option<RFPlot>,
     /// SatManager widget
-    sat_manager: crate::widgets::sat_manager::SatManager,
-    /// Loaded TLEs
-    satellites: Vec<Satellite>,
+    sat_manager: SatManager,
     active_tab: TabId,
 }
 
@@ -34,20 +33,19 @@ pub enum Message {
     #[allow(dead_code)]
     UpdateConfig(Config),
     SpectrogramLoaded(Result<Spectrogram, String>),
-    SatellitesLoaded(Result<Vec<Satellite>, String>),
-    RFPlot(crate::widgets::rfplot::Message),
-    SatManager(crate::widgets::sat_manager::Message),
+    RFPlot(rfplot::Message),
+    SatManager(sat_manager::Message),
     TabSelected(TabId),
 }
 
-impl From<crate::widgets::rfplot::Message> for Message {
-    fn from(msg: crate::widgets::rfplot::Message) -> Self {
+impl From<rfplot::Message> for Message {
+    fn from(msg: rfplot::Message) -> Self {
         Message::RFPlot(msg)
     }
 }
 
-impl From<crate::widgets::sat_manager::Message> for Message {
-    fn from(msg: crate::widgets::sat_manager::Message) -> Self {
+impl From<sat_manager::Message> for Message {
+    fn from(msg: sat_manager::Message) -> Self {
         Message::SatManager(msg)
     }
 }
@@ -73,12 +71,11 @@ impl AppModel {
     /// Initializes the application with any given flags and startup commands.
     fn init(flags: Args) -> (Self, Task<Message>) {
         // Construct the app model with the runtime's core.
-        let app = AppModel {
+        let mut app = AppModel {
             config: Config::default(),
             spectrogram: None,
             rfplot: None,
             sat_manager: SatManager::new(),
-            satellites: Vec::new(),
             active_tab: TabId::default(),
         };
 
@@ -91,14 +88,14 @@ impl AppModel {
             let freqs_path = flags
                 .frequencies_path
                 .expect("frequencies_path should be present when tle_path is present");
-            tasks.push(Task::future(async move {
-                let satellites: anyhow::Result<_> = async {
-                    let freqs = rstrf::orbit::load_frequencies(&freqs_path).await?;
-                    rstrf::orbit::load_tles(&path, freqs).await
-                }
-                .await;
-                Message::SatellitesLoaded(satellites.map_err(|e| format!("{e:?}")))
-            }));
+            tasks.push(
+                app.sat_manager
+                    .update(sat_manager::Message::LoadTLEs {
+                        tle_path: path.clone(),
+                        freqs_path: freqs_path.clone(),
+                    })
+                    .map(Message::from),
+            );
         }
         let command = Task::batch(tasks);
 
@@ -152,20 +149,17 @@ impl AppModel {
                 Ok(spec) => {
                     log::info!("Loaded spectrogram: {spec:?}");
                     self.spectrogram = Some(spec);
-                    self.rfplot = Some(crate::widgets::rfplot::RFPlot::new(
-                        self.spectrogram.as_ref().cloned().unwrap(),
-                    ));
-                    return self.set_rfplot_satellites().map(Message::from);
+                    let mut rfplot = RFPlot::new(self.spectrogram.as_ref().cloned().unwrap());
+                    // TODO
+                    let task = Self::set_rfplot_satellites(
+                        &mut rfplot,
+                        self.sat_manager.satellites().to_vec(),
+                    )
+                    .map(Message::from);
+                    self.rfplot = Some(rfplot);
+                    return task;
                 }
                 Err(err) => log::error!("failed to load spectrogram: {err}"),
-            },
-            Message::SatellitesLoaded(result) => match result {
-                Ok(satellites) => {
-                    log::info!("Loaded {} TLEs", satellites.len());
-                    self.satellites = satellites;
-                    return self.set_rfplot_satellites().map(Message::from);
-                }
-                Err(err) => log::error!("failed to load TLEs: {err}"),
             },
             Message::RFPlot(message) => match &mut self.rfplot {
                 Some(rfplot) => {
@@ -175,22 +169,25 @@ impl AppModel {
                     log::error!("RFPlot widget not initialized");
                 }
             },
-            Message::SatManager(message) => {
-                return self.sat_manager.update(message).map(Message::from);
-            }
+            Message::SatManager(message) => match message {
+                sat_manager::Message::SatellitesChanged(satellites) => match &mut self.rfplot {
+                    Some(rfplot) => {
+                        return Self::set_rfplot_satellites(rfplot, satellites).map(Message::from);
+                    }
+                    None => (),
+                },
+                _ => return self.sat_manager.update(message).map(Message::from),
+            },
             Message::TabSelected(tab_id) => self.active_tab = tab_id,
         }
         Task::none()
     }
 
     #[must_use]
-    fn set_rfplot_satellites(&mut self) -> Task<crate::widgets::rfplot::Message> {
-        match &mut self.rfplot {
-            Some(rfplot) => rfplot.update(
-                crate::widgets::rfplot::overlay::Message::SetSatellites(self.satellites.clone())
-                    .into(),
-            ),
-            None => Task::none(),
-        }
+    fn set_rfplot_satellites(
+        rfplot: &mut RFPlot,
+        satellites: Vec<Satellite>,
+    ) -> Task<rfplot::Message> {
+        rfplot.update(rfplot::overlay::Message::SetSatellites(satellites).into())
     }
 }
