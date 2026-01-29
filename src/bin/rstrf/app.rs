@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::config::Config;
+use crate::widgets::sat_manager::SatManager;
 use crate::{Args, fl};
 use iced::Application;
-use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{self, text};
-use iced::{Element, Length, Program, Subscription, Task, Theme};
+use iced::alignment::Horizontal;
+use iced::widget::text;
+use iced::{Element, Program, Subscription, Task, Theme};
+use iced_aw::Tabs;
 use rstrf::orbit::Satellite;
 use rstrf::spectrogram::Spectrogram;
 
@@ -19,8 +21,11 @@ pub struct AppModel {
     spectrogram: Option<Spectrogram>,
     /// RFPlot widget
     rfplot: Option<crate::widgets::rfplot::RFPlot>,
+    /// SatManager widget
+    sat_manager: crate::widgets::sat_manager::SatManager,
     /// Loaded TLEs
     satellites: Vec<Satellite>,
+    active_tab: TabId,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -31,12 +36,27 @@ pub enum Message {
     SpectrogramLoaded(Result<Spectrogram, String>),
     SatellitesLoaded(Result<Vec<Satellite>, String>),
     RFPlot(crate::widgets::rfplot::Message),
+    SatManager(crate::widgets::sat_manager::Message),
+    TabSelected(TabId),
 }
 
 impl From<crate::widgets::rfplot::Message> for Message {
     fn from(msg: crate::widgets::rfplot::Message) -> Self {
         Message::RFPlot(msg)
     }
+}
+
+impl From<crate::widgets::sat_manager::Message> for Message {
+    fn from(msg: crate::widgets::sat_manager::Message) -> Self {
+        Message::SatManager(msg)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabId {
+    #[default]
+    RFPlot,
+    SatManager,
 }
 
 impl AppModel {
@@ -57,7 +77,9 @@ impl AppModel {
             config: Config::default(),
             spectrogram: None,
             rfplot: None,
+            sat_manager: SatManager::new(),
             satellites: Vec::new(),
+            active_tab: TabId::default(),
         };
 
         let spectrogram = Task::future(async move {
@@ -95,11 +117,15 @@ impl AppModel {
                 .into(),
         };
 
-        widget::container(rfplot)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(Vertical::Center)
+        Tabs::new(Message::TabSelected)
+            .push(TabId::RFPlot, fl!("tab-rfplot").into(), rfplot)
+            .push(
+                TabId::SatManager,
+                fl!("tab-satellites").into(),
+                self.sat_manager.view().map(Message::SatManager),
+            )
+            .set_active_tab(&self.active_tab)
+            .tab_bar_position(iced_aw::TabBarPosition::Top)
             .into()
     }
 
@@ -149,6 +175,10 @@ impl AppModel {
                     log::error!("RFPlot widget not initialized");
                 }
             },
+            Message::SatManager(message) => {
+                return self.sat_manager.update(message).map(Message::from);
+            }
+            Message::TabSelected(tab_id) => self.active_tab = tab_id,
         }
         Task::none()
     }
