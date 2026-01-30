@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::Args;
 use crate::config::Config;
 use crate::widgets::rfplot::{self, RFPlot};
 use crate::widgets::sat_manager::{self, SatManager};
-use crate::{Args, fl};
 use iced::Application;
 use iced::alignment::Horizontal;
 use iced::widget::text;
@@ -109,16 +109,16 @@ impl AppModel {
     fn view(&self) -> Element<'_, Message> {
         let rfplot = match &self.rfplot {
             Some(rfplot) => rfplot.view().map(Message::RFPlot),
-            None => text(fl!("loading-spectrogram"))
+            None => text("Loading spectrogram...")
                 .align_x(Horizontal::Center)
                 .into(),
         };
 
         Tabs::new(Message::TabSelected)
-            .push(TabId::RFPlot, fl!("tab-rfplot").into(), rfplot)
+            .push(TabId::RFPlot, "Plot".into(), rfplot)
             .push(
                 TabId::SatManager,
-                fl!("tab-satellites").into(),
+                "Satellites".into(),
                 self.sat_manager.view().map(Message::SatManager),
             )
             .set_active_tab(&self.active_tab)

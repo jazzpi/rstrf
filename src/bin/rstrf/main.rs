@@ -2,7 +2,6 @@
 
 mod app;
 mod config;
-mod i18n;
 mod widgets;
 
 use clap::Parser;
@@ -29,12 +28,6 @@ fn main() -> iced::Result {
 
     // Parse command line arguments
     let args = Args::parse();
-
-    // Get the system's preferred languages.
-    let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
-
-    // Enable localizations to be applied.
-    i18n::init(&requested_languages);
 
     AppModel::create(args).run()
 }
