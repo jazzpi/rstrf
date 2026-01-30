@@ -2,8 +2,8 @@
 
 use crate::Args;
 use crate::config::Config;
-use crate::widgets::rfplot::{self, RFPlot};
-use crate::widgets::sat_manager::{self, SatManager};
+use crate::panes::rfplot::{self, RFPlot};
+use crate::panes::sat_manager::{self, SatManager};
 use iced::Application;
 use iced::widget::{PaneGrid, pane_grid, responsive, text};
 use iced::{Element, Program, Subscription, Task, Theme};

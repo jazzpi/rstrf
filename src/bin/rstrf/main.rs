@@ -2,7 +2,7 @@
 
 mod app;
 mod config;
-mod widgets;
+mod panes;
 
 use clap::Parser;
 use std::path::PathBuf;

@@ -7,7 +7,7 @@ use iced::{
 use plotters_iced2::ChartWidget;
 use rstrf::{coord::plot_area, spectrogram::Spectrogram};
 
-use crate::widgets::rfplot::control::Controls;
+use crate::panes::rfplot::control::Controls;
 
 mod colormap;
 mod control;
