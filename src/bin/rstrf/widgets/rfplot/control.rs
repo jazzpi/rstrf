@@ -46,15 +46,20 @@ pub enum Message {
 }
 
 impl Controls {
-    pub fn new(power_bounds: (f32, f32)) -> Self {
+    pub fn new() -> Self {
         Self {
             log_scale: Vec2::new(ZOOM_MIN, ZOOM_MIN),
             center: data_normalized::Point::new(0.5, 0.5),
-            power_bounds,
-            power_range: power_bounds,
+            power_bounds: (0.0, 0.0),
+            power_range: (0.0, 0.0),
             signal_sigma: 5.0,
             track_bw: 10e3,
         }
+    }
+
+    pub fn set_power_bounds(&mut self, bounds: (f32, f32)) {
+        self.power_bounds = bounds;
+        self.power_range = bounds;
     }
 
     pub fn size(&self) -> data_normalized::Size {

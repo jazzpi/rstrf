@@ -170,11 +170,11 @@ impl Pipeline {
 #[derive(Debug)]
 pub struct Primitive {
     controls: Controls,
-    spectrogram: Spectrogram,
+    spectrogram: Option<Spectrogram>,
 }
 
 impl Primitive {
-    fn new(controls: Controls, spectrogram: Spectrogram) -> Self {
+    fn new(controls: Controls, spectrogram: Option<Spectrogram>) -> Self {
         Self {
             controls,
             spectrogram,
@@ -193,8 +193,12 @@ impl shader::Primitive for Primitive {
         _bounds: &Rectangle,
         _viewport: &shader::Viewport,
     ) {
+        let Some(spectrogram) = &self.spectrogram else {
+            return;
+        };
+
         if pipeline.spectrogram_bind_group.is_none() {
-            pipeline.set_spectrogram(device, &self.spectrogram);
+            pipeline.set_spectrogram(device, spectrogram);
         }
 
         let bounds = self.controls.bounds();
@@ -205,8 +209,8 @@ impl shader::Primitive for Primitive {
                 x_bounds: (bounds.0.x, bounds.0.x + bounds.0.width).into(),
                 y_bounds: (bounds.0.y, bounds.0.y + bounds.0.height).into(),
                 power_bounds: self.controls.power_range().into(),
-                nslices: self.spectrogram.nslices as u32,
-                nchan: self.spectrogram.nchan as u32,
+                nslices: spectrogram.nslices as u32,
+                nchan: spectrogram.nchan as u32,
             },
         );
     }

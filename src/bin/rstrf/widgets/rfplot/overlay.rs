@@ -13,6 +13,7 @@ use rstrf::{
         ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
     orbit, signal,
+    spectrogram::Spectrogram,
     util::clip_line,
 };
 
@@ -26,6 +27,7 @@ pub enum Message {
     UpdateCrosshair(Option<plot_area::Point>),
     SetSatellites(Vec<orbit::Satellite>),
     SetSatellitePredictions(Option<orbit::Predictions>),
+    SpectrogramUpdated,
 }
 
 fn clamp_line_to_plot(
@@ -55,8 +57,11 @@ impl Overlay {
         mut chart: ChartBuilder<DB>,
         shared: &SharedState,
     ) -> Result<(), String> {
-        let bounds = shared.controls.bounds()
-            * DataNormalizedToDataAbsolute::new(&shared.spectrogram.bounds());
+        let Some(spectrogram) = &shared.spectrogram else {
+            return Err("No spectrogram loaded".to_string());
+        };
+        let bounds =
+            shared.controls.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
         let mut chart = chart
@@ -217,17 +222,14 @@ impl Overlay {
                 ))
                 .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
             let crosshair_norm =
-                *crosshair * DataAbsoluteToDataNormalized::new(&shared.spectrogram.bounds());
-            let dim = shared.spectrogram.data().dim();
-            let power = shared.spectrogram.data()[(
+                *crosshair * DataAbsoluteToDataNormalized::new(&spectrogram.bounds());
+            let dim = spectrogram.data().dim();
+            let power = spectrogram.data()[(
                 ((crosshair_norm.0.x * (dim.0 as f32)).floor() as usize).clamp(0, dim.0 - 1),
                 ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
             )];
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
-                * PlotAreaToDataAbsolute::new(
-                    &shared.controls.bounds(),
-                    &shared.spectrogram.bounds(),
-                );
+                * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
             chart
                 .draw_series(vec![Text::new(
                     format!(
@@ -362,19 +364,22 @@ impl Overlay {
             (keyboard::Key::Character("r"), _) => {
                 (Status::Captured, Some(control::Message::ResetView.into()))
             }
-            (keyboard::Key::Character("s"), Some(pos)) => (
-                Status::Captured,
-                Some(
-                    Message::AddTrackPoint(
-                        pos * ScreenToDataAbsolute::new(
-                            &screen::Size(bounds.size()),
-                            &shared.controls.bounds(),
-                            &shared.spectrogram.bounds(),
-                        ),
-                    )
-                    .into(),
+            (keyboard::Key::Character("s"), Some(pos)) => match &shared.spectrogram {
+                Some(spectrogram) => (
+                    Status::Captured,
+                    Some(
+                        Message::AddTrackPoint(
+                            pos * ScreenToDataAbsolute::new(
+                                &screen::Size(bounds.size()),
+                                &shared.controls.bounds(),
+                                &spectrogram.bounds(),
+                            ),
+                        )
+                        .into(),
+                    ),
                 ),
-            ),
+                None => (Status::Ignored, None),
+            },
             (keyboard::Key::Character("f"), _) => {
                 (Status::Captured, Some(Message::FindSignals.into()))
             }
@@ -399,7 +404,11 @@ impl Overlay {
                 if self.track_points.len() < 2 {
                     Task::none()
                 } else {
-                    let spectrogram = shared.spectrogram.clone();
+                    let Some(spectrogram) = &shared.spectrogram else {
+                        log::error!("No spectrogram loaded, cannot find signals");
+                        return Task::none();
+                    };
+                    let spectrogram = spectrogram.clone();
                     let track_points = self.track_points.clone();
                     let sigma = shared.controls.signal_sigma();
                     let track_bw = shared.controls.track_bw();
@@ -433,40 +442,61 @@ impl Overlay {
                 Task::none()
             }
             Message::UpdateCrosshair(plot_pos) => {
-                self.crosshair = plot_pos.map(|p| {
-                    p * PlotAreaToDataAbsolute::new(
-                        &shared.controls.bounds(),
-                        &shared.spectrogram.bounds(),
-                    )
+                self.crosshair = shared.spectrogram.as_ref().and_then(|spectrogram| {
+                    plot_pos.map(|p| {
+                        p * PlotAreaToDataAbsolute::new(
+                            &shared.controls.bounds(),
+                            &spectrogram.bounds(),
+                        )
+                    })
                 });
                 Task::none()
             }
             Message::SetSatellites(satellites) => {
                 self.satellites = satellites;
-                // TODO: clear previous predictions here?
-                log::debug!("Using {} satellites", self.satellites.len());
-                let satellites = self.satellites.clone();
-                let start_time = shared.spectrogram.start_time;
-                let length_s = shared.spectrogram.length().as_seconds_f64();
-                Task::future(async move {
-                    let result = tokio::task::spawn_blocking(move || {
-                        orbit::predict_satellites(satellites, start_time, length_s)
-                    })
-                    .await;
-                    match result {
-                        Ok(predictions) => Message::SetSatellitePredictions(Some(predictions)),
-                        Err(e) => {
-                            log::error!("Failed to predict satellite passes: {}", e);
-                            Message::SetSatellitePredictions(None)
-                        }
-                    }
-                })
+                self.predict_satellites(shared.spectrogram.as_ref())
             }
             Message::SetSatellitePredictions(predictions) => {
                 self.satellite_predictions = predictions;
                 Task::none()
             }
+            Message::SpectrogramUpdated => {
+                self.satellite_predictions = None;
+                self.track_points.clear();
+                self.signals.clear();
+                self.crosshair = None;
+                self.predict_satellites(shared.spectrogram.as_ref())
+            }
         }
+    }
+
+    fn predict_satellites(&self, spectrogram: Option<&Spectrogram>) -> Task<Message> {
+        let Some(spectrogram) = spectrogram else {
+            log::debug!("No spectrogram loaded, skipping pass predictions");
+            return Task::done(Message::SetSatellitePredictions(None));
+        };
+        if self.satellites.is_empty() {
+            return Task::done(Message::SetSatellitePredictions(None));
+        }
+
+        log::debug!("Predicting {} satellites", self.satellites.len());
+        let satellites = self.satellites.clone();
+
+        let start_time = spectrogram.start_time;
+        let length_s = spectrogram.length().as_seconds_f64();
+        Task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                orbit::predict_satellites(satellites, start_time, length_s)
+            })
+            .await;
+            match result {
+                Ok(predictions) => Message::SetSatellitePredictions(Some(predictions)),
+                Err(e) => {
+                    log::error!("Failed to predict satellite passes: {}", e);
+                    Message::SetSatellitePredictions(None)
+                }
+            }
+        })
     }
 }
 
