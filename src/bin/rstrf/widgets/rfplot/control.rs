@@ -75,7 +75,7 @@ impl Controls {
         )
     }
 
-    pub fn to_data_normalized(&self) -> PlotAreaToDataNormalized {
+    pub fn data_normalized(&self) -> PlotAreaToDataNormalized {
         PlotAreaToDataNormalized::new(&self.bounds())
     }
 
@@ -156,7 +156,6 @@ impl Controls {
         .into()
     }
 
-    #[must_use]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::UpdateZoomX(zoom_x) => {
@@ -166,30 +165,30 @@ impl Controls {
                 self.log_scale.y = zoom_y;
             }
             Message::PanningDelta(delta) => {
-                self.center -= delta * self.to_data_normalized();
+                self.center -= delta * self.data_normalized();
             }
             Message::ZoomDelta(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
 
-                let old_data = plot_pos * self.to_data_normalized();
+                let old_data = plot_pos * self.data_normalized();
                 let prev_zoom = self.log_scale;
                 self.log_scale = (prev_zoom + Vec2::splat(delta))
                     .clamp(Vec2::splat(ZOOM_MIN), Vec2::splat(ZOOM_MAX));
-                let new_data = plot_pos * self.to_data_normalized();
+                let new_data = plot_pos * self.data_normalized();
                 self.center += old_data - new_data;
             }
             Message::ZoomDeltaX(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
-                let old_x = (plot_pos * self.to_data_normalized()).0.x;
+                let old_x = (plot_pos * self.data_normalized()).0.x;
                 self.log_scale.x = (self.log_scale.x + delta).clamp(ZOOM_MIN, ZOOM_MAX);
-                let new_x = (plot_pos * self.to_data_normalized()).0.x;
+                let new_x = (plot_pos * self.data_normalized()).0.x;
                 self.center.0.x += old_x - new_x;
             }
             Message::ZoomDeltaY(plot_pos, delta) => {
                 let delta = delta * ZOOM_WHEEL_SCALE;
-                let old_y = (plot_pos * self.to_data_normalized()).0.y;
+                let old_y = (plot_pos * self.data_normalized()).0.y;
                 self.log_scale.y = (self.log_scale.y + delta).clamp(ZOOM_MIN, ZOOM_MAX);
-                let new_y = (plot_pos * self.to_data_normalized()).0.y;
+                let new_y = (plot_pos * self.data_normalized()).0.y;
                 self.center.0.y += old_y - new_y;
             }
             Message::ResetView => {

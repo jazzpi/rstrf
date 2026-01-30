@@ -30,15 +30,11 @@ impl From<overlay::Message> for Message {
     }
 }
 
+#[derive(Default)]
 pub enum MouseInteraction {
+    #[default]
     Idle,
     Panning(plot_area::Point),
-}
-
-impl Default for MouseInteraction {
-    fn default() -> Self {
-        MouseInteraction::Idle
-    }
 }
 
 struct SharedState {
@@ -66,7 +62,6 @@ impl RFPlot {
         }
     }
 
-    #[must_use]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Control(message) => self.shared.controls.update(message).map(Message::from),

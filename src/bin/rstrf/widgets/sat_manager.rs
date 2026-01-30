@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use iced::{
     Element, Length, Task,
-    alignment::{Horizontal, Vertical},
-    widget::{checkbox, container, scrollable, table, text},
+    widget::{checkbox, scrollable, table, text},
 };
 use rstrf::orbit::Satellite;
 

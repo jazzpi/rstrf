@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::mem::MaybeUninit;
+
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
@@ -59,7 +61,7 @@ END
     };
 
     for (i, slice) in spectrogram.data().outer_iter().enumerate() {
-        writer.write(header(i).as_bytes()).await?;
+        writer.write_all(header(i).as_bytes()).await?;
         for &value in slice.iter() {
             let linear_value = 10f32.powf(value / 10.0);
             writer.write_f32_le(linear_value).await?;
@@ -81,12 +83,11 @@ const HEADER_SIZE: usize = 256;
 
 impl Header {
     pub fn same_params(&self, other: &Self) -> bool {
-        return self.freq == other.freq && self.bw == other.bw && self.nchan == other.nchan;
+        self.freq == other.freq && self.bw == other.bw && self.nchan == other.nchan
     }
 
     pub fn nth_following(&self, nth: i32) -> DateTime<Utc> {
-        self.start_time
-            + chrono::Duration::milliseconds((self.length * 1000.0) as i64) * (nth as i32)
+        self.start_time + chrono::Duration::milliseconds((self.length * 1000.0) as i64) * nth
     }
 }
 
@@ -236,19 +237,16 @@ async fn load_file(path: &std::path::Path) -> Result<Spectrogram> {
     let n_blocks = file_size / (data_block_size + HEADER_SIZE);
 
     let mut raw_data: Vec<f32> = Vec::with_capacity(n_blocks * header.nchan);
-    unsafe {
-        raw_data.set_len(n_blocks * header.nchan);
-    }
-
+    let uninit = raw_data.spare_capacity_mut();
     let mut data_offset = 0usize;
     parse_data(
         &mut reader,
-        &mut raw_data[data_offset..data_offset + header.nchan],
+        &mut uninit[data_offset..data_offset + header.nchan],
     )
     .await?;
     data_offset += header.nchan;
 
-    while data_offset < raw_data.len() {
+    while data_offset < uninit.len() {
         let new_header = parse_header(&mut reader).await?;
         ensure!(
             header.same_params(&new_header),
@@ -267,10 +265,22 @@ async fn load_file(path: &std::path::Path) -> Result<Spectrogram> {
         );
         parse_data(
             &mut reader,
-            &mut raw_data[data_offset..data_offset + header.nchan],
+            &mut uninit[data_offset..data_offset + header.nchan],
         )
         .await?;
         data_offset += header.nchan;
+    }
+
+    ensure!(
+        data_offset == uninit.len(),
+        "Data size mismatch: expected {}, got {}",
+        uninit.len(),
+        data_offset
+    );
+
+    // SAFETY: We have initialized all elements via uninit
+    unsafe {
+        raw_data.set_len(n_blocks * header.nchan);
     }
 
     let min_max = raw_data
@@ -326,10 +336,10 @@ async fn parse_header<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Result
 
 async fn parse_data<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut R,
-    data: &mut [f32],
+    data: &mut [MaybeUninit<f32>],
 ) -> Result<()> {
     for value in data.iter_mut() {
-        *value = reader.read_f32_le().await?;
+        value.write(reader.read_f32_le().await?);
     }
 
     Ok(())

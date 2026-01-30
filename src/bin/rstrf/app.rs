@@ -170,12 +170,11 @@ impl AppModel {
                 }
             },
             Message::SatManager(message) => match message {
-                sat_manager::Message::SatellitesChanged(satellites) => match &mut self.rfplot {
-                    Some(rfplot) => {
+                sat_manager::Message::SatellitesChanged(satellites) => {
+                    if let Some(rfplot) = &mut self.rfplot {
                         return Self::set_rfplot_satellites(rfplot, satellites).map(Message::from);
                     }
-                    None => (),
-                },
+                }
                 _ => return self.sat_manager.update(message).map(Message::from),
             },
             Message::TabSelected(tab_id) => self.active_tab = tab_id,
@@ -183,7 +182,6 @@ impl AppModel {
         Task::none()
     }
 
-    #[must_use]
     fn set_rfplot_satellites(
         rfplot: &mut RFPlot,
         satellites: Vec<Satellite>,

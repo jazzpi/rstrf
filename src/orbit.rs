@@ -60,9 +60,8 @@ pub async fn load_tles(
             ParseState::AwaitLine1OrTitle => {
                 if line.starts_with("1 ") {
                     ParseState::AwaitLine2(None, line)
-                } else if line.starts_with("0 ") {
-                    let title = line[2..].to_string();
-                    ParseState::AwaitLine1(title)
+                } else if let Some(title) = line.strip_prefix("0 ") {
+                    ParseState::AwaitLine1(title.into())
                 } else {
                     ParseState::AwaitLine1(line)
                 }

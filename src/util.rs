@@ -4,7 +4,7 @@ use ndarray::Array1;
 
 // TODO: How can we implement this for f32 as well?
 pub fn minmax(arr: &Array1<f64>) -> (f64, f64) {
-    if arr.len() == 0 {
+    if arr.is_empty() {
         (f64::NAN, f64::NAN)
     } else {
         arr.iter()

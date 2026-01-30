@@ -36,7 +36,7 @@ fn clamp_line_to_plot(
         .tuple_windows()
         .filter_map(|(a, b)| clip_line(&bounds.0, a.0, b.0))
         .flat_map(|(a, b)| vec![a, b])
-        .map(|p| data_absolute::Point(p))
+        .map(data_absolute::Point)
 }
 
 #[derive(Debug, Default, Clone)]
@@ -67,10 +67,10 @@ impl Overlay {
 
         chart
             .configure_mesh()
-            .axis_style(&WHITE)
+            .axis_style(WHITE)
             .label_style(&WHITE)
-            .bold_line_style(&WHITE.mix(0.2))
-            .light_line_style(&WHITE.mix(0.2))
+            .bold_line_style(WHITE.mix(0.2))
+            .light_line_style(WHITE.mix(0.2))
             .y_label_formatter(&|v| format!("{:.1}", v / 1000.0))
             .x_desc("Time [s]")
             .y_desc("Frequency offset [kHz]")
@@ -184,62 +184,62 @@ impl Overlay {
                 }
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
-        if let Some(crosshair) = &self.crosshair {
-            if bounds.contains(*crosshair) {
-                let style = ShapeStyle {
-                    color: WHITE.mix(0.5),
-                    filled: false,
-                    stroke_width: 1,
-                };
-                // Vertical line
-                chart
-                    .draw_series(LineSeries::new(
-                        vec![
-                            data_absolute::Point::new(crosshair.0.x, bounds.0.y),
-                            data_absolute::Point::new(crosshair.0.x, bounds.0.y + bounds.0.height),
-                        ]
-                        .into_iter()
-                        .map(|p| p.into()),
-                        style.clone(),
-                    ))
-                    .map_err(|e| format!("Could not draw crosshair vertical line: {:?}", e))?;
-                // Horizontal line
-                chart
-                    .draw_series(LineSeries::new(
-                        vec![
-                            data_absolute::Point::new(bounds.0.x, crosshair.0.y),
-                            data_absolute::Point::new(bounds.0.x + bounds.0.width, crosshair.0.y),
-                        ]
-                        .into_iter()
-                        .map(|p| p.into()),
-                        style,
-                    ))
-                    .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
-                let crosshair_norm =
-                    *crosshair * DataAbsoluteToDataNormalized::new(&shared.spectrogram.bounds());
-                let dim = shared.spectrogram.data().dim();
-                let power = shared.spectrogram.data()[(
-                    ((crosshair_norm.0.x * (dim.0 as f32)).floor() as usize).clamp(0, dim.0 - 1),
-                    ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
-                )];
-                let crosshair_pos = plot_area::Point::new(0.01, 0.99)
-                    * PlotAreaToDataAbsolute::new(
-                        &shared.controls.bounds(),
-                        &shared.spectrogram.bounds(),
-                    );
-                chart
-                    .draw_series(vec![Text::new(
-                        format!(
-                            "t = {:.01} s\nf = {:.01} kHz\nP = {:.01} dB",
-                            crosshair.0.x,
-                            crosshair.0.y / 1e3,
-                            power
-                        ),
-                        crosshair_pos.into(),
-                        ("sans-serif", 12).into_font().color(&WHITE),
-                    )])
-                    .expect("Could not draw crosshair label");
-            }
+        if let Some(crosshair) = &self.crosshair
+            && bounds.contains(*crosshair)
+        {
+            let style = ShapeStyle {
+                color: WHITE.mix(0.5),
+                filled: false,
+                stroke_width: 1,
+            };
+            // Vertical line
+            chart
+                .draw_series(LineSeries::new(
+                    vec![
+                        data_absolute::Point::new(crosshair.0.x, bounds.0.y),
+                        data_absolute::Point::new(crosshair.0.x, bounds.0.y + bounds.0.height),
+                    ]
+                    .into_iter()
+                    .map(|p| p.into()),
+                    style,
+                ))
+                .map_err(|e| format!("Could not draw crosshair vertical line: {:?}", e))?;
+            // Horizontal line
+            chart
+                .draw_series(LineSeries::new(
+                    vec![
+                        data_absolute::Point::new(bounds.0.x, crosshair.0.y),
+                        data_absolute::Point::new(bounds.0.x + bounds.0.width, crosshair.0.y),
+                    ]
+                    .into_iter()
+                    .map(|p| p.into()),
+                    style,
+                ))
+                .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
+            let crosshair_norm =
+                *crosshair * DataAbsoluteToDataNormalized::new(&shared.spectrogram.bounds());
+            let dim = shared.spectrogram.data().dim();
+            let power = shared.spectrogram.data()[(
+                ((crosshair_norm.0.x * (dim.0 as f32)).floor() as usize).clamp(0, dim.0 - 1),
+                ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
+            )];
+            let crosshair_pos = plot_area::Point::new(0.01, 0.99)
+                * PlotAreaToDataAbsolute::new(
+                    &shared.controls.bounds(),
+                    &shared.spectrogram.bounds(),
+                );
+            chart
+                .draw_series(vec![Text::new(
+                    format!(
+                        "t = {:.01} s\nf = {:.01} kHz\nP = {:.01} dB",
+                        crosshair.0.x,
+                        crosshair.0.y / 1e3,
+                        power
+                    ),
+                    crosshair_pos.into(),
+                    ("sans-serif", 12).into_font().color(&WHITE),
+                )])
+                .expect("Could not draw crosshair label");
         }
 
         Ok(())
@@ -382,7 +382,6 @@ impl Overlay {
         }
     }
 
-    #[must_use]
     pub fn update(&mut self, message: Message, shared: &SharedState) -> Task<Message> {
         match message {
             Message::AddTrackPoint(pos) => {
