@@ -1,13 +1,16 @@
 use std::path::PathBuf;
 
 use iced::{
-    Element, Length, Padding, Task,
+    Element, Length, Padding, Size, Task,
     widget::{self, container},
 };
 use plotters_iced2::ChartWidget;
 use rstrf::{coord::plot_area, spectrogram::Spectrogram};
 
-use crate::panes::rfplot::control::Controls;
+use crate::{
+    app::WorkspaceEvent,
+    panes::{Message as PaneMessage, PaneWidget, rfplot::control::Controls},
+};
 
 mod colormap;
 mod control;
@@ -65,40 +68,54 @@ impl RFPlot {
             overlay: overlay::Overlay::default(),
         }
     }
+}
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+impl PaneWidget for RFPlot {
+    fn update(&mut self, message: PaneMessage) -> Task<PaneMessage> {
         match message {
-            Message::Control(message) => self.shared.controls.update(message).map(Message::from),
-            Message::Overlay(message) => self
-                .overlay
-                .update(message, &self.shared)
-                .map(Message::from),
-            Message::LoadSpectrogram(paths) => Task::future(async move {
-                let spec = rstrf::spectrogram::load(&paths).await;
-                Message::SpectrogramLoaded(spec.map_err(|e| format!("{e:?}")))
-            }),
-            Message::SpectrogramLoaded(result) => match result {
-                Ok(spec) => {
-                    log::info!("Loaded spectrogram: {spec:?}");
-                    self.shared.controls.set_power_bounds(spec.power_bounds);
-                    self.shared.spectrogram = Some(spec);
-                    self.overlay
-                        .update(overlay::Message::SpectrogramUpdated, &self.shared)
-                        .map(Message::from)
-                }
-                Err(err) => {
-                    log::error!("failed to load spectrogram: {err}");
-                    Task::none()
-                }
+            PaneMessage::RFPlot(message) => match message {
+                Message::Control(message) => self
+                    .shared
+                    .controls
+                    .update(message)
+                    .map(|m| PaneMessage::RFPlot(m.into())),
+                Message::Overlay(message) => self
+                    .overlay
+                    .update(message, &self.shared)
+                    .map(|m| PaneMessage::RFPlot(m.into())),
+                Message::LoadSpectrogram(paths) => Task::future(async move {
+                    let spec = rstrf::spectrogram::load(&paths).await;
+                    Message::SpectrogramLoaded(spec.map_err(|e| format!("{e:?}"))).into()
+                }),
+                Message::SpectrogramLoaded(result) => match result {
+                    Ok(spec) => {
+                        log::info!("Loaded spectrogram: {spec:?}");
+                        self.shared.controls.set_power_bounds(spec.power_bounds);
+                        self.shared.spectrogram = Some(spec);
+                        self.overlay
+                            .update(overlay::Message::SpectrogramUpdated, &self.shared)
+                            .map(|m| PaneMessage::RFPlot(m.into()))
+                    }
+                    Err(err) => {
+                        log::error!("failed to load spectrogram: {err}");
+                        Task::none()
+                    }
+                },
             },
+            PaneMessage::Workspace(event) => match event {
+                WorkspaceEvent::SatellitesChanged(satellites) => self
+                    .overlay
+                    .update(overlay::Message::SetSatellites(satellites), &self.shared)
+                    .map(|m| PaneMessage::RFPlot(m.into())),
+            },
+            _ => Task::none(),
         }
     }
 
-    /// Build the RFPlot widget view.
-    ///
-    /// The plot itself is implemented as a stack of two layers: the spectrogram itself (see
-    /// `shader.rs`) and the overlay (see `overlay.rs`).
-    pub fn view(&self) -> Element<'_, Message> {
+    fn view(&self, _size: Size) -> Element<'_, PaneMessage> {
+        // The plot is implemented as a stack of two layers: the spectrogram itself (see
+        // `shader.rs`) and the overlay (see `overlay.rs`).
+
         if self.shared.spectrogram.is_none() {
             return container(widget::text("Loading spectrogram...").size(16))
                 .center(Length::Fill)
@@ -126,11 +143,16 @@ impl RFPlot {
 
         let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay,].into();
 
-        widget::column![plot_area, controls]
+        let result: Element<'_, Message> = widget::column![plot_area, controls]
             .padding(10)
             .spacing(10)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .into();
+        result.map(PaneMessage::from)
+    }
+
+    fn title(&self) -> &str {
+        "Plot"
     }
 }

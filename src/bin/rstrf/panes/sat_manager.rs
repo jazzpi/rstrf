@@ -1,10 +1,15 @@
 use std::path::PathBuf;
 
 use iced::{
-    Element, Length, Task,
+    Element, Length, Size, Task,
     widget::{checkbox, scrollable, table, text},
 };
 use rstrf::orbit::Satellite;
+
+use crate::{
+    app::WorkspaceEvent,
+    panes::{Message as PaneMessage, PaneWidget},
+};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -13,8 +18,6 @@ pub enum Message {
         freqs_path: PathBuf,
     },
     SatellitesLoaded(Result<Vec<Satellite>, String>),
-    /// For notifying the parent that the satellite list has changed
-    SatellitesChanged(Vec<Satellite>),
     SatelliteToggled(usize, bool),
 }
 
@@ -29,7 +32,60 @@ impl SatManager {
         }
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    pub fn satellites(&self) -> Vec<Satellite> {
+        self.satellites
+            .iter()
+            .filter_map(|(sat, active)| if *active { Some(sat.clone()) } else { None })
+            .collect::<Vec<_>>()
+    }
+}
+
+impl PaneWidget for SatManager {
+    fn update(&mut self, message: PaneMessage) -> Task<PaneMessage> {
+        match message {
+            PaneMessage::SatManager(message) => match message {
+                Message::LoadTLEs {
+                    tle_path,
+                    freqs_path,
+                } => Task::future(async move {
+                    let satellites: anyhow::Result<_> = async {
+                        let freqs = rstrf::orbit::load_frequencies(&freqs_path).await?;
+                        rstrf::orbit::load_tles(&tle_path, freqs).await
+                    }
+                    .await;
+                    PaneMessage::SatManager(Message::SatellitesLoaded(
+                        satellites.map_err(|e| format!("{e:?}")),
+                    ))
+                }),
+                Message::SatellitesLoaded(satellites) => match satellites {
+                    Ok(satellites) => {
+                        log::info!("Loaded {} satellites", satellites.len());
+                        self.satellites = satellites.into_iter().map(|sat| (sat, true)).collect();
+                        Task::done(PaneMessage::Workspace(WorkspaceEvent::SatellitesChanged(
+                            self.satellites(),
+                        )))
+                    }
+                    Err(err) => {
+                        log::error!("Failed to load satellites: {}", err);
+                        Task::none()
+                    }
+                },
+                Message::SatelliteToggled(idx, active) => {
+                    let Some((_, sat_active)) = self.satellites.get_mut(idx) else {
+                        log::error!("Invalid satellite index toggled: {}", idx);
+                        return Task::none();
+                    };
+                    *sat_active = active;
+                    Task::done(PaneMessage::Workspace(WorkspaceEvent::SatellitesChanged(
+                        self.satellites(),
+                    )))
+                }
+            },
+            _ => Task::none(),
+        }
+    }
+
+    fn view(&self, _size: Size) -> Element<'_, PaneMessage> {
         let columns = [
             table::column(
                 text("Norad ID"),
@@ -60,52 +116,15 @@ impl SatManager {
                 },
             ),
         ];
-        scrollable(table(columns, self.satellites.iter().enumerate()))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        let result: Element<'_, Message> =
+            scrollable(table(columns, self.satellites.iter().enumerate()))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+        result.map(PaneMessage::from)
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::LoadTLEs {
-                tle_path,
-                freqs_path,
-            } => Task::future(async move {
-                let satellites: anyhow::Result<_> = async {
-                    let freqs = rstrf::orbit::load_frequencies(&freqs_path).await?;
-                    rstrf::orbit::load_tles(&tle_path, freqs).await
-                }
-                .await;
-                Message::SatellitesLoaded(satellites.map_err(|e| format!("{e:?}")))
-            }),
-            Message::SatellitesLoaded(satellites) => match satellites {
-                Ok(satellites) => {
-                    log::info!("Loaded {} satellites", satellites.len());
-                    self.satellites = satellites.into_iter().map(|sat| (sat, true)).collect();
-                    Task::done(Message::SatellitesChanged(self.satellites().to_vec()))
-                }
-                Err(err) => {
-                    log::error!("Failed to load satellites: {}", err);
-                    Task::none()
-                }
-            },
-            Message::SatellitesChanged(_) => Task::none(),
-            Message::SatelliteToggled(idx, active) => {
-                let Some((_, sat_active)) = self.satellites.get_mut(idx) else {
-                    log::error!("Invalid satellite index toggled: {}", idx);
-                    return Task::none();
-                };
-                *sat_active = active;
-                Task::done(Message::SatellitesChanged(self.satellites()))
-            }
-        }
-    }
-
-    pub fn satellites(&self) -> Vec<Satellite> {
-        self.satellites
-            .iter()
-            .filter_map(|(sat, active)| if *active { Some(sat.clone()) } else { None })
-            .collect::<Vec<_>>()
+    fn title(&self) -> &str {
+        "Satellites"
     }
 }

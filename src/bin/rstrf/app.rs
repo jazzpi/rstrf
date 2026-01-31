@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::Args;
 use crate::config::Config;
+use crate::panes::PaneWidget;
 use crate::panes::rfplot::{self, RFPlot};
 use crate::panes::sat_manager::{self, SatManager};
+use crate::{Args, panes};
 use iced::Application;
 use iced::widget::{PaneGrid, pane_grid, responsive, text};
 use iced::{Element, Program, Subscription, Task, Theme};
+use rstrf::orbit::Satellite;
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
@@ -14,7 +16,7 @@ pub struct AppModel {
     #[allow(dead_code)]
     /// Configuration data that persists between application runs.
     config: Config,
-    panes: pane_grid::State<Pane>,
+    panes: pane_grid::State<Box<dyn panes::PaneWidget>>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -22,25 +24,12 @@ pub struct AppModel {
 pub enum Message {
     #[allow(dead_code)]
     UpdateConfig(Config),
-    PaneMessage(pane_grid::Pane, PaneMessage),
+    PaneMessage(pane_grid::Pane, panes::Message),
 }
 
 #[derive(Debug, Clone)]
-pub enum PaneMessage {
-    RFPlot(rfplot::Message),
-    SatManager(sat_manager::Message),
-}
-
-impl From<rfplot::Message> for PaneMessage {
-    fn from(msg: rfplot::Message) -> Self {
-        PaneMessage::RFPlot(msg)
-    }
-}
-
-impl From<sat_manager::Message> for PaneMessage {
-    fn from(msg: sat_manager::Message) -> Self {
-        PaneMessage::SatManager(msg)
-    }
+pub enum WorkspaceEvent {
+    SatellitesChanged(Vec<Satellite>),
 }
 
 impl AppModel {
@@ -61,50 +50,53 @@ impl AppModel {
 
         let mut spectrogram_task = Some(
             rfplot
-                .update(rfplot::Message::LoadSpectrogram(
-                    flags.spectrogram_path.clone(),
-                ))
-                .map(PaneMessage::from),
+                .update(rfplot::Message::LoadSpectrogram(flags.spectrogram_path.clone()).into())
+                .map(panes::Message::from),
         );
         let mut tle_task = flags.tle_path.map(|tle_path| {
             let freqs_path = flags
                 .frequencies_path
                 .expect("frequencies_path should be present when tle_path is present");
             sat_manager
-                .update(sat_manager::Message::LoadTLEs {
-                    tle_path,
-                    freqs_path,
-                })
-                .map(PaneMessage::from)
+                .update(
+                    sat_manager::Message::LoadTLEs {
+                        tle_path,
+                        freqs_path,
+                    }
+                    .into(),
+                )
+                .map(panes::Message::from)
         });
 
         let panes = pane_grid::State::with_configuration(pane_grid::Configuration::Split {
             axis: pane_grid::Axis::Vertical,
             ratio: 0.7,
-            a: Box::new(pane_grid::Configuration::Pane(Pane::RFPlot(rfplot))),
-            b: Box::new(pane_grid::Configuration::Pane(Pane::SatManager(
-                sat_manager,
-            ))),
+            a: Box::new(pane_grid::Configuration::<Box<dyn PaneWidget>>::Pane(
+                Box::new(rfplot),
+            )),
+            b: Box::new(pane_grid::Configuration::Pane(Box::new(sat_manager))),
         });
 
+        // TODO: This is necessary to route the tasks to the correct panes. But holy cow is it ugly.
         let mut tasks: Vec<Task<Message>> = Vec::new();
         for (id, state) in panes.iter() {
             let id = *id;
-            match state {
-                Pane::RFPlot(_) => {
+            match state.title() {
+                "Plot" => {
                     let Some(task) = spectrogram_task else {
                         continue;
                     };
                     tasks.push(task.map(move |m| Message::PaneMessage(id, m)));
                     spectrogram_task = None;
                 }
-                Pane::SatManager(_) => {
+                "Satellites" => {
                     let Some(task) = tle_task else {
                         continue;
                     };
                     tasks.push(task.map(move |m| Message::PaneMessage(id, m)));
                     tle_task = None;
                 }
+                _ => (),
             }
         }
 
@@ -125,8 +117,10 @@ impl AppModel {
         let pane_grid = PaneGrid::new(&self.panes, move |id, pane, _is_maximized| {
             let title = text(pane.title());
             let title_bar = pane_grid::TitleBar::new(title);
-            pane_grid::Content::new(responsive(move |size| pane.view(id, size)))
-                .title_bar(title_bar)
+            pane_grid::Content::new(responsive(move |size| {
+                pane.view(size).map(move |m| Message::PaneMessage(id, m))
+            }))
+            .title_bar(title_bar)
         });
         pane_grid.into()
     }
@@ -151,88 +145,31 @@ impl AppModel {
                 self.config = config;
             }
             Message::PaneMessage(id, pane_message) => {
-                let mut tasks = self.forward_updates(&pane_message);
-
-                match self.panes.get_mut(id) {
-                    Some(pane) => tasks.push(
-                        pane.update(pane_message)
-                            .map(move |m| Message::PaneMessage(id, m)),
-                    ),
-                    None => log::warn!("Received PaneMessage for unknown pane ID {:?}", id),
-                }
+                let tasks = match &pane_message {
+                    panes::Message::Workspace(_) => self
+                        .panes
+                        .iter_mut()
+                        .map(|(id, pane)| {
+                            let id = *id;
+                            pane.update(pane_message.clone())
+                                .map(move |m| Message::PaneMessage(id, m))
+                        })
+                        .collect(),
+                    _ => match self.panes.get_mut(id) {
+                        Some(pane) => vec![
+                            pane.update(pane_message)
+                                .map(move |m| Message::PaneMessage(id, m)),
+                        ],
+                        None => {
+                            log::warn!("Received PaneMessage for unknown pane ID {:?}", id);
+                            Vec::new()
+                        }
+                    },
+                };
 
                 return Task::batch(tasks);
             }
         }
         Task::none()
-    }
-
-    fn forward_updates(&mut self, pane_message: &PaneMessage) -> Vec<Task<Message>> {
-        match pane_message {
-            PaneMessage::SatManager(sat_manager::Message::SatellitesChanged(satellites)) => self
-                .panes
-                .iter_mut()
-                .filter_map(|(id, p)| {
-                    let id = *id;
-                    match p {
-                        Pane::RFPlot(rfplot) => Some(
-                            rfplot
-                                .update(
-                                    rfplot::overlay::Message::SetSatellites(satellites.clone())
-                                        .into(),
-                                )
-                                .map(move |m| Message::PaneMessage(id, m.into())),
-                        ),
-                        _ => None,
-                    }
-                })
-                .collect(),
-            _ => Vec::new(),
-        }
-    }
-}
-
-#[allow(clippy::large_enum_variant)]
-enum Pane {
-    RFPlot(RFPlot),
-    SatManager(SatManager),
-}
-
-impl Pane {
-    fn title(&self) -> &str {
-        match self {
-            Pane::RFPlot(_) => "Plot",
-            Pane::SatManager(_) => "Satellites",
-        }
-    }
-
-    fn view(&self, id: pane_grid::Pane, _size: iced::Size) -> Element<'_, Message> {
-        match self {
-            Pane::RFPlot(rfplot) => rfplot
-                .view()
-                .map(move |msg| Message::PaneMessage(id, PaneMessage::RFPlot(msg))),
-            Pane::SatManager(sat_manager) => sat_manager
-                .view()
-                .map(move |msg| Message::PaneMessage(id, PaneMessage::SatManager(msg))),
-        }
-    }
-
-    fn update(&mut self, message: PaneMessage) -> Task<PaneMessage> {
-        match self {
-            Pane::RFPlot(rfplot) => match message {
-                PaneMessage::RFPlot(msg) => rfplot.update(msg).map(PaneMessage::from),
-                _ => {
-                    log::warn!("Received incompatible PaneMessage for RFPlot pane");
-                    Task::none()
-                }
-            },
-            Pane::SatManager(sat_manager) => match message {
-                PaneMessage::SatManager(msg) => sat_manager.update(msg).map(PaneMessage::from),
-                _ => {
-                    log::warn!("Received incompatible PaneMessage for SatManager pane");
-                    Task::none()
-                }
-            },
-        }
     }
 }
