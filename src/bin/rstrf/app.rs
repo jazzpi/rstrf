@@ -7,6 +7,8 @@ use crate::panes::sat_manager::{self, SatManager};
 use crate::{Args, panes};
 use iced::Application;
 use iced::widget::{PaneGrid, button, pane_grid, responsive, row, text};
+use iced::window::Settings;
+use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::orbit::Satellite;
 
@@ -43,8 +45,15 @@ impl AppModel {
         iced::application(move || Self::init(args.clone()), Self::update, Self::view)
             .subscription(Self::subscription)
             .theme(Theme::Dark)
+            .title(Self::title)
+            .window(Settings {
+                platform_specific: PlatformSpecific {
+                    application_id: "de.jazzpi.rstrf".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
         // TODO
-        // .title(Self::title)
         // .font()
         // .presets()
     }
@@ -234,6 +243,10 @@ impl AppModel {
             }
         }
         Task::none()
+    }
+
+    fn title(&self) -> String {
+        "rSTRF".into()
     }
 }
 
