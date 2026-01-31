@@ -6,7 +6,7 @@ use crate::panes::rfplot::{self, RFPlot};
 use crate::panes::sat_manager::{self, SatManager};
 use crate::{Args, panes};
 use iced::Application;
-use iced::widget::{PaneGrid, pane_grid, responsive, text};
+use iced::widget::{PaneGrid, button, pane_grid, responsive, row, text};
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::orbit::Satellite;
 
@@ -17,6 +17,7 @@ pub struct AppModel {
     /// Configuration data that persists between application runs.
     config: Config,
     panes: pane_grid::State<Box<dyn panes::PaneWidget>>,
+    focused_pane: Option<pane_grid::Pane>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -25,6 +26,11 @@ pub enum Message {
     #[allow(dead_code)]
     UpdateConfig(Config),
     PaneMessage(pane_grid::Pane, panes::Message),
+    ClosePane(pane_grid::Pane),
+    ToggleMaximizePane(pane_grid::Pane),
+    PaneClicked(pane_grid::Pane),
+    PaneDragged(pane_grid::DragEvent),
+    PaneResized(pane_grid::ResizeEvent),
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +110,7 @@ impl AppModel {
         let app = AppModel {
             config: Config::default(),
             panes,
+            focused_pane: None,
         };
 
         (app, command)
@@ -115,13 +122,41 @@ impl AppModel {
     /// events received by widgets will be passed to the update method.
     fn view(&self) -> Element<'_, Message> {
         let pane_grid = PaneGrid::new(&self.panes, move |id, pane, _is_maximized| {
+            let is_focused = Some(id) == self.focused_pane;
             let title = text(pane.title());
-            let title_bar = pane_grid::TitleBar::new(title);
+            let title_bar = pane_grid::TitleBar::new(title)
+                .controls(pane_grid::Controls::new(
+                    row![
+                        // TODO: Use icons
+                        button(text("M").size(14))
+                            .style(button::secondary)
+                            .on_press(Message::ToggleMaximizePane(id)),
+                        button(text("X").size(14))
+                            .style(button::danger)
+                            .on_press(Message::ClosePane(id)),
+                    ]
+                    .spacing(5),
+                ))
+                .padding(10)
+                .style(if is_focused {
+                    style::title_bar_focused
+                } else {
+                    style::title_bar_unfocused
+                });
             pane_grid::Content::new(responsive(move |size| {
                 pane.view(size).map(move |m| Message::PaneMessage(id, m))
             }))
             .title_bar(title_bar)
-        });
+            .style(if is_focused {
+                style::pane_focused
+            } else {
+                style::pane_unfocused
+            })
+        })
+        .spacing(10)
+        .on_click(Message::PaneClicked)
+        .on_drag(Message::PaneDragged)
+        .on_resize(10, Message::PaneResized);
         pane_grid.into()
     }
 
@@ -169,7 +204,83 @@ impl AppModel {
 
                 return Task::batch(tasks);
             }
+            Message::ClosePane(pane) => {
+                if self.panes.len() == 1 {
+                    // TODO: Replace with a placeholder?
+                    return Task::none();
+                }
+                let Some((_, sibling)) = self.panes.close(pane) else {
+                    log::warn!("Tried to close unknown pane {:?}", pane);
+                    return Task::none();
+                };
+                self.focused_pane = Some(sibling);
+            }
+            Message::ToggleMaximizePane(pane) => {
+                if self.panes.maximized().is_some() {
+                    self.panes.restore();
+                } else {
+                    self.panes.maximize(pane);
+                }
+            }
+            Message::PaneClicked(pane) => {
+                self.focused_pane = Some(pane);
+            }
+            Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
+                self.panes.drop(pane, target);
+            }
+            Message::PaneDragged(_) => (),
+            Message::PaneResized(ev) => {
+                self.panes.resize(ev.split, ev.ratio);
+            }
         }
         Task::none()
+    }
+}
+
+mod style {
+    use iced::{Border, Theme, widget::container::Style};
+
+    pub fn title_bar_focused(theme: &Theme) -> Style {
+        let palette = theme.extended_palette();
+        Style {
+            text_color: Some(palette.primary.strong.text),
+            background: Some(palette.primary.strong.color.into()),
+            ..Style::default()
+        }
+    }
+
+    pub fn title_bar_unfocused(theme: &Theme) -> Style {
+        let palette = theme.extended_palette();
+        Style {
+            text_color: Some(palette.background.strong.text),
+            background: Some(palette.background.strong.color.into()),
+            ..Style::default()
+        }
+    }
+
+    pub fn pane_focused(theme: &Theme) -> Style {
+        let palette = theme.extended_palette();
+        Style {
+            background: Some(palette.background.weak.color.into()),
+            border: Border {
+                width: 2.0,
+                color: palette.primary.strong.color,
+                ..Border::default()
+            },
+            ..Style::default()
+        }
+    }
+
+    pub fn pane_unfocused(theme: &Theme) -> Style {
+        let palette = theme.extended_palette();
+        Style {
+            background: Some(palette.background.weak.color.into()),
+            border: Border {
+                width: 2.0,
+                color: palette.background.strong.color,
+                ..Border::default()
+            },
+            ..Style::default()
+        }
     }
 }
