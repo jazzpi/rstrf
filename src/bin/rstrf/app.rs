@@ -11,6 +11,7 @@ use iced::window::Settings;
 use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::orbit::Satellite;
+use std::fmt::Debug;
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
@@ -35,9 +36,19 @@ pub enum Message {
     PaneResized(pane_grid::ResizeEvent),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum WorkspaceEvent {
     SatellitesChanged(Vec<Satellite>),
+}
+
+impl Debug for WorkspaceEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WorkspaceEvent::SatellitesChanged(sats) => {
+                write!(f, "WorkspaceEvent::SatellitesChanged(len={})", sats.len())
+            }
+        }
+    }
 }
 
 impl AppModel {
