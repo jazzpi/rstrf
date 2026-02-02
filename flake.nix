@@ -1,7 +1,7 @@
 # Adapted from https://wiki.nixos.org/wiki/Rust#Installation_via_rustup
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
   outputs =
