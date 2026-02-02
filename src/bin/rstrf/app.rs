@@ -28,6 +28,7 @@ pub struct AppModel {
 pub enum Message {
     #[allow(dead_code)]
     UpdateConfig(Config),
+    #[allow(clippy::enum_variant_names)]
     PaneMessage(pane_grid::Pane, panes::Message),
     ClosePane(pane_grid::Pane),
     ToggleMaximizePane(pane_grid::Pane),
