@@ -74,11 +74,15 @@ impl AppModel {
         let mut rfplot = RFPlot::new();
         let mut sat_manager = SatManager::new();
 
-        let mut spectrogram_task = Some(
-            rfplot
-                .update(rfplot::Message::LoadSpectrogram(flags.spectrogram_path.clone()).into())
-                .map(panes::Message::from),
-        );
+        let mut spectrogram_task = if flags.spectrogram_path.is_empty() {
+            None
+        } else {
+            Some(
+                rfplot
+                    .update(rfplot::Message::LoadSpectrogram(flags.spectrogram_path.clone()).into())
+                    .map(panes::Message::from),
+            )
+        };
         let mut tle_task = flags.tle_path.map(|tle_path| {
             let freqs_path = flags
                 .frequencies_path

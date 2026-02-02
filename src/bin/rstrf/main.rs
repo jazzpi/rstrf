@@ -13,7 +13,7 @@ use crate::app::AppModel;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Spectrogram files to load
-    #[arg(value_name = "SPECTROGRAM_PATH", required = true)]
+    #[arg(value_name = "SPECTROGRAM_PATH", required = false)]
     spectrogram_path: Vec<PathBuf>,
     /// TLE file to load
     #[arg(short, long, value_name = "TLE_PATH", requires = "frequencies_path")]

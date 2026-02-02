@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use iced::{
     Element, Length, Padding, Size, Task,
-    widget::{self, container},
+    widget::{self, button, container},
 };
 use plotters_iced2::ChartWidget;
+use rfd::AsyncFileDialog;
 use rstrf::{coord::plot_area, spectrogram::Spectrogram};
 
 use crate::{
@@ -21,8 +22,10 @@ mod shader;
 pub enum Message {
     Control(control::Message),
     Overlay(overlay::Message),
+    PickSpectrogram,
     LoadSpectrogram(Vec<PathBuf>),
     SpectrogramLoaded(Result<Spectrogram, String>),
+    Nop,
 }
 
 impl From<control::Message> for Message {
@@ -101,6 +104,24 @@ impl PaneWidget for RFPlot {
                         Task::none()
                     }
                 },
+                Message::PickSpectrogram => Task::future(async {
+                    let files = AsyncFileDialog::new()
+                        .add_filter("RFFFT spectrograms", &["bin"])
+                        .add_filter("All files", &["*"])
+                        .pick_files()
+                        .await;
+                    if let Some(files) = files
+                        && !files.is_empty()
+                    {
+                        Message::LoadSpectrogram(
+                            files.iter().map(|f| f.path().to_path_buf()).collect(),
+                        )
+                        .into()
+                    } else {
+                        Message::Nop.into()
+                    }
+                }),
+                Message::Nop => Task::none(),
             },
             PaneMessage::Workspace(event) => match event {
                 WorkspaceEvent::SatellitesChanged(satellites) => self
@@ -117,9 +138,13 @@ impl PaneWidget for RFPlot {
         // `shader.rs`) and the overlay (see `overlay.rs`).
 
         if self.shared.spectrogram.is_none() {
-            return container(widget::text("Loading spectrogram...").size(16))
-                .center(Length::Fill)
-                .into();
+            return container(
+                button("Open Spectrogram")
+                    .style(button::primary)
+                    .on_press(Message::PickSpectrogram.into()),
+            )
+            .center(Length::Fill)
+            .into();
         }
 
         let controls = self.shared.controls.view().map(Message::from);
