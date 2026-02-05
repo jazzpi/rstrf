@@ -6,7 +6,7 @@ use crate::panes::rfplot::{self, RFPlot};
 use crate::panes::sat_manager::{self, SatManager};
 use crate::{Args, panes};
 use iced::Application;
-use iced::widget::{PaneGrid, button, pane_grid, responsive, row, text};
+use iced::widget::{PaneGrid, button, column, pane_grid, responsive, row, text};
 use iced::window::Settings;
 use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
@@ -35,6 +35,7 @@ pub enum Message {
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
+    Menu(rstrf::menu::Message),
 }
 
 #[derive(Clone)]
@@ -146,6 +147,7 @@ impl AppModel {
     /// Application events will be processed through the view. Any messages emitted by
     /// events received by widgets will be passed to the update method.
     fn view(&self) -> Element<'_, Message> {
+        let mb = rstrf::menu::view().map(Message::Menu);
         let pane_grid = PaneGrid::new(&self.panes, move |id, pane, _is_maximized| {
             let is_focused = Some(id) == self.focused_pane;
             let title = text(pane.title());
@@ -182,7 +184,7 @@ impl AppModel {
         .on_click(Message::PaneClicked)
         .on_drag(Message::PaneDragged)
         .on_resize(10, Message::PaneResized);
-        pane_grid.into()
+        column![mb, pane_grid].into()
     }
 
     /// Register subscriptions for this application.
@@ -256,6 +258,9 @@ impl AppModel {
             Message::PaneDragged(_) => (),
             Message::PaneResized(ev) => {
                 self.panes.resize(ev.split, ev.ratio);
+            }
+            Message::Menu(message) => {
+                log::debug!("{:?}", message)
             }
         }
         Task::none()

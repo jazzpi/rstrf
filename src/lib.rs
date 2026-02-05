@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod coord;
+pub mod menu;
 pub mod orbit;
 pub mod signal;
 pub mod spectrogram;
