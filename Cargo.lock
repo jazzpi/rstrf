@@ -3752,6 +3752,8 @@ dependencies = [
  "regex",
  "rfd",
  "scirs2-ndimage",
+ "serde",
+ "serde_json",
  "sgp4",
  "tokio",
 ]

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::config::Config;
-use crate::panes::PaneWidget;
-use crate::panes::rfplot::{self, RFPlot};
-use crate::panes::sat_manager::{self, SatManager};
+use crate::workspace::Workspace;
 use crate::{Args, panes};
 use iced::Application;
 use iced::widget::{PaneGrid, button, column, pane_grid, responsive, row, text};
 use iced::window::Settings;
 use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
+use rfd::AsyncFileDialog;
 use rstrf::orbit::Satellite;
 use std::fmt::Debug;
+use std::path::PathBuf;
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
@@ -19,7 +19,7 @@ pub struct AppModel {
     #[allow(dead_code)]
     /// Configuration data that persists between application runs.
     config: Config,
-    panes: pane_grid::State<Box<dyn panes::PaneWidget>>,
+    panes: panes::PaneGridState,
     focused_pane: Option<pane_grid::Pane>,
 }
 
@@ -36,6 +36,8 @@ pub enum Message {
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     Menu(rstrf::menu::Message),
+    // TODO: move to workspace mod
+    LoadWorkspace(PathBuf),
 }
 
 #[derive(Clone)]
@@ -73,71 +75,20 @@ impl AppModel {
 
     /// Initializes the application with any given flags and startup commands.
     fn init(flags: Args) -> (Self, Task<Message>) {
-        let mut rfplot = RFPlot::new();
-        let mut sat_manager = SatManager::new();
+        let (panes, _) = panes::PaneGridState::new(Box::new(panes::Dummy {}));
 
-        let mut spectrogram_task = if flags.spectrogram_path.is_empty() {
-            None
-        } else {
-            Some(
-                rfplot
-                    .update(rfplot::Message::LoadSpectrogram(flags.spectrogram_path.clone()).into())
-                    .map(panes::Message::from),
-            )
-        };
-        let mut tle_task = flags.tle_path.map(|tle_path| {
-            let freqs_path = flags
-                .frequencies_path
-                .expect("frequencies_path should be present when tle_path is present");
-            sat_manager
-                .update(
-                    sat_manager::Message::LoadTLEs {
-                        tle_path,
-                        freqs_path,
-                    }
-                    .into(),
-                )
-                .map(panes::Message::from)
-        });
-
-        let panes = pane_grid::State::with_configuration(pane_grid::Configuration::Split {
-            axis: pane_grid::Axis::Vertical,
-            ratio: 0.7,
-            a: Box::new(pane_grid::Configuration::<Box<dyn PaneWidget>>::Pane(
-                Box::new(rfplot),
-            )),
-            b: Box::new(pane_grid::Configuration::Pane(Box::new(sat_manager))),
-        });
-
-        // TODO: This is necessary to route the tasks to the correct panes. But holy cow is it ugly.
         let mut tasks: Vec<Task<Message>> = Vec::new();
-        for (id, state) in panes.iter() {
-            let id = *id;
-            match state.title() {
-                "Plot" => {
-                    let Some(task) = spectrogram_task else {
-                        continue;
-                    };
-                    tasks.push(task.map(move |m| Message::PaneMessage(id, m)));
-                    spectrogram_task = None;
-                }
-                "Satellites" => {
-                    let Some(task) = tle_task else {
-                        continue;
-                    };
-                    tasks.push(task.map(move |m| Message::PaneMessage(id, m)));
-                    tle_task = None;
-                }
-                _ => (),
-            }
+        if let Some(path) = flags.workspace {
+            tasks.push(Task::done(Message::LoadWorkspace(path)));
         }
 
-        let command = Task::batch(tasks);
-        let app = AppModel {
+        let mut app = AppModel {
             config: Config::default(),
             panes,
             focused_pane: None,
         };
+        tasks.push(app.reset_workspace(Workspace::default()));
+        let command = Task::batch(tasks);
 
         (app, command)
     }
@@ -259,8 +210,27 @@ impl AppModel {
             Message::PaneResized(ev) => {
                 self.panes.resize(ev.split, ev.ratio);
             }
-            Message::Menu(message) => {
-                log::debug!("{:?}", message)
+            Message::Menu(message) => match message {
+                rstrf::menu::Message::WorkspacePick => {
+                    return Task::future(async {
+                        let path = AsyncFileDialog::new()
+                            .add_filter("Workspaces", &["json"])
+                            .pick_file()
+                            .await
+                            .map(|f| f.path().to_path_buf());
+                        log::debug!("Picked workspace file: {:?}", path);
+                        path
+                    })
+                    .and_then(|p| Task::done(Message::LoadWorkspace(p)));
+                }
+                rstrf::menu::Message::WorkspaceSave => log::warn!("TODO: Save workspace"),
+            },
+            Message::LoadWorkspace(path) => {
+                let ws = Workspace::load(path);
+                match ws {
+                    Ok(ws) => return self.reset_workspace(ws),
+                    Err(err) => log::error!("Failed to load workspace: {:?}", err),
+                }
             }
         }
         Task::none()
@@ -268,6 +238,21 @@ impl AppModel {
 
     fn title(&self) -> String {
         "rSTRF".into()
+    }
+
+    fn reset_workspace(&mut self, ws: Workspace) -> Task<Message> {
+        log::debug!("Loaded workspace: {:?}", ws);
+        let panes = panes::from_tree(ws.panes);
+        match panes {
+            Ok((state, task)) => {
+                self.panes = state;
+                task.map(|msg| Message::PaneMessage(msg.id, msg.message))
+            }
+            Err(err) => {
+                log::error!("Failed to generate panes from workspace: {:?}", err);
+                Task::none()
+            }
+        }
     }
 }
 

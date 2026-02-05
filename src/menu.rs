@@ -11,7 +11,7 @@ use iced_aw::{
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    WorkspaceOpen,
+    WorkspacePick,
     WorkspaceSave,
 }
 
@@ -66,7 +66,7 @@ pub fn view<'a>() -> Element<'a, Message> {
     menu_bar!((
         button_s("Workspace", None),
         menu(menu_items!(
-            (button_f("Open", Some(Message::WorkspaceOpen))),
+            (button_f("Open", Some(Message::WorkspacePick))),
             (button_f("Save", Some(Message::WorkspaceSave))),
         ))
     ))
