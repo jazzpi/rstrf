@@ -4,9 +4,14 @@ use iced::{
     Element, Length, Padding, Size, Task,
     widget::{self, button, container},
 };
+use iced_aw::{menu_bar, menu_items};
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
-use rstrf::{coord::plot_area, spectrogram::Spectrogram};
+use rstrf::{
+    coord::plot_area,
+    menu::{button_f, button_s, submenu, view_menu},
+    spectrogram::Spectrogram,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -164,6 +169,12 @@ impl PaneWidget for RFPlot {
             .into();
         }
 
+        let mb = view_menu(menu_bar!((
+            button_s("Spectrogram", None),
+            submenu(menu_items!(
+                (button_f("Load file(s)", Some(Message::PickSpectrogram))),
+            ))
+        )));
         let controls = self.shared.controls.view().map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
@@ -185,9 +196,13 @@ impl PaneWidget for RFPlot {
 
         let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay,].into();
 
-        let result: Element<'_, Message> = widget::column![plot_area, controls]
+        let contents: Element<'_, Message> = widget::column![plot_area, controls]
             .padding(10)
             .spacing(10)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        let result: Element<'_, Message> = widget::column![mb, contents]
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
