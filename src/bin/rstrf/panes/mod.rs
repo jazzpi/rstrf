@@ -97,11 +97,12 @@ fn build_rest(
     match tree {
         PaneTree::Leaf(leaf) if leaf == left_leftmost => Ok(()),
         PaneTree::Leaf(leaf) => bail!("Unexpected leaf: {leaf:?}"),
-        PaneTree::Split { split, a, b } => {
+        PaneTree::Split { axis, ratio, a, b } => {
             let right_leftmost = b.leftmost_leaf();
-            let (right_pane, _) = state
-                .split((*split).into(), left_pane, widget_for(right_leftmost))
+            let (right_pane, split) = state
+                .split((*axis).into(), left_pane, widget_for(right_leftmost))
                 .ok_or(anyhow::anyhow!("Could not split pane"))?;
+            state.resize(split, *ratio);
             tasks.push(task_for(right_leftmost).map(move |message| PaneMessage {
                 id: right_pane,
                 message,

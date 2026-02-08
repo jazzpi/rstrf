@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use iced::widget::pane_grid;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workspace {
     pub panes: PaneTree,
 }
@@ -20,7 +20,8 @@ impl Default for Workspace {
     fn default() -> Self {
         Self {
             panes: PaneTree::Split {
-                split: SplitDirection::Vertical,
+                axis: SplitAxis::Vertical,
+                ratio: 0.7,
                 a: Box::new(PaneTree::Leaf(Pane::RFPlot {
                     spectrogram: Vec::new(),
                 })),
@@ -33,11 +34,12 @@ impl Default for Workspace {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PaneTree {
     Split {
-        split: SplitDirection,
+        axis: SplitAxis,
+        ratio: f32,
         a: Box<PaneTree>,
         b: Box<PaneTree>,
     },
@@ -54,18 +56,18 @@ impl PaneTree {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SplitDirection {
+pub enum SplitAxis {
     #[serde(rename = "h")]
     Horizontal,
     #[serde(rename = "v")]
     Vertical,
 }
 
-impl From<SplitDirection> for pane_grid::Axis {
-    fn from(value: SplitDirection) -> Self {
+impl From<SplitAxis> for pane_grid::Axis {
+    fn from(value: SplitAxis) -> Self {
         match value {
-            SplitDirection::Horizontal => pane_grid::Axis::Horizontal,
-            SplitDirection::Vertical => pane_grid::Axis::Vertical,
+            SplitAxis::Horizontal => pane_grid::Axis::Horizontal,
+            SplitAxis::Vertical => pane_grid::Axis::Vertical,
         }
     }
 }
