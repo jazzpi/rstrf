@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::mem::MaybeUninit;
+use std::{
+    mem::MaybeUninit,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
-use ndarray::{Array2, ArrayView2, Axis};
+use ndarray::{ArcArray2, ArrayView2, Axis};
 use ndarray_stats::QuantileExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::coord::data_absolute;
 
 /// Loads a spectrogram from the given file paths
-pub async fn load(paths: &[std::path::PathBuf]) -> Result<Spectrogram> {
+pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
     if paths.is_empty() {
         bail!("No files provided");
     }
@@ -29,7 +32,7 @@ pub async fn load(paths: &[std::path::PathBuf]) -> Result<Spectrogram> {
 }
 
 /// Writes a spectrogram to the given file path
-pub async fn save(spectrogram: &Spectrogram, path: &std::path::Path) -> Result<()> {
+pub async fn save(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
     let mut file = tokio::fs::File::create(path).await?;
     let mut writer = tokio::io::BufWriter::new(&mut file);
 
@@ -91,7 +94,7 @@ impl Header {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Spectrogram {
     pub start_time: DateTime<Utc>,
     pub nchan: usize,
@@ -100,7 +103,7 @@ pub struct Spectrogram {
     pub bw: f32,                  // Hz
     pub slice_length: f32,        // s
     pub power_bounds: (f32, f32), // dB
-    pub data: Array2<f32>,        // dB
+    pub data: ArcArray2<f32>,     // dB
 }
 
 impl std::fmt::Debug for Spectrogram {
@@ -120,7 +123,7 @@ impl std::fmt::Debug for Spectrogram {
 impl Spectrogram {
     pub(self) fn new(first_header: &Header, raw_data: Vec<f32>) -> anyhow::Result<Self> {
         let nslices = raw_data.len() / first_header.nchan;
-        let data = Array2::from_shape_vec((nslices, first_header.nchan), raw_data)?
+        let data = ArcArray2::from_shape_vec((nslices, first_header.nchan), raw_data)?
             .mapv(|v| 10.0 * (v + 1e-12).log10());
         let min = *data.min()?;
         let max = *data.max()?;
@@ -132,7 +135,7 @@ impl Spectrogram {
             nchan: first_header.nchan,
             nslices,
             power_bounds: (min, max),
-            data,
+            data: data.into(),
         })
     }
 
@@ -185,7 +188,7 @@ impl Spectrogram {
             nchan: first.nchan,
             nslices,
             power_bounds,
-            data,
+            data: data.into(),
         })
     }
 
@@ -193,7 +196,7 @@ impl Spectrogram {
         self.data.view()
     }
 
-    pub fn set_data(&mut self, data: Array2<f32>) -> anyhow::Result<()> {
+    pub fn set_data(&mut self, data: ArcArray2<f32>) -> anyhow::Result<()> {
         ensure!(
             data.dim() == (self.nslices, self.nchan),
             "Data shape mismatch: expected ({}, {}), got ({}, {})",
@@ -223,7 +226,7 @@ impl Spectrogram {
     }
 }
 
-async fn load_file(path: &std::path::Path) -> Result<Spectrogram> {
+async fn load_file(path: &Path) -> Result<Spectrogram> {
     let file = tokio::fs::File::open(path).await?;
     let file_size = file.metadata().await?.len() as usize;
     let mut reader = tokio::io::BufReader::new(file);

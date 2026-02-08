@@ -8,12 +8,33 @@ use duplicate::{duplicate, duplicate_item};
 #[duplicate_item(name; [screen]; [plot_area]; [data_normalized]; [data_absolute])]
 pub mod name {
     use duplicate::duplicate_item;
-    #[derive(Debug, Clone, Copy)]
-    pub struct Point(pub iced::Point);
+    use serde::{Deserialize, Serialize};
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+    pub struct Point(
+        #[serde(
+            serialize_with = "serialize_point",
+            deserialize_with = "deserialize_point"
+        )]
+        pub iced::Point,
+    );
     impl Point {
         pub fn new(x: f32, y: f32) -> Self {
             Self(iced::Point::new(x, y))
         }
+    }
+
+    fn serialize_point<S: serde::Serializer>(
+        point: &iced::Point,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        (point.x, point.y).serialize(serializer)
+    }
+
+    fn deserialize_point<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<iced::Point, D::Error> {
+        let (x, y) = <(f32, f32)>::deserialize(deserializer)?;
+        Ok(iced::Point::new(x, y))
     }
 
     #[duplicate_item(type_name; [Point]; [&Point])]

@@ -7,10 +7,11 @@ use iced::{
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{coord::plot_area, spectrogram::Spectrogram};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::WorkspaceEvent,
-    panes::{Message as PaneMessage, PaneWidget, rfplot::control::Controls},
+    panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget, rfplot::control::Controls},
 };
 
 mod colormap;
@@ -24,7 +25,7 @@ pub enum Message {
     Overlay(overlay::Message),
     PickSpectrogram,
     LoadSpectrogram(Vec<PathBuf>),
-    SpectrogramLoaded(Result<Spectrogram, String>),
+    SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
     Nop,
 }
 
@@ -47,13 +48,17 @@ pub enum MouseInteraction {
     Panning(plot_area::Point),
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Default, Clone)]
 struct SharedState {
     pub controls: Controls,
+    pub spectrogram_files: Vec<PathBuf>,
+    #[serde(skip)]
     pub spectrogram: Option<Spectrogram>,
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub struct RFPlot {
     shared: SharedState,
     overlay: overlay::Overlay,
@@ -62,9 +67,8 @@ pub struct RFPlot {
 impl RFPlot {
     pub fn new() -> Self {
         let shared = SharedState {
-            controls: Controls::new(),
-            spectrogram: None,
             plot_area_margin: 50.0,
+            ..Default::default()
         };
         Self {
             shared,
@@ -74,6 +78,15 @@ impl RFPlot {
 }
 
 impl PaneWidget for RFPlot {
+    fn init(&mut self) -> Task<PaneMessage> {
+        if self.shared.spectrogram_files.is_empty() {
+            Task::none()
+        } else {
+            // TODO: This resets the power bounds after loading the spectrogram
+            self.update(Message::LoadSpectrogram(self.shared.spectrogram_files.clone()).into())
+        }
+    }
+
     fn update(&mut self, message: PaneMessage) -> Task<PaneMessage> {
         match message {
             PaneMessage::RFPlot(message) => match message {
@@ -88,19 +101,23 @@ impl PaneWidget for RFPlot {
                     .map(|m| PaneMessage::RFPlot(m.into())),
                 Message::LoadSpectrogram(paths) => Task::future(async move {
                     let spec = rstrf::spectrogram::load(&paths).await;
-                    Message::SpectrogramLoaded(spec.map_err(|e| format!("{e:?}"))).into()
+                    Message::SpectrogramLoaded(
+                        spec.map(|s| (paths, s)).map_err(|e| format!("{e:?}")),
+                    )
+                    .into()
                 }),
                 Message::SpectrogramLoaded(result) => match result {
-                    Ok(spec) => {
+                    Ok((paths, spec)) => {
                         log::info!("Loaded spectrogram: {spec:?}");
                         self.shared.controls.set_power_bounds(spec.power_bounds);
                         self.shared.spectrogram = Some(spec);
+                        self.shared.spectrogram_files = paths;
                         self.overlay
                             .update(overlay::Message::SpectrogramUpdated, &self.shared)
                             .map(|m| PaneMessage::RFPlot(m.into()))
                     }
                     Err(err) => {
-                        log::error!("failed to load spectrogram: {err}");
+                        log::error!("Failed to load spectrogram: {err}");
                         Task::none()
                     }
                 },
@@ -179,5 +196,9 @@ impl PaneWidget for RFPlot {
 
     fn title(&self) -> &str {
         "Plot"
+    }
+
+    fn to_tree(&self) -> PaneTree {
+        PaneTree::Leaf(Pane::RFPlot(self.clone()))
     }
 }

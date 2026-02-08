@@ -16,6 +16,7 @@ use rstrf::{
     spectrogram::Spectrogram,
     util::clip_line,
 };
+use serde::{Deserialize, Serialize};
 
 use super::{MouseInteraction, RFPlot, SharedState, control};
 
@@ -41,12 +42,14 @@ fn clamp_line_to_plot(
         .map(data_absolute::Point)
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub(super) struct Overlay {
     satellites: Vec<orbit::Satellite>,
+    #[serde(skip)]
     satellite_predictions: Option<orbit::Predictions>,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
+    #[serde(skip)]
     crosshair: Option<data_absolute::Point>,
 }
 
@@ -497,6 +500,14 @@ impl Overlay {
                 }
             }
         })
+    }
+}
+
+impl PartialEq for Overlay {
+    fn eq(&self, other: &Self) -> bool {
+        self.track_points == other.track_points
+            && self.signals == other.signals
+            && self.crosshair == other.crosshair
     }
 }
 

@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
 
     let result = &spectrogram.data() - &median;
 
-    spectrogram.set_data(result)?;
+    spectrogram.set_data(result.into())?;
 
     spectrogram::save(&spectrogram, &args.output)
         .await

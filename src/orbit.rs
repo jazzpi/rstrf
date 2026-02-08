@@ -4,6 +4,7 @@ use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use ndarray::{Array1, ArrayView1, Zip, arr1};
 use ndarray_linalg::Norm;
+use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
 use tokio::io::AsyncBufReadExt;
 
@@ -102,11 +103,17 @@ pub async fn load_tles(
 const RADIUS_EARTH: f64 = 6378.137; // km
 const SPEED_OF_LIGHT: f64 = 299792.458; // km/s
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Satellite {
     pub elements: sgp4::Elements,
     pub constants: sgp4::Constants,
     pub tx_freq: f64,
+}
+
+impl PartialEq for Satellite {
+    fn eq(&self, other: &Self) -> bool {
+        self.tx_freq == other.tx_freq && self.elements == other.elements
+    }
 }
 
 impl Satellite {

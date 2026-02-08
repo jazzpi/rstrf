@@ -15,13 +15,14 @@ futures-util = "0.3.31"
 regex = "1.11"
 tokio = { version = "1.48.0", features = ["full"] }
 ndarray = "0.17.2"
-glam = { version = "0.30.10", features = ["bytemuck"] }
+glam = { version = "0.30.10", features = ["bytemuck", "serde"] }
 bytemuck = "1.24.0"
 env_logger = "0.11.8"
 log = "0.4.29"
 plotters = "0.3.7"
 duplicate = "2.0.1"
-sgp4 = "2.3.0"
+# TODO: Switch to upstream version when https://github.com/neuromorphicsystems/sgp4/pull/20 is merged
+sgp4 = { git = "https://github.com/jazzpi/sgp4", branch = "partial-eq", version = "2.3.0" }
 ndarray-linalg = { version = "0.18.1", features = ["openblas-system"] }
 itertools = "0.14.0"
 copy-range = "0.1.1"

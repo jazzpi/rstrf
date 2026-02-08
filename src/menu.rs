@@ -13,9 +13,10 @@ use iced_aw::{
 pub enum Message {
     WorkspacePick,
     WorkspaceSave,
+    WorkspaceSaveAs,
 }
 
-// Adapter from the iced_aw example
+// Adapted from the iced_aw example
 
 fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
     button(content).padding([4, 8]).style(|theme, status| {
@@ -36,7 +37,7 @@ fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'
     })
 }
 
-fn debug_button(
+fn menu_button(
     label: &str,
     msg: Option<Message>,
     width: Option<Length>,
@@ -54,11 +55,11 @@ fn debug_button(
 }
 
 fn button_s(label: &str, msg: Option<Message>) -> Element<'_, Message> {
-    debug_button(label, msg, Some(Length::Shrink), Some(Length::Shrink))
+    menu_button(label, msg, Some(Length::Shrink), Some(Length::Shrink))
 }
 
 fn button_f(label: &str, msg: Option<Message>) -> Element<'_, Message> {
-    debug_button(label, msg, Some(Length::Fill), Some(Length::Shrink))
+    menu_button(label, msg, Some(Length::Fill), Some(Length::Shrink))
 }
 
 pub fn view<'a>() -> Element<'a, Message> {
@@ -68,6 +69,7 @@ pub fn view<'a>() -> Element<'a, Message> {
         menu(menu_items!(
             (button_f("Open", Some(Message::WorkspacePick))),
             (button_f("Save", Some(Message::WorkspaceSave))),
+            (button_f("Save as...", Some(Message::WorkspaceSaveAs))),
         ))
     ))
     .draw_path(DrawPath::Backdrop)

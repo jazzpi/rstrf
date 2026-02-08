@@ -5,14 +5,16 @@ use iced::{
     widget::{checkbox, scrollable, table, text},
 };
 use rstrf::orbit::Satellite;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::WorkspaceEvent,
-    panes::{Message as PaneMessage, PaneWidget},
+    panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
 };
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    // TODO: We don't use this message anymore...
     LoadTLEs {
         tle_path: PathBuf,
         freqs_path: PathBuf,
@@ -21,6 +23,7 @@ pub enum Message {
     SatelliteToggled(usize, bool),
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct SatManager {
     satellites: Vec<(Satellite, bool)>,
 }
@@ -126,5 +129,9 @@ impl PaneWidget for SatManager {
 
     fn title(&self) -> &str {
         "Satellites"
+    }
+
+    fn to_tree(&self) -> PaneTree {
+        PaneTree::Leaf(Pane::SatManager(self.clone()))
     }
 }

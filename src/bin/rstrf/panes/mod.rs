@@ -3,11 +3,11 @@ use iced::{
     Element, Length, Size, Task,
     widget::{container, pane_grid, text},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::WorkspaceEvent,
-    panes::rfplot::RFPlot,
-    workspace::{Pane, PaneTree},
+    panes::{rfplot::RFPlot, sat_manager::SatManager},
 };
 
 pub mod rfplot;
@@ -39,9 +39,13 @@ impl From<sat_manager::Message> for Message {
 }
 
 pub trait PaneWidget {
+    fn init(&mut self) -> Task<Message> {
+        Task::none()
+    }
     fn update(&mut self, message: Message) -> Task<Message>;
     fn view(&self, size: Size) -> Element<'_, Message>;
     fn title(&self) -> &str;
+    fn to_tree(&self) -> PaneTree;
 }
 
 pub struct Dummy {}
@@ -59,6 +63,66 @@ impl PaneWidget for Dummy {
     fn title(&self) -> &str {
         "Loading..."
     }
+
+    fn to_tree(&self) -> PaneTree {
+        PaneTree::Leaf(Pane::Dummy)
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PaneTree {
+    Split {
+        axis: SplitAxis,
+        ratio: f32,
+        a: Box<PaneTree>,
+        b: Box<PaneTree>,
+    },
+    Leaf(Pane),
+}
+
+impl PaneTree {
+    pub fn leftmost_leaf(&self) -> &Pane {
+        match self {
+            PaneTree::Leaf(pane) => pane,
+            PaneTree::Split { a, .. } => a.leftmost_leaf(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SplitAxis {
+    #[serde(rename = "h")]
+    Horizontal,
+    #[serde(rename = "v")]
+    Vertical,
+}
+
+impl From<SplitAxis> for pane_grid::Axis {
+    fn from(value: SplitAxis) -> Self {
+        match value {
+            SplitAxis::Horizontal => pane_grid::Axis::Horizontal,
+            SplitAxis::Vertical => pane_grid::Axis::Vertical,
+        }
+    }
+}
+
+impl From<pane_grid::Axis> for SplitAxis {
+    fn from(value: pane_grid::Axis) -> Self {
+        match value {
+            pane_grid::Axis::Horizontal => SplitAxis::Horizontal,
+            pane_grid::Axis::Vertical => SplitAxis::Vertical,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[serde(tag = "pane", rename_all = "snake_case")]
+pub enum Pane {
+    #[serde(rename = "rfplot")]
+    RFPlot(RFPlot),
+    SatManager(SatManager),
+    Dummy,
 }
 
 pub type PaneGridState = pane_grid::State<Box<dyn PaneWidget>>;
@@ -76,8 +140,10 @@ pub type PaneGridState = pane_grid::State<Box<dyn PaneWidget>>;
 /// right subtree. Afterwards, we recursively build the subtrees.
 pub fn from_tree(tree: PaneTree) -> anyhow::Result<(PaneGridState, Task<PaneMessage>)> {
     let leftmost = tree.leftmost_leaf();
-    let (mut state, initial_pane) = PaneGridState::new(widget_for(leftmost));
-    let mut tasks = vec![task_for(leftmost).map(move |message| PaneMessage {
+    let mut widget = build_widget(leftmost);
+    let task = widget.init();
+    let (mut state, initial_pane) = PaneGridState::new(widget);
+    let mut tasks = vec![task.map(move |message| PaneMessage {
         id: initial_pane,
         message,
     })];
@@ -96,14 +162,16 @@ fn build_rest(
 ) -> anyhow::Result<()> {
     match tree {
         PaneTree::Leaf(leaf) if leaf == left_leftmost => Ok(()),
-        PaneTree::Leaf(leaf) => bail!("Unexpected leaf: {leaf:?}"),
+        PaneTree::Leaf(_) => bail!("Unexpected leaf"),
         PaneTree::Split { axis, ratio, a, b } => {
             let right_leftmost = b.leftmost_leaf();
+            let mut widget = build_widget(right_leftmost);
+            let task = widget.init();
             let (right_pane, split) = state
-                .split((*axis).into(), left_pane, widget_for(right_leftmost))
+                .split((*axis).into(), left_pane, widget)
                 .ok_or(anyhow::anyhow!("Could not split pane"))?;
             state.resize(split, *ratio);
-            tasks.push(task_for(right_leftmost).map(move |message| PaneMessage {
+            tasks.push(task.map(move |message| PaneMessage {
                 id: right_pane,
                 message,
             }));
@@ -116,27 +184,30 @@ fn build_rest(
     }
 }
 
-fn widget_for(pane: &Pane) -> Box<dyn PaneWidget> {
+fn build_widget(pane: &Pane) -> Box<dyn PaneWidget> {
     match pane {
-        Pane::RFPlot { spectrogram: _ } => Box::new(RFPlot::new()),
-        Pane::SatManager { .. } => Box::new(sat_manager::SatManager::new()),
+        Pane::RFPlot(widget) => Box::new(widget.clone()),
+        Pane::SatManager(widget) => Box::new(widget.clone()),
+        Pane::Dummy => Box::new(Dummy {}),
     }
 }
 
-fn task_for(pane: &Pane) -> Task<Message> {
-    match pane {
-        Pane::RFPlot { spectrogram } => {
-            RFPlot::new().update(rfplot::Message::LoadSpectrogram(spectrogram.clone()).into())
-        }
-        Pane::SatManager {
-            elements,
-            frequencies,
-        } => sat_manager::SatManager::new().update(
-            sat_manager::Message::LoadTLEs {
-                tle_path: elements.clone(),
-                freqs_path: frequencies.clone(),
-            }
-            .into(),
-        ),
-    }
+/// Generate a (serializable) PaneTree from a pane_grid::State
+pub fn to_tree(state: &PaneGridState, layout: &pane_grid::Node) -> Option<PaneTree> {
+    let node = match layout {
+        pane_grid::Node::Split {
+            id: _,
+            axis,
+            ratio,
+            a,
+            b,
+        } => PaneTree::Split {
+            axis: (*axis).into(),
+            ratio: *ratio,
+            a: Box::new(to_tree(state, a)?),
+            b: Box::new(to_tree(state, b)?),
+        },
+        pane_grid::Node::Pane(pane) => state.get(*pane)?.to_tree(),
+    };
+    Some(node)
 }

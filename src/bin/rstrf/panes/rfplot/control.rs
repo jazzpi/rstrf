@@ -4,6 +4,7 @@ use iced::{
     widget::{self, slider, text},
 };
 use rstrf::coord::{PlotAreaToDataNormalized, data_normalized, plot_area};
+use serde::{Deserialize, Serialize};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 8.0;
@@ -16,7 +17,7 @@ const SIGMA_MAX: f32 = 20.0;
 const TRACK_BW_MIN: f32 = 1e3;
 const TRACK_BW_MAX: f32 = 100e3;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Controls {
     log_scale: Vec2,
     center: data_normalized::Point,
@@ -46,17 +47,6 @@ pub enum Message {
 }
 
 impl Controls {
-    pub fn new() -> Self {
-        Self {
-            log_scale: Vec2::new(ZOOM_MIN, ZOOM_MIN),
-            center: data_normalized::Point::new(0.5, 0.5),
-            power_bounds: (0.0, 0.0),
-            power_range: (0.0, 0.0),
-            signal_sigma: 5.0,
-            track_bw: 10e3,
-        }
-    }
-
     pub fn set_power_bounds(&mut self, bounds: (f32, f32)) {
         self.power_bounds = bounds;
         self.power_range = bounds;
@@ -236,5 +226,18 @@ impl Controls {
         };
         self.center.0.x += dx;
         self.center.0.y += dy;
+    }
+}
+
+impl Default for Controls {
+    fn default() -> Self {
+        Self {
+            log_scale: Vec2::new(ZOOM_MIN, ZOOM_MIN),
+            center: data_normalized::Point::new(0.5, 0.5),
+            power_bounds: (0.0, 0.0),
+            power_range: (0.0, 0.0),
+            signal_sigma: 5.0,
+            track_bw: 10e3,
+        }
     }
 }

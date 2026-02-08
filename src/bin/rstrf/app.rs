@@ -21,6 +21,7 @@ pub struct AppModel {
     config: Config,
     panes: panes::PaneGridState,
     focused_pane: Option<pane_grid::Pane>,
+    workspace_path: Option<PathBuf>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -36,8 +37,8 @@ pub enum Message {
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     Menu(rstrf::menu::Message),
-    // TODO: move to workspace mod
     LoadWorkspace(PathBuf),
+    SaveWorkspace(PathBuf),
 }
 
 #[derive(Clone)]
@@ -78,14 +79,15 @@ impl AppModel {
         let (panes, _) = panes::PaneGridState::new(Box::new(panes::Dummy {}));
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
-        if let Some(path) = flags.workspace {
-            tasks.push(Task::done(Message::LoadWorkspace(path)));
+        if let Some(ref path) = flags.workspace {
+            tasks.push(Task::done(Message::LoadWorkspace(path.clone())));
         }
 
         let mut app = AppModel {
             config: Config::default(),
             panes,
             focused_pane: None,
+            workspace_path: flags.workspace,
         };
         tasks.push(app.reset_workspace(Workspace::default()));
         let command = Task::batch(tasks);
@@ -223,13 +225,57 @@ impl AppModel {
                     })
                     .and_then(|p| Task::done(Message::LoadWorkspace(p)));
                 }
-                rstrf::menu::Message::WorkspaceSave => log::warn!("TODO: Save workspace"),
+                rstrf::menu::Message::WorkspaceSave => {
+                    if let Some(ref path) = self.workspace_path {
+                        return Task::done(Message::SaveWorkspace(path.clone()));
+                    } else {
+                        return Task::done(Message::Menu(rstrf::menu::Message::WorkspaceSaveAs));
+                    }
+                }
+                rstrf::menu::Message::WorkspaceSaveAs => {
+                    return Task::future(async {
+                        let path = AsyncFileDialog::new()
+                            .add_filter("Workspaces", &["json"])
+                            .save_file()
+                            .await
+                            .map(|f| {
+                                let f = f.path();
+                                if f.extension().is_none() {
+                                    f.with_extension("json")
+                                } else {
+                                    f.into()
+                                }
+                            });
+                        log::debug!("Picked workspace file for saving: {:?}", path);
+                        path
+                    })
+                    .and_then(|p| Task::done(Message::SaveWorkspace(p)));
+                }
             },
             Message::LoadWorkspace(path) => {
                 let ws = Workspace::load(path);
                 match ws {
                     Ok(ws) => return self.reset_workspace(ws),
                     Err(err) => log::error!("Failed to load workspace: {:?}", err),
+                }
+            }
+            Message::SaveWorkspace(path) => {
+                let result = (|| -> anyhow::Result<Task<Message>> {
+                    let pane_tree = panes::to_tree(&self.panes, self.panes.layout())
+                        .ok_or(anyhow::anyhow!("Failed to generate pane tree"))?;
+                    let json = serde_json::to_string(&Workspace { panes: pane_tree })?;
+                    self.workspace_path = Some(path.clone());
+                    Ok(Task::future(async move {
+                        match tokio::fs::write(path.clone(), json).await {
+                            Ok(_) => log::info!("Saved workspace to {path:?}"),
+                            Err(e) => log::error!("Failed to save workspace to {path:?}: {e:?}"),
+                        }
+                    })
+                    .discard())
+                })();
+                match result {
+                    Ok(task) => return task,
+                    Err(err) => log::error!("Failed to save workspace: {:?}", err),
                 }
             }
         }
@@ -241,7 +287,7 @@ impl AppModel {
     }
 
     fn reset_workspace(&mut self, ws: Workspace) -> Task<Message> {
-        log::debug!("Loaded workspace: {:?}", ws);
+        log::debug!("Loaded workspace");
         let panes = panes::from_tree(ws.panes);
         match panes {
             Ok((state, task)) => {

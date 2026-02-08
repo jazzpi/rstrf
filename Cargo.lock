@@ -1540,6 +1540,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
 dependencies = [
  "bytemuck",
+ "serde_core",
 ]
 
 [[package]]
@@ -4060,8 +4061,7 @@ dependencies = [
 [[package]]
 name = "sgp4"
 version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd6dfc8de075786c3ae96fc6e38c1e0e608b03362d8d89ebeb22e0c00b4098f3"
+source = "git+https://github.com/jazzpi/sgp4?branch=partial-eq#bdfcee6a3c73ddbc77daf158050497aaa5b17a7c"
 dependencies = [
  "chrono",
  "serde",
