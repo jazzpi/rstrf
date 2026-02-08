@@ -197,9 +197,7 @@ impl shader::Primitive for Primitive {
             return;
         };
 
-        if pipeline.spectrogram_bind_group.is_none() {
-            pipeline.set_spectrogram(device, spectrogram);
-        }
+        pipeline.set_spectrogram(device, spectrogram);
 
         let bounds = self.controls.bounds();
 
