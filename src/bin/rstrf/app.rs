@@ -8,8 +8,11 @@ use iced::widget::{PaneGrid, button, column, pane_grid, responsive, row, text};
 use iced::window::Settings;
 use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
+use iced_aw::{menu_bar, menu_items};
 use rfd::AsyncFileDialog;
+use rstrf::menu::{button_f, button_s, submenu, view_menu};
 use rstrf::orbit::Satellite;
+use rstrf::util::pick_file;
 use std::fmt::Debug;
 use std::path::PathBuf;
 
@@ -36,9 +39,11 @@ pub enum Message {
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
-    Menu(rstrf::menu::Message),
-    LoadWorkspace(PathBuf),
-    SaveWorkspace(PathBuf),
+    WorkspaceOpen,
+    WorkspaceSave,
+    WorkspaceSaveAs,
+    WorkspaceDoLoad(PathBuf),
+    WorkspaceDoSave(PathBuf),
 }
 
 #[derive(Clone)]
@@ -80,7 +85,7 @@ impl AppModel {
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
         if let Some(ref path) = flags.workspace {
-            tasks.push(Task::done(Message::LoadWorkspace(path.clone())));
+            tasks.push(Task::done(Message::WorkspaceDoLoad(path.clone())));
         }
 
         let mut app = AppModel {
@@ -100,7 +105,14 @@ impl AppModel {
     /// Application events will be processed through the view. Any messages emitted by
     /// events received by widgets will be passed to the update method.
     fn view(&self) -> Element<'_, Message> {
-        let mb = rstrf::menu::view().map(Message::Menu);
+        let mb = view_menu(menu_bar!((
+            button_s("Workspace", None),
+            submenu(menu_items!(
+                (button_f("Open", Some(Message::WorkspaceOpen))),
+                (button_f("Save", Some(Message::WorkspaceSave))),
+                (button_f("Save as...", Some(Message::WorkspaceSaveAs))),
+            ))
+        )));
         let pane_grid = PaneGrid::new(&self.panes, move |id, pane, _is_maximized| {
             let is_focused = Some(id) == self.focused_pane;
             let title = text(pane.title());
@@ -212,54 +224,44 @@ impl AppModel {
             Message::PaneResized(ev) => {
                 self.panes.resize(ev.split, ev.ratio);
             }
-            Message::Menu(message) => match message {
-                rstrf::menu::Message::WorkspacePick => {
-                    return Task::future(async {
-                        let path = AsyncFileDialog::new()
-                            .add_filter("Workspaces", &["json"])
-                            .pick_file()
-                            .await
-                            .map(|f| f.path().to_path_buf());
-                        log::debug!("Picked workspace file: {:?}", path);
-                        path
-                    })
-                    .and_then(|p| Task::done(Message::LoadWorkspace(p)));
+            Message::WorkspaceOpen => {
+                return Task::future(pick_file(&[("Workspaces", &["json"])]))
+                    .and_then(|p| Task::done(Message::WorkspaceDoLoad(p)));
+            }
+            Message::WorkspaceSave => {
+                if let Some(ref path) = self.workspace_path {
+                    return Task::done(Message::WorkspaceDoSave(path.clone()));
+                } else {
+                    return Task::done(Message::WorkspaceSaveAs);
                 }
-                rstrf::menu::Message::WorkspaceSave => {
-                    if let Some(ref path) = self.workspace_path {
-                        return Task::done(Message::SaveWorkspace(path.clone()));
-                    } else {
-                        return Task::done(Message::Menu(rstrf::menu::Message::WorkspaceSaveAs));
-                    }
-                }
-                rstrf::menu::Message::WorkspaceSaveAs => {
-                    return Task::future(async {
-                        let path = AsyncFileDialog::new()
-                            .add_filter("Workspaces", &["json"])
-                            .save_file()
-                            .await
-                            .map(|f| {
-                                let f = f.path();
-                                if f.extension().is_none() {
-                                    f.with_extension("json")
-                                } else {
-                                    f.into()
-                                }
-                            });
-                        log::debug!("Picked workspace file for saving: {:?}", path);
-                        path
-                    })
-                    .and_then(|p| Task::done(Message::SaveWorkspace(p)));
-                }
-            },
-            Message::LoadWorkspace(path) => {
+            }
+            Message::WorkspaceSaveAs => {
+                return Task::future(async {
+                    let path = AsyncFileDialog::new()
+                        .add_filter("Workspaces", &["json"])
+                        .save_file()
+                        .await
+                        .map(|f| {
+                            let f = f.path();
+                            if f.extension().is_none() {
+                                f.with_extension("json")
+                            } else {
+                                f.into()
+                            }
+                        });
+                    log::debug!("Picked workspace file for saving: {:?}", path);
+                    path
+                })
+                .and_then(|p| Task::done(Message::WorkspaceDoSave(p)));
+            }
+            Message::WorkspaceDoLoad(path) => {
                 let ws = Workspace::load(path);
                 match ws {
                     Ok(ws) => return self.reset_workspace(ws),
                     Err(err) => log::error!("Failed to load workspace: {:?}", err),
                 }
             }
-            Message::SaveWorkspace(path) => {
+            Message::WorkspaceDoSave(path) => {
                 let result = (|| -> anyhow::Result<Task<Message>> {
                     let pane_tree = panes::to_tree(&self.panes, self.panes.layout())
                         .ok_or(anyhow::anyhow!("Failed to generate pane tree"))?;

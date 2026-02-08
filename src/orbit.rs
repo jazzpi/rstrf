@@ -85,9 +85,7 @@ pub async fn load_tles(
                     .context("Failed to parse TLE")?;
                 let constants = sgp4::Constants::from_elements(&elem)
                     .context("Failed to derive SGP4 constants")?;
-                let tx_freq = tx_freqs.get(&elem.norad_id).copied().with_context(|| {
-                    format!("No transmit frequency found for NORAD ID {}", elem.norad_id)
-                })?;
+                let tx_freq = tx_freqs.get(&elem.norad_id).copied().unwrap_or(0.0);
                 elements.push(Satellite {
                     elements: elem,
                     constants,
@@ -103,11 +101,33 @@ pub async fn load_tles(
 const RADIUS_EARTH: f64 = 6378.137; // km
 const SPEED_OF_LIGHT: f64 = 299792.458; // km/s
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Satellite {
     pub elements: sgp4::Elements,
+    #[serde(skip)]
     pub constants: sgp4::Constants,
     pub tx_freq: f64,
+}
+
+impl<'de> Deserialize<'de> for Satellite {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct SatelliteHelper {
+            elements: sgp4::Elements,
+            tx_freq: f64,
+        }
+        let helper = SatelliteHelper::deserialize(deserializer)?;
+        let constants =
+            sgp4::Constants::from_elements(&helper.elements).map_err(serde::de::Error::custom)?;
+        Ok(Satellite {
+            elements: helper.elements,
+            constants,
+            tx_freq: helper.tx_freq,
+        })
+    }
 }
 
 impl PartialEq for Satellite {

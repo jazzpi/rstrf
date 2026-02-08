@@ -35,6 +35,7 @@ iced_aw = { version = "0.13.0", features = ["menu"], default-features = false }
 rfd = "0.17.2"
 serde = "1.0.228"
 serde_json = "1.0.149"
+serde_with = "3.16.1"
 
 [profile.release-with-debug]
 inherits = "release"

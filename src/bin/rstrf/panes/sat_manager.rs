@@ -1,11 +1,17 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use iced::{
     Element, Length, Size, Task,
-    widget::{checkbox, scrollable, table, text},
+    widget::{checkbox, column, scrollable, table, text},
 };
-use rstrf::orbit::Satellite;
+use iced_aw::{menu_bar, menu_items};
+use rstrf::{
+    menu::{button_f, button_s, submenu, view_menu},
+    orbit::Satellite,
+    util::pick_file,
+};
 use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
 
 use crate::{
     app::WorkspaceEvent,
@@ -14,24 +20,28 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    // TODO: We don't use this message anymore...
-    LoadTLEs {
-        tle_path: PathBuf,
-        freqs_path: PathBuf,
-    },
+    LoadTLEs,
+    LoadFrequencies,
+    DoLoadTLEs(PathBuf),
+    DoLoadFrequencies(PathBuf),
     SatellitesLoaded(Result<Vec<Satellite>, String>),
+    FrequenciesLoaded(Result<HashMap<u64, f64>, String>),
     SatelliteToggled(usize, bool),
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct SatManager {
     satellites: Vec<(Satellite, bool)>,
+    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
+    frequencies: HashMap<u64, f64>,
 }
 
 impl SatManager {
     pub fn new() -> Self {
         Self {
             satellites: Vec::new(),
+            frequencies: HashMap::new(),
         }
     }
 
@@ -47,17 +57,26 @@ impl PaneWidget for SatManager {
     fn update(&mut self, message: PaneMessage) -> Task<PaneMessage> {
         match message {
             PaneMessage::SatManager(message) => match message {
-                Message::LoadTLEs {
-                    tle_path,
-                    freqs_path,
-                } => Task::future(async move {
-                    let satellites: anyhow::Result<_> = async {
-                        let freqs = rstrf::orbit::load_frequencies(&freqs_path).await?;
-                        rstrf::orbit::load_tles(&tle_path, freqs).await
-                    }
-                    .await;
-                    PaneMessage::SatManager(Message::SatellitesLoaded(
-                        satellites.map_err(|e| format!("{e:?}")),
+                Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
+                    .and_then(|p| Task::done(PaneMessage::SatManager(Message::DoLoadTLEs(p)))),
+                Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
+                    .and_then(|p| {
+                        Task::done(PaneMessage::SatManager(Message::DoLoadFrequencies(p)))
+                    }),
+                Message::DoLoadTLEs(path) => {
+                    let frequencies = self.frequencies.clone();
+                    Task::future(async move {
+                        let satellites: anyhow::Result<_> =
+                            rstrf::orbit::load_tles(&path, frequencies).await;
+                        PaneMessage::SatManager(Message::SatellitesLoaded(
+                            satellites.map_err(|e| format!("{e:?}")),
+                        ))
+                    })
+                }
+                Message::DoLoadFrequencies(path) => Task::future(async move {
+                    let freqs = rstrf::orbit::load_frequencies(&path).await;
+                    PaneMessage::SatManager(Message::FrequenciesLoaded(
+                        freqs.map_err(|e| format!("{e:?}")),
                     ))
                 }),
                 Message::SatellitesLoaded(satellites) => match satellites {
@@ -70,6 +89,24 @@ impl PaneWidget for SatManager {
                     }
                     Err(err) => {
                         log::error!("Failed to load satellites: {}", err);
+                        Task::none()
+                    }
+                },
+                Message::FrequenciesLoaded(frequencies) => match frequencies {
+                    Ok(frequencies) => {
+                        log::info!("Loaded frequencies for {} satellites", frequencies.len());
+                        self.frequencies = frequencies;
+                        self.satellites.iter_mut().for_each(|(sat, _)| {
+                            if let Some(freq) = self.frequencies.get(&sat.norad_id()) {
+                                sat.tx_freq = *freq;
+                            }
+                        });
+                        Task::done(PaneMessage::Workspace(WorkspaceEvent::SatellitesChanged(
+                            self.satellites(),
+                        )))
+                    }
+                    Err(err) => {
+                        log::error!("Failed to load frequencies: {}", err);
                         Task::none()
                     }
                 },
@@ -89,6 +126,13 @@ impl PaneWidget for SatManager {
     }
 
     fn view(&self, _size: Size) -> Element<'_, PaneMessage> {
+        let mb = view_menu(menu_bar!((
+            button_s("File", None),
+            submenu(menu_items!(
+                (button_f("Load frequencies", Some(Message::LoadFrequencies))),
+                (button_f("Load TLEs", Some(Message::LoadTLEs))),
+            ))
+        )));
         let columns = [
             table::column(
                 text("Norad ID"),
@@ -119,11 +163,12 @@ impl PaneWidget for SatManager {
                 },
             ),
         ];
-        let result: Element<'_, Message> =
+        let table: Element<'_, Message> =
             scrollable(table(columns, self.satellites.iter().enumerate()))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into();
+        let result: Element<'_, Message> = column![mb, table].into();
         result.map(PaneMessage::from)
     }
 

@@ -1,6 +1,9 @@
+use std::path::PathBuf;
+
 use iced::{Point, Rectangle};
 use itertools::izip;
 use ndarray::Array1;
+use rfd::AsyncFileDialog;
 
 // TODO: How can we implement this for f32 as well?
 pub fn minmax(arr: &Array1<f64>) -> (f64, f64) {
@@ -54,4 +57,15 @@ pub fn clip_line(bounds: &Rectangle, a: Point, b: Point) -> Option<(Point, Point
     } else {
         Some((a + delta * u1, a + delta * u2))
     }
+}
+
+pub async fn pick_file(filters: &[(&str, &[&str])]) -> Option<PathBuf> {
+    let mut dialog = AsyncFileDialog::new();
+    for &(name, extensions) in filters {
+        dialog = dialog.add_filter(name, extensions);
+    }
+    dialog
+        .pick_file()
+        .await
+        .map(|file| file.path().to_path_buf())
 }
