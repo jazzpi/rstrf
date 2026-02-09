@@ -7,6 +7,8 @@ use crate::panes::{Pane, PaneTree, SplitAxis, rfplot::RFPlot, sat_manager::SatMa
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workspace {
     pub panes: PaneTree,
+    #[serde(default)]
+    pub auto_save: bool,
 }
 
 impl Workspace {
@@ -26,6 +28,7 @@ impl Default for Workspace {
                 a: Box::new(PaneTree::Leaf(Pane::RFPlot(RFPlot::new()))),
                 b: Box::new(PaneTree::Leaf(Pane::SatManager(SatManager::new()))),
             },
+            auto_save: true,
         }
     }
 }

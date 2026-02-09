@@ -138,7 +138,7 @@ pub type PaneGridState = pane_grid::State<Box<dyn PaneWidget>>;
 /// allow splitting subtrees -- only existing panes (leafs). So we first find the leftmost leaf of
 /// both subtrees, and split the leftmost leaf of the left subtree with the leftmost leaf of the
 /// right subtree. Afterwards, we recursively build the subtrees.
-pub fn from_tree(tree: PaneTree) -> anyhow::Result<(PaneGridState, Task<PaneMessage>)> {
+pub fn from_tree(tree: &PaneTree) -> anyhow::Result<(PaneGridState, Task<PaneMessage>)> {
     let leftmost = tree.leftmost_leaf();
     let mut widget = build_widget(leftmost);
     let task = widget.init();

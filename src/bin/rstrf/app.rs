@@ -10,7 +10,7 @@ use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
 use iced_aw::{menu_bar, menu_items};
 use rfd::AsyncFileDialog;
-use rstrf::menu::{button_f, button_s, submenu, view_menu};
+use rstrf::menu::{button_f, button_s, checkbox, submenu, view_menu};
 use rstrf::orbit::Satellite;
 use rstrf::util::pick_file;
 use std::fmt::Debug;
@@ -25,6 +25,7 @@ pub struct AppModel {
     panes: panes::PaneGridState,
     focused_pane: Option<pane_grid::Pane>,
     workspace_path: Option<PathBuf>,
+    workspace: Workspace,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -42,6 +43,7 @@ pub enum Message {
     WorkspaceOpen,
     WorkspaceSave,
     WorkspaceSaveAs,
+    WorkspaceToggleAutoSave,
     WorkspaceDoLoad(PathBuf),
     WorkspaceDoSave(PathBuf),
 }
@@ -93,8 +95,9 @@ impl AppModel {
             panes,
             focused_pane: None,
             workspace_path: flags.workspace,
+            workspace: Workspace::default(),
         };
-        tasks.push(app.reset_workspace(Workspace::default()));
+        tasks.push(app.reset_workspace());
         let command = Task::batch(tasks);
 
         (app, command)
@@ -111,6 +114,11 @@ impl AppModel {
                 (button_f("Open", Some(Message::WorkspaceOpen))),
                 (button_f("Save", Some(Message::WorkspaceSave))),
                 (button_f("Save as...", Some(Message::WorkspaceSaveAs))),
+                (checkbox(
+                    "Auto-save",
+                    Some(Message::WorkspaceToggleAutoSave),
+                    self.workspace.auto_save
+                ))
             ))
         )));
         let pane_grid = PaneGrid::new(&self.panes, move |id, pane, _is_maximized| {
@@ -159,7 +167,15 @@ impl AppModel {
     /// stopped and started conditionally based on application state, or persist
     /// indefinitely.
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::none()
+        if self.workspace.auto_save
+            && let Some(ws_path) = self.workspace_path.clone()
+        {
+            iced::time::every(iced::time::Duration::from_secs(5))
+                .with(ws_path)
+                .map(|(ws_path, _)| Message::WorkspaceDoSave(ws_path))
+        } else {
+            Subscription::none()
+        }
     }
 
     /// Handles messages emitted by the application and its widgets.
@@ -254,18 +270,24 @@ impl AppModel {
                 })
                 .and_then(|p| Task::done(Message::WorkspaceDoSave(p)));
             }
+            Message::WorkspaceToggleAutoSave => {
+                self.workspace.auto_save = !self.workspace.auto_save;
+            }
             Message::WorkspaceDoLoad(path) => {
                 let ws = Workspace::load(path);
                 match ws {
-                    Ok(ws) => return self.reset_workspace(ws),
+                    Ok(ws) => {
+                        self.workspace = ws;
+                        return self.reset_workspace();
+                    }
                     Err(err) => log::error!("Failed to load workspace: {:?}", err),
                 }
             }
             Message::WorkspaceDoSave(path) => {
                 let result = (|| -> anyhow::Result<Task<Message>> {
-                    let pane_tree = panes::to_tree(&self.panes, self.panes.layout())
+                    self.workspace.panes = panes::to_tree(&self.panes, self.panes.layout())
                         .ok_or(anyhow::anyhow!("Failed to generate pane tree"))?;
-                    let json = serde_json::to_string(&Workspace { panes: pane_tree })?;
+                    let json = serde_json::to_string(&self.workspace)?;
                     self.workspace_path = Some(path.clone());
                     Ok(Task::future(async move {
                         match tokio::fs::write(path.clone(), json).await {
@@ -288,9 +310,9 @@ impl AppModel {
         "rSTRF".into()
     }
 
-    fn reset_workspace(&mut self, ws: Workspace) -> Task<Message> {
+    fn reset_workspace(&mut self) -> Task<Message> {
         log::debug!("Loaded workspace");
-        let panes = panes::from_tree(ws.panes);
+        let panes = panes::from_tree(&self.workspace.panes);
         match panes {
             Ok((state, task)) => {
                 self.panes = state;

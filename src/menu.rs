@@ -1,7 +1,7 @@
 use iced::{
     Border, Color, Element, Length, Renderer, Theme, alignment,
     border::Radius,
-    widget::{button, text},
+    widget::{self, button, container, text},
 };
 use iced_aw::{
     Menu, MenuBar,
@@ -61,6 +61,52 @@ pub fn button_f<'a, Message: Clone + 'a>(
     msg: Option<Message>,
 ) -> Element<'a, Message> {
     menu_button(label, msg, Some(Length::Fill), Some(Length::Shrink))
+}
+
+pub fn checkbox<'a, Message: Clone + 'a>(
+    label: &'a str,
+    msg: Option<Message>,
+    is_checked: bool,
+) -> Element<'a, Message> {
+    let mut checkbox = widget::checkbox::<Message, Theme, Renderer>(is_checked)
+        .style(|theme: &Theme, status| {
+            use widget::checkbox::{Status, Style};
+
+            let palette = theme.extended_palette();
+            let base = Style {
+                background: palette.background.weak.color.into(),
+                icon_color: palette.primary.strong.color,
+                border: Border::default().rounded(4.0),
+                text_color: None,
+            };
+            match status {
+                Status::Active { is_checked: _ } => Style {
+                    background: palette.background.neutral.color.into(),
+                    ..base
+                },
+                Status::Hovered { is_checked: _ } => Style {
+                    background: palette.background.strong.color.into(),
+                    text_color: Some(palette.primary.weak.color),
+                    ..base
+                },
+                Status::Disabled { is_checked: _ } => Style {
+                    background: palette.secondary.weak.color.into(),
+                    icon_color: palette.secondary.strong.color,
+                    ..base
+                },
+            }
+        })
+        .label(label)
+        .spacing(10)
+        .size(20);
+    if let Some(msg) = msg.clone() {
+        checkbox = checkbox.on_toggle(move |_| msg.clone());
+    }
+    container(checkbox)
+        .padding([4, 8])
+        .align_y(alignment::Vertical::Center)
+        .align_left(Length::Fill)
+        .into()
 }
 
 pub fn view_menu<'a, Message: 'a>(
