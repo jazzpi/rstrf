@@ -47,6 +47,7 @@
             vulkan-loader
             udev
             openblas
+            dbus
           ];
           RUSTC_VERSION = "stable";
           shellHook =
