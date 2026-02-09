@@ -1,15 +1,13 @@
 use anyhow::bail;
-use iced::{
-    Element, Length, Size, Task,
-    widget::{container, pane_grid, text},
-};
+use iced::{Element, Size, Task, widget::pane_grid};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     app::WorkspaceEvent,
-    panes::{rfplot::RFPlot, sat_manager::SatManager},
+    panes::{dummy::Dummy, rfplot::RFPlot, sat_manager::SatManager},
 };
 
+pub mod dummy;
 pub mod rfplot;
 pub mod sat_manager;
 
@@ -18,6 +16,7 @@ pub enum Message {
     RFPlot(rfplot::Message),
     SatManager(sat_manager::Message),
     Workspace(WorkspaceEvent),
+    ReplacePane(Pane),
 }
 
 #[derive(Debug, Clone)]
@@ -46,27 +45,6 @@ pub trait PaneWidget {
     fn view(&self, size: Size) -> Element<'_, Message>;
     fn title(&self) -> &str;
     fn to_tree(&self) -> PaneTree;
-}
-
-pub struct Dummy {}
-
-impl PaneWidget for Dummy {
-    fn update(&mut self, _: Message) -> Task<Message> {
-        Task::none()
-    }
-
-    fn view(&self, _: Size) -> Element<'_, Message> {
-        // TODO: Show buttons to open other widgets?
-        container(text("Loading...")).center(Length::Fill).into()
-    }
-
-    fn title(&self) -> &str {
-        "Loading..."
-    }
-
-    fn to_tree(&self) -> PaneTree {
-        PaneTree::Leaf(Pane::Dummy)
-    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -122,7 +100,17 @@ pub enum Pane {
     #[serde(rename = "rfplot")]
     RFPlot(RFPlot),
     SatManager(SatManager),
-    Dummy,
+    Dummy(Dummy),
+}
+
+impl std::fmt::Debug for Pane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pane::RFPlot(_) => write!(f, "Pane::RFPlot"),
+            Pane::SatManager(_) => write!(f, "Pane::SatManager"),
+            Pane::Dummy(_) => write!(f, "Pane::Dummy"),
+        }
+    }
 }
 
 pub type PaneGridState = pane_grid::State<Box<dyn PaneWidget>>;
@@ -188,7 +176,7 @@ fn build_widget(pane: &Pane) -> Box<dyn PaneWidget> {
     match pane {
         Pane::RFPlot(widget) => Box::new(widget.clone()),
         Pane::SatManager(widget) => Box::new(widget.clone()),
-        Pane::Dummy => Box::new(Dummy {}),
+        Pane::Dummy(widget) => Box::new(widget.clone()),
     }
 }
 

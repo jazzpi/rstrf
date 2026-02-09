@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::config::Config;
+use crate::panes::dummy::Dummy;
 use crate::workspace::Workspace;
 use crate::{Args, panes};
 use iced::Application;
@@ -83,7 +84,7 @@ impl AppModel {
 
     /// Initializes the application with any given flags and startup commands.
     fn init(flags: Args) -> (Self, Task<Message>) {
-        let (panes, _) = panes::PaneGridState::new(Box::new(panes::Dummy {}));
+        let (panes, _) = panes::PaneGridState::new(Box::new(panes::dummy::Dummy));
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
         if let Some(ref path) = flags.workspace {
@@ -198,6 +199,16 @@ impl AppModel {
                                 .map(move |m| Message::PaneMessage(id, m))
                         })
                         .collect(),
+                    panes::Message::ReplacePane(new_pane) => {
+                        if let Some(pane) = self.panes.get_mut(id) {
+                            *pane = match new_pane {
+                                panes::Pane::RFPlot(inner) => Box::new(inner.clone()),
+                                panes::Pane::SatManager(inner) => Box::new(inner.clone()),
+                                panes::Pane::Dummy(inner) => Box::new(inner.clone()),
+                            }
+                        }
+                        Vec::new()
+                    }
                     _ => match self.panes.get_mut(id) {
                         Some(pane) => vec![
                             pane.update(pane_message)
@@ -214,8 +225,10 @@ impl AppModel {
             }
             Message::ClosePane(pane) => {
                 if self.panes.len() == 1 {
-                    // TODO: Replace with a placeholder?
-                    return Task::none();
+                    return Task::done(Message::PaneMessage(
+                        pane,
+                        panes::Message::ReplacePane(panes::Pane::Dummy(Dummy)),
+                    ));
                 }
                 let Some((_, sibling)) = self.panes.close(pane) else {
                     log::warn!("Tried to close unknown pane {:?}", pane);
