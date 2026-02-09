@@ -38,6 +38,7 @@ pub enum Message {
     PaneMessage(pane_grid::Pane, panes::Message),
     ClosePane(pane_grid::Pane),
     ToggleMaximizePane(pane_grid::Pane),
+    SplitPane(pane_grid::Pane, pane_grid::Axis),
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
@@ -129,6 +130,12 @@ impl AppModel {
                 .controls(pane_grid::Controls::new(
                     row![
                         // TODO: Use icons
+                        button(text("H").size(14))
+                            .style(button::primary)
+                            .on_press(Message::SplitPane(id, pane_grid::Axis::Horizontal)),
+                        button(text("V").size(14))
+                            .style(button::primary)
+                            .on_press(Message::SplitPane(id, pane_grid::Axis::Vertical)),
                         button(text("M").size(14))
                             .style(button::secondary)
                             .on_press(Message::ToggleMaximizePane(id)),
@@ -242,6 +249,9 @@ impl AppModel {
                 } else {
                     self.panes.maximize(pane);
                 }
+            }
+            Message::SplitPane(pane, axis) => {
+                self.panes.split(axis, pane, Box::new(Dummy));
             }
             Message::PaneClicked(pane) => {
                 self.focused_pane = Some(pane);
