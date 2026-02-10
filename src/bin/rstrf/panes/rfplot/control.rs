@@ -49,7 +49,14 @@ pub enum Message {
 impl Controls {
     pub fn set_power_bounds(&mut self, bounds: (f32, f32)) {
         self.power_bounds = bounds;
-        self.power_range = bounds;
+        self.power_range = if self.power_range == (0.0, 0.0) {
+            bounds
+        } else {
+            (
+                self.power_range.0.clamp(bounds.0, bounds.1),
+                self.power_range.1.clamp(bounds.0, bounds.1),
+            )
+        };
     }
 
     pub fn size(&self) -> data_normalized::Size {
