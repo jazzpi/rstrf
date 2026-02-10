@@ -93,64 +93,10 @@ impl Pipeline {
             return;
         };
 
-        let (buffers, _) = self.instances.entry(primitive.id).or_insert_with(|| {
-            let prefix = format!("spectrogram.{}", primitive.id);
-            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(format!("{prefix}.buffer.uniform").as_str()),
-                size: std::mem::size_of::<Uniforms>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(format!("{prefix}.buffer.colormap").as_str()),
-                contents: bytemuck::cast_slice(&super::colormap::MAGMA),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-
-            let uniform_bind_group_layout = self.pipeline.get_bind_group_layout(0);
-            let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(format!("{prefix}.bind_group.uniform").as_str()),
-                layout: &uniform_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: colormap_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-
-            let spectrogram_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(format!("{prefix}.buffer.spectrogram").as_str()),
-                contents: bytemuck::cast_slice(spectrogram.data().as_slice().unwrap()),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-            let spectrogram_bind_group_layout = self.pipeline.get_bind_group_layout(1);
-            let spectrogram_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(format!("{prefix}.bind_group.spectrogram").as_str()),
-                layout: &spectrogram_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: spectrogram_buffer.as_entire_binding(),
-                }],
-            });
-
-            (
-                Buffers {
-                    uniform: uniform_buffer,
-                    colormap: colormap_buffer,
-                    spectrogram: spectrogram_buffer,
-                },
-                BindGroups {
-                    uniform: uniform_bind_group,
-                    spectrogram: spectrogram_bind_group,
-                },
-            )
-        });
+        let (buffers, _) = self
+            .instances
+            .entry(primitive.id)
+            .or_insert_with_key(|id| Self::create_buffers(device, &self.pipeline, id, spectrogram));
 
         let bounds = primitive.controls.bounds();
 
@@ -165,6 +111,70 @@ impl Pipeline {
                 nchan: spectrogram.nchan as u32,
             }),
         );
+    }
+
+    fn create_buffers(
+        device: &wgpu::Device,
+        pipeline: &wgpu::RenderPipeline,
+        id: &Uuid,
+        spectrogram: &Spectrogram,
+    ) -> (Buffers, BindGroups) {
+        let prefix = format!("spectrogram.{}", id);
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(format!("{prefix}.buffer.uniform").as_str()),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(format!("{prefix}.buffer.colormap").as_str()),
+            contents: bytemuck::cast_slice(&super::colormap::MAGMA),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let uniform_bind_group_layout = pipeline.get_bind_group_layout(0);
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(format!("{prefix}.bind_group.uniform").as_str()),
+            layout: &uniform_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: colormap_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let spectrogram_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(format!("{prefix}.buffer.spectrogram").as_str()),
+            contents: bytemuck::cast_slice(spectrogram.data().as_slice().unwrap()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let spectrogram_bind_group_layout = pipeline.get_bind_group_layout(1);
+        let spectrogram_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(format!("{prefix}.bind_group.spectrogram").as_str()),
+            layout: &spectrogram_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: spectrogram_buffer.as_entire_binding(),
+            }],
+        });
+
+        (
+            Buffers {
+                uniform: uniform_buffer,
+                colormap: colormap_buffer,
+                spectrogram: spectrogram_buffer,
+            },
+            BindGroups {
+                uniform: uniform_bind_group,
+                spectrogram: spectrogram_bind_group,
+            },
+        )
     }
 
     fn render(
