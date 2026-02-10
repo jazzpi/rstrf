@@ -11,6 +11,7 @@ use futures_util::future::try_join_all;
 use ndarray::{ArcArray2, ArrayView2, Axis};
 use ndarray_stats::QuantileExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use uuid::Uuid;
 
 use crate::coord::data_absolute;
 
@@ -96,6 +97,7 @@ impl Header {
 
 #[derive(Clone, PartialEq)]
 pub struct Spectrogram {
+    pub id: Uuid,
     pub start_time: DateTime<Utc>,
     pub nchan: usize,
     pub nslices: usize,
@@ -128,6 +130,7 @@ impl Spectrogram {
         let min = *data.min()?;
         let max = *data.max()?;
         Ok(Spectrogram {
+            id: Uuid::new_v4(),
             start_time: first_header.start_time,
             freq: first_header.freq,
             bw: first_header.bw,
@@ -181,6 +184,7 @@ impl Spectrogram {
                 });
 
         Ok(Spectrogram {
+            id: Uuid::new_v4(),
             start_time: first.start_time,
             freq: first.freq,
             bw: first.bw,
