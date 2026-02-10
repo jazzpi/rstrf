@@ -75,10 +75,10 @@ impl Overlay {
 
         chart
             .configure_mesh()
+            .max_light_lines(0)
             .axis_style(WHITE)
             .label_style(&WHITE)
-            .bold_line_style(WHITE.mix(0.2))
-            .light_line_style(WHITE.mix(0.2))
+            .bold_line_style(WHITE.mix(0.4))
             .y_label_formatter(&|v| format!("{:.1}", v / 1000.0))
             .x_desc("Time [s]")
             .y_desc("Frequency offset [kHz]")
