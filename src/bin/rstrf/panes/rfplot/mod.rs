@@ -13,6 +13,7 @@ use rstrf::{
     spectrogram::Spectrogram,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     app::WorkspaceEvent,
@@ -67,6 +68,8 @@ struct SharedState {
 pub struct RFPlot {
     shared: SharedState,
     overlay: overlay::Overlay,
+    #[serde(default = "Uuid::new_v4")]
+    id: Uuid,
 }
 
 impl RFPlot {
@@ -75,9 +78,11 @@ impl RFPlot {
             plot_area_margin: 50.0,
             ..Default::default()
         };
+        let id = Uuid::new_v4();
         Self {
             shared,
             overlay: overlay::Overlay::default(),
+            id,
         }
     }
 }
