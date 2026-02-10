@@ -32,6 +32,7 @@ pub enum Message {
     SatellitesUpdated,
     SetSatellitePredictions(Option<orbit::Predictions>),
     SpectrogramUpdated,
+    TogglePredictions,
 }
 
 fn clamp_line_to_plot(
@@ -45,15 +46,34 @@ fn clamp_line_to_plot(
         .map(data_absolute::Point)
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+fn yes() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Overlay {
     satellites: Vec<orbit::Satellite>,
     #[serde(skip)]
     satellite_predictions: Option<orbit::Predictions>,
+    #[serde(default = "yes")]
+    show_predictions: bool,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
     #[serde(skip)]
     crosshair: Option<data_absolute::Point>,
+}
+
+impl Default for Overlay {
+    fn default() -> Self {
+        Self {
+            satellites: Default::default(),
+            satellite_predictions: Default::default(),
+            show_predictions: true,
+            track_points: Default::default(),
+            signals: Default::default(),
+            crosshair: Default::default(),
+        }
+    }
 }
 
 impl Overlay {
@@ -88,7 +108,9 @@ impl Overlay {
             .draw()
             .map_err(|e| format!("Failed to draw mesh: {:?}", e))?;
 
-        if let Some(satellite_predictions) = &self.satellite_predictions {
+        if self.show_predictions
+            && let Some(satellite_predictions) = &self.satellite_predictions
+        {
             let time = &satellite_predictions.times;
             for sat in &self.satellites {
                 let id = sat.norad_id();
@@ -362,15 +384,18 @@ impl Overlay {
             return (Status::Ignored, None);
         };
 
-        let pos = cursor
+        let Some(pos) = cursor
             .position_in(bounds)
-            .map(|pos| screen::Point::new(pos.x, pos.y));
+            .map(|pos| screen::Point::new(pos.x, pos.y))
+        else {
+            return (Status::Ignored, None);
+        };
 
-        match (key.as_ref(), pos) {
-            (keyboard::Key::Character("r"), _) => {
+        match key.as_ref() {
+            keyboard::Key::Character("r") => {
                 (Status::Captured, Some(control::Message::ResetView.into()))
             }
-            (keyboard::Key::Character("s"), Some(pos)) => match &shared.spectrogram {
+            keyboard::Key::Character("s") => match &shared.spectrogram {
                 Some(spectrogram) => (
                     Status::Captured,
                     Some(
@@ -386,8 +411,9 @@ impl Overlay {
                 ),
                 None => (Status::Ignored, None),
             },
-            (keyboard::Key::Character("f"), _) => {
-                (Status::Captured, Some(Message::FindSignals.into()))
+            keyboard::Key::Character("f") => (Status::Captured, Some(Message::FindSignals.into())),
+            keyboard::Key::Character("p") => {
+                (Status::Captured, Some(Message::TogglePredictions.into()))
             }
             _ => (Status::Ignored, None),
         }
@@ -477,6 +503,10 @@ impl Overlay {
                 self.signals.clear();
                 self.crosshair = None;
                 self.predict_satellites(shared.spectrogram.as_ref())
+            }
+            Message::TogglePredictions => {
+                self.show_predictions = !self.show_predictions;
+                Task::none()
             }
         }
     }
