@@ -33,8 +33,8 @@ impl PaneWidget for Dummy {
         container(content).center(Length::Fill).into()
     }
 
-    fn title(&self) -> &str {
-        "Loading..."
+    fn title(&self) -> String {
+        "Loading...".into()
     }
 
     fn to_tree(&self) -> PaneTree {

@@ -43,7 +43,7 @@ pub trait PaneWidget {
     }
     fn update(&mut self, message: Message) -> Task<Message>;
     fn view(&self, size: Size) -> Element<'_, Message>;
-    fn title(&self) -> &str;
+    fn title(&self) -> String;
     fn to_tree(&self) -> PaneTree;
 }
 

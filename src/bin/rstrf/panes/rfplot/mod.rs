@@ -214,8 +214,15 @@ impl PaneWidget for RFPlot {
         result.map(PaneMessage::from)
     }
 
-    fn title(&self) -> &str {
-        "Plot"
+    fn title(&self) -> String {
+        format!(
+            "Plot: {}",
+            self.shared
+                .spectrogram
+                .as_ref()
+                .map(|s| s.start_time.to_string())
+                .unwrap_or("Loading...".to_string())
+        )
     }
 
     fn to_tree(&self) -> PaneTree {

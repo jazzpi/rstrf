@@ -6,7 +6,7 @@ use iced::{
 };
 use iced_aw::{menu_bar, menu_items};
 use rstrf::{
-    menu::{button_s, button_f, submenu, view_menu},
+    menu::{button_f, button_s, submenu, view_menu},
     orbit::Satellite,
     util::pick_file,
 };
@@ -172,8 +172,8 @@ impl PaneWidget for SatManager {
         result.map(PaneMessage::from)
     }
 
-    fn title(&self) -> &str {
-        "Satellites"
+    fn title(&self) -> String {
+        "Satellites".into()
     }
 
     fn to_tree(&self) -> PaneTree {
