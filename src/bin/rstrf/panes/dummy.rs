@@ -22,8 +22,8 @@ impl PaneWidget for Dummy {
                 .on_press(panes::Message::ReplacePane(pane))
         };
         let content: Element<'_, panes::Message> = column![
-            pane("RFPlot", Pane::RFPlot(RFPlot::new())),
-            pane("SatManager", Pane::SatManager(SatManager::new())),
+            pane("RFPlot", Pane::RFPlot(Box::new(RFPlot::new()))),
+            pane("SatManager", Pane::SatManager(Box::new(SatManager::new()))),
         ]
         .spacing(20)
         .into();
@@ -38,6 +38,6 @@ impl PaneWidget for Dummy {
     }
 
     fn to_tree(&self) -> PaneTree {
-        PaneTree::Leaf(Pane::Dummy(self.clone()))
+        PaneTree::Leaf(Pane::Dummy(Box::new(self.clone())))
     }
 }

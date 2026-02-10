@@ -25,8 +25,10 @@ impl Default for Workspace {
             panes: PaneTree::Split {
                 axis: SplitAxis::Vertical,
                 ratio: 0.7,
-                a: Box::new(PaneTree::Leaf(Pane::RFPlot(RFPlot::new()))),
-                b: Box::new(PaneTree::Leaf(Pane::SatManager(SatManager::new()))),
+                a: Box::new(PaneTree::Leaf(Pane::RFPlot(Box::new(RFPlot::new())))),
+                b: Box::new(PaneTree::Leaf(Pane::SatManager(
+                    Box::new(SatManager::new()),
+                ))),
             },
             auto_save: true,
         }

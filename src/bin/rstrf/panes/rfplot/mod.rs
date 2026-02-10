@@ -226,6 +226,6 @@ impl PaneWidget for RFPlot {
     }
 
     fn to_tree(&self) -> PaneTree {
-        PaneTree::Leaf(Pane::RFPlot(self.clone()))
+        PaneTree::Leaf(Pane::RFPlot(Box::new(self.clone())))
     }
 }

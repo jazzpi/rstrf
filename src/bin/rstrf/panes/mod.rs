@@ -98,9 +98,9 @@ impl From<pane_grid::Axis> for SplitAxis {
 #[serde(tag = "pane", rename_all = "snake_case")]
 pub enum Pane {
     #[serde(rename = "rfplot")]
-    RFPlot(RFPlot),
-    SatManager(SatManager),
-    Dummy(Dummy),
+    RFPlot(Box<RFPlot>),
+    SatManager(Box<SatManager>),
+    Dummy(Box<Dummy>),
 }
 
 impl std::fmt::Debug for Pane {
@@ -174,9 +174,9 @@ fn build_rest(
 
 fn build_widget(pane: &Pane) -> Box<dyn PaneWidget> {
     match pane {
-        Pane::RFPlot(widget) => Box::new(widget.clone()),
-        Pane::SatManager(widget) => Box::new(widget.clone()),
-        Pane::Dummy(widget) => Box::new(widget.clone()),
+        Pane::RFPlot(widget) => widget.clone(),
+        Pane::SatManager(widget) => widget.clone(),
+        Pane::Dummy(widget) => widget.clone(),
     }
 }
 

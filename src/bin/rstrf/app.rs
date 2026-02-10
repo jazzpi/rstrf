@@ -209,9 +209,9 @@ impl AppModel {
                     panes::Message::ReplacePane(new_pane) => {
                         if let Some(pane) = self.panes.get_mut(id) {
                             *pane = match new_pane {
-                                panes::Pane::RFPlot(inner) => Box::new(inner.clone()),
-                                panes::Pane::SatManager(inner) => Box::new(inner.clone()),
-                                panes::Pane::Dummy(inner) => Box::new(inner.clone()),
+                                panes::Pane::RFPlot(inner) => inner.clone(),
+                                panes::Pane::SatManager(inner) => inner.clone(),
+                                panes::Pane::Dummy(inner) => inner.clone(),
                             }
                         }
                         Vec::new()
@@ -234,7 +234,7 @@ impl AppModel {
                 if self.panes.len() == 1 {
                     return Task::done(Message::PaneMessage(
                         pane,
-                        panes::Message::ReplacePane(panes::Pane::Dummy(Dummy)),
+                        panes::Message::ReplacePane(panes::Pane::Dummy(Box::new(Dummy))),
                     ));
                 }
                 let Some((_, sibling)) = self.panes.close(pane) else {
