@@ -196,7 +196,10 @@ impl AppModel {
                             panes::Pane::RFPlot(inner) => inner.clone(),
                             panes::Pane::SatManager(inner) => inner.clone(),
                             panes::Pane::Dummy(inner) => inner.clone(),
-                        }
+                        };
+                        return pane
+                            .init(&self.workspace.shared)
+                            .map(move |msg| Message::PaneMessage(id, msg));
                     }
                 }
                 panes::Message::ToWorkspace(message) => {
