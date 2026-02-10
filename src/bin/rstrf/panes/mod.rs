@@ -136,7 +136,7 @@ pub fn from_tree(tree: &PaneTree) -> anyhow::Result<(PaneGridState, Task<PaneMes
         message,
     })];
 
-    build_rest(&tree, &mut state, initial_pane, &mut tasks, leftmost)?;
+    build_rest(tree, &mut state, initial_pane, &mut tasks, leftmost)?;
 
     Ok((state, Task::batch(tasks)))
 }
