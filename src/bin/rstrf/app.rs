@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::panes::dummy::Dummy;
-use crate::workspace::Workspace;
+use crate::workspace::{self, Workspace};
 use crate::{Args, panes};
 use iced::Application;
 use iced::widget::{PaneGrid, button, column, pane_grid, responsive, row, text};
@@ -12,7 +12,6 @@ use iced::{Element, Program, Subscription, Task, Theme};
 use iced_aw::{menu_bar, menu_items};
 use rfd::AsyncFileDialog;
 use rstrf::menu::{button_f, button_s, checkbox, submenu, view_menu};
-use rstrf::orbit::Satellite;
 use rstrf::util::pick_file;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -42,27 +41,13 @@ pub enum Message {
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
+    WorkspaceEvent(workspace::Event),
     WorkspaceOpen,
     WorkspaceSave,
     WorkspaceSaveAs,
     WorkspaceToggleAutoSave,
     WorkspaceDoLoad(PathBuf),
     WorkspaceDoSave(PathBuf),
-}
-
-#[derive(Clone)]
-pub enum WorkspaceEvent {
-    SatellitesChanged(Vec<Satellite>),
-}
-
-impl Debug for WorkspaceEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WorkspaceEvent::SatellitesChanged(sats) => {
-                write!(f, "WorkspaceEvent::SatellitesChanged(len={})", sats.len())
-            }
-        }
-    }
 }
 
 impl AppModel {
@@ -152,7 +137,8 @@ impl AppModel {
                     style::title_bar_unfocused
                 });
             pane_grid::Content::new(responsive(move |size| {
-                pane.view(size).map(move |m| Message::PaneMessage(id, m))
+                pane.view(size, &self.workspace.shared)
+                    .map(move |m| Message::PaneMessage(id, m))
             }))
             .title_bar(title_bar)
             .style(if is_focused {
@@ -195,41 +181,38 @@ impl AppModel {
             Message::UpdateConfig(config) => {
                 self.config = config;
             }
-            Message::PaneMessage(id, pane_message) => {
-                let tasks = match &pane_message {
-                    panes::Message::Workspace(_) => self
-                        .panes
-                        .iter_mut()
-                        .map(|(id, pane)| {
-                            let id = *id;
-                            pane.update(pane_message.clone())
-                                .map(move |m| Message::PaneMessage(id, m))
-                        })
-                        .collect(),
-                    panes::Message::ReplacePane(new_pane) => {
-                        if let Some(pane) = self.panes.get_mut(id) {
-                            *pane = match new_pane {
-                                panes::Pane::RFPlot(inner) => inner.clone(),
-                                panes::Pane::SatManager(inner) => inner.clone(),
-                                panes::Pane::Dummy(inner) => inner.clone(),
-                            }
-                        }
-                        Vec::new()
-                    }
-                    _ => match self.panes.get_mut(id) {
-                        Some(pane) => vec![
-                            pane.update(pane_message)
-                                .map(move |m| Message::PaneMessage(id, m)),
-                        ],
-                        None => {
-                            log::warn!("Received PaneMessage for unknown pane ID {:?}", id);
-                            Vec::new()
-                        }
-                    },
-                };
-
+            Message::WorkspaceEvent(event) => {
+                let tasks = self.panes.iter_mut().map(|(id, pane)| {
+                    let id = *id;
+                    pane.workspace_event(event.clone(), &self.workspace.shared)
+                        .map(move |m| Message::PaneMessage(id, m))
+                });
                 return Task::batch(tasks);
             }
+            Message::PaneMessage(id, pane_message) => match pane_message {
+                panes::Message::ReplacePane(new_pane) => {
+                    if let Some(pane) = self.panes.get_mut(id) {
+                        *pane = match new_pane {
+                            panes::Pane::RFPlot(inner) => inner.clone(),
+                            panes::Pane::SatManager(inner) => inner.clone(),
+                            panes::Pane::Dummy(inner) => inner.clone(),
+                        }
+                    }
+                }
+                panes::Message::ToWorkspace(message) => {
+                    return self.workspace.update(message).map(Message::WorkspaceEvent);
+                }
+                _ => match self.panes.get_mut(id) {
+                    Some(pane) => {
+                        return pane
+                            .update(pane_message, &self.workspace.shared)
+                            .map(move |m| Message::PaneMessage(id, m));
+                    }
+                    None => {
+                        log::warn!("Received PaneMessage for unknown pane ID {:?}", id);
+                    }
+                },
+            },
             Message::ClosePane(pane) => {
                 if self.panes.len() == 1 {
                     return Task::done(Message::PaneMessage(
@@ -335,7 +318,7 @@ impl AppModel {
 
     fn reset_workspace(&mut self) -> Task<Message> {
         log::debug!("Loaded workspace");
-        let panes = panes::from_tree(&self.workspace.panes);
+        let panes = panes::from_workspace(&self.workspace);
         match panes {
             Ok((state, task)) => {
                 self.panes = state;

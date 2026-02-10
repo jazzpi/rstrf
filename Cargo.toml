@@ -41,3 +41,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[lints.clippy]
+# More concise for cases like .filter_map(|flag, val| flag.then(|| val))
+filter_map_bool_then = "allow"

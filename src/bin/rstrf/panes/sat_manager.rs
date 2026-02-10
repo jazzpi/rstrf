@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use iced::{
     Element, Length, Size, Task,
@@ -11,11 +11,11 @@ use rstrf::{
     util::pick_file,
 };
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
+use serde_with::serde_as;
 
 use crate::{
-    app::WorkspaceEvent,
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
+    workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
 #[derive(Debug, Clone)]
@@ -24,37 +24,27 @@ pub enum Message {
     LoadFrequencies,
     DoLoadTLEs(PathBuf),
     DoLoadFrequencies(PathBuf),
-    SatellitesLoaded(Result<Vec<Satellite>, String>),
-    FrequenciesLoaded(Result<HashMap<u64, f64>, String>),
     SatelliteToggled(usize, bool),
 }
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct SatManager {
-    satellites: Vec<(Satellite, bool)>,
-    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
-    frequencies: HashMap<u64, f64>,
+    // In the future, this will hold e.g. column visibility settings
 }
 
 impl SatManager {
     pub fn new() -> Self {
-        Self {
-            satellites: Vec::new(),
-            frequencies: HashMap::new(),
-        }
-    }
-
-    pub fn satellites(&self) -> Vec<Satellite> {
-        self.satellites
-            .iter()
-            .filter_map(|(sat, active)| if *active { Some(sat.clone()) } else { None })
-            .collect::<Vec<_>>()
+        Self {}
     }
 }
 
 impl PaneWidget for SatManager {
-    fn update(&mut self, message: PaneMessage) -> Task<PaneMessage> {
+    fn update(
+        &mut self,
+        message: PaneMessage,
+        workspace: &workspace::WorkspaceShared,
+    ) -> Task<PaneMessage> {
         match message {
             PaneMessage::SatManager(message) => match message {
                 Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
@@ -64,68 +54,69 @@ impl PaneWidget for SatManager {
                         Task::done(PaneMessage::SatManager(Message::DoLoadFrequencies(p)))
                     }),
                 Message::DoLoadTLEs(path) => {
-                    let frequencies = self.frequencies.clone();
+                    let frequencies = workspace.frequencies.clone();
                     Task::future(async move {
                         let satellites: anyhow::Result<_> =
                             rstrf::orbit::load_tles(&path, frequencies).await;
-                        PaneMessage::SatManager(Message::SatellitesLoaded(
-                            satellites.map_err(|e| format!("{e:?}")),
-                        ))
+                        satellites.map_err(|e| format!("{e:?}"))
+                    })
+                    .then(|result| match result {
+                        Ok(sats) => {
+                            log::info!("Loaded {} satellites", sats.len());
+                            Task::done(PaneMessage::ToWorkspace(
+                                WorkspaceMessage::SatellitesChanged(
+                                    sats.into_iter().map(|sat| (sat, true)).collect(),
+                                ),
+                            ))
+                        }
+                        Err(err) => {
+                            log::error!("Failed to load satellites: {}", err);
+                            Task::none()
+                        }
                     })
                 }
                 Message::DoLoadFrequencies(path) => Task::future(async move {
-                    let freqs = rstrf::orbit::load_frequencies(&path).await;
-                    PaneMessage::SatManager(Message::FrequenciesLoaded(
-                        freqs.map_err(|e| format!("{e:?}")),
-                    ))
-                }),
-                Message::SatellitesLoaded(satellites) => match satellites {
-                    Ok(satellites) => {
-                        log::info!("Loaded {} satellites", satellites.len());
-                        self.satellites = satellites.into_iter().map(|sat| (sat, true)).collect();
-                        Task::done(PaneMessage::Workspace(WorkspaceEvent::SatellitesChanged(
-                            self.satellites(),
-                        )))
-                    }
-                    Err(err) => {
-                        log::error!("Failed to load satellites: {}", err);
-                        Task::none()
-                    }
-                },
-                Message::FrequenciesLoaded(frequencies) => match frequencies {
-                    Ok(frequencies) => {
-                        log::info!("Loaded frequencies for {} satellites", frequencies.len());
-                        self.frequencies = frequencies;
-                        self.satellites.iter_mut().for_each(|(sat, _)| {
-                            if let Some(freq) = self.frequencies.get(&sat.norad_id()) {
-                                sat.tx_freq = *freq;
-                            }
-                        });
-                        Task::done(PaneMessage::Workspace(WorkspaceEvent::SatellitesChanged(
-                            self.satellites(),
-                        )))
+                    rstrf::orbit::load_frequencies(&path)
+                        .await
+                        .map_err(|e| format!("{e:?}"))
+                    // PaneMessage::SatManager(Message::FrequenciesLoaded(
+                    //     freqs,
+                    // ))
+                })
+                .then(|result| match result {
+                    Ok(freqs) => {
+                        log::info!("Loaded frequencies for {} satellites", freqs.len());
+                        Task::done(PaneMessage::ToWorkspace(
+                            WorkspaceMessage::FrequenciesChanged(freqs),
+                        ))
                     }
                     Err(err) => {
                         log::error!("Failed to load frequencies: {}", err);
                         Task::none()
                     }
-                },
-                Message::SatelliteToggled(idx, active) => {
-                    let Some((_, sat_active)) = self.satellites.get_mut(idx) else {
-                        log::error!("Invalid satellite index toggled: {}", idx);
-                        return Task::none();
-                    };
-                    *sat_active = active;
-                    Task::done(PaneMessage::Workspace(WorkspaceEvent::SatellitesChanged(
-                        self.satellites(),
-                    )))
-                }
+                }),
+                Message::SatelliteToggled(idx, active) => Task::done(PaneMessage::ToWorkspace(
+                    WorkspaceMessage::SatellitesChanged(
+                        workspace
+                            .satellites
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (sat, was_active))| {
+                                if i == idx {
+                                    (sat.clone(), active)
+                                } else {
+                                    (sat.clone(), *was_active)
+                                }
+                            })
+                            .collect(),
+                    ),
+                )),
             },
             _ => Task::none(),
         }
     }
 
-    fn view(&self, _size: Size) -> Element<'_, PaneMessage> {
+    fn view(&self, _size: Size, workspace: &WorkspaceShared) -> Element<'_, PaneMessage> {
         let mb = view_menu(menu_bar!((
             button_s("File", None),
             submenu(menu_items!(
@@ -136,38 +127,37 @@ impl PaneWidget for SatManager {
         let columns = [
             table::column(
                 text("Norad ID"),
-                |(_, (sat, _)): (usize, &(Satellite, bool))| text(sat.norad_id().to_string()),
+                |(_, (sat, _)): (usize, (Satellite, bool))| text(sat.norad_id().to_string()),
             ),
-            table::column(
-                text("Name"),
-                |(_, (sat, _)): (usize, &(Satellite, bool))| {
-                    text(
-                        sat.elements
-                            .object_name
-                            .clone()
-                            .unwrap_or("N/A".to_string()),
-                    )
-                },
-            ),
+            table::column(text("Name"), |(_, (sat, _)): (usize, (Satellite, bool))| {
+                text(
+                    sat.elements
+                        .object_name
+                        .clone()
+                        .unwrap_or("N/A".to_string()),
+                )
+            }),
             table::column(
                 text("Frequency (MHz)"),
-                |(_, (sat, _)): (usize, &(Satellite, bool))| {
+                |(_, (sat, _)): (usize, (Satellite, bool))| {
                     text(format!("{:3}", sat.tx_freq / 1e6))
                 },
             ),
             table::column(
                 text("Show"),
-                |(idx, (_, active)): (usize, &(Satellite, bool))| {
-                    checkbox(*active)
+                |(idx, (_, active)): (usize, (Satellite, bool))| {
+                    checkbox(active)
                         .on_toggle(move |new_state| Message::SatelliteToggled(idx, new_state))
                 },
             ),
         ];
-        let table: Element<'_, Message> =
-            scrollable(table(columns, self.satellites.iter().enumerate()))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into();
+        let table: Element<'_, Message> = scrollable(table(
+            columns,
+            workspace.satellites.iter().cloned().enumerate(),
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
         let result: Element<'_, Message> = column![mb, table].into();
         result.map(PaneMessage::from)
     }

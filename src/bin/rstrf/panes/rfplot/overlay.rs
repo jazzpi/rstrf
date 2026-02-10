@@ -12,11 +12,14 @@ use rstrf::{
         DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
         ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
-    orbit, signal,
+    orbit::{self, SatPrediction},
+    signal,
     spectrogram::Spectrogram,
     util::clip_line,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::workspace::WorkspaceShared;
 
 use super::{MouseInteraction, RFPlot, SharedState, control};
 
@@ -26,7 +29,7 @@ pub enum Message {
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
-    SetSatellites(Vec<orbit::Satellite>),
+    SatellitesUpdated,
     SetSatellitePredictions(Option<orbit::Predictions>),
     SpectrogramUpdated,
 }
@@ -90,13 +93,13 @@ impl Overlay {
             for sat in &self.satellites {
                 let id = sat.norad_id();
                 log::trace!("Plotting satellite {}", id);
-                let Some(freq) = &satellite_predictions.frequencies.get(&id) else {
+                let Some(SatPrediction {
+                    frequency: freq,
+                    zenith_angle: za,
+                }) = &satellite_predictions.for_id(id)
+                else {
                     continue;
                 };
-                let za = &satellite_predictions
-                    .zenith_angles
-                    .get(&id)
-                    .expect("Missing zenith angle prediction for satellite");
 
                 chart
                     .draw_series(LineSeries::new(
@@ -390,7 +393,12 @@ impl Overlay {
         }
     }
 
-    pub fn update(&mut self, message: Message, shared: &SharedState) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        message: Message,
+        shared: &SharedState,
+        workspace: &WorkspaceShared,
+    ) -> Task<Message> {
         match message {
             Message::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
@@ -455,8 +463,8 @@ impl Overlay {
                 });
                 Task::none()
             }
-            Message::SetSatellites(satellites) => {
-                self.satellites = satellites;
+            Message::SatellitesUpdated => {
+                self.satellites = workspace.active_satellites();
                 self.predict_satellites(shared.spectrogram.as_ref())
             }
             Message::SetSatellitePredictions(predictions) => {

@@ -277,8 +277,8 @@ pub fn predict_satellites(
 #[derive(Clone)]
 pub struct Predictions {
     pub times: Array1<f64>,
-    pub frequencies: HashMap<u64, Array1<f64>>,
-    pub zenith_angles: HashMap<u64, Array1<f64>>,
+    frequencies: HashMap<u64, Array1<f64>>,
+    zenith_angles: HashMap<u64, Array1<f64>>,
 }
 
 impl std::fmt::Debug for Predictions {
@@ -288,5 +288,19 @@ impl std::fmt::Debug for Predictions {
             .field("frequencies", &self.frequencies.len())
             .field("zenith_angles", &self.zenith_angles.len())
             .finish()
+    }
+}
+
+pub struct SatPrediction<'a> {
+    pub frequency: ndarray::ArrayView1<'a, f64>,
+    pub zenith_angle: ndarray::ArrayView1<'a, f64>,
+}
+
+impl Predictions {
+    pub fn for_id(&self, id: u64) -> Option<SatPrediction<'_>> {
+        Some(SatPrediction {
+            frequency: self.frequencies.get(&id)?.view(),
+            zenith_angle: self.zenith_angles.get(&id)?.view(),
+        })
     }
 }

@@ -4,17 +4,20 @@ use iced::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::panes::{self, Pane, PaneTree, PaneWidget, rfplot::RFPlot, sat_manager::SatManager};
+use crate::{
+    panes::{self, Pane, PaneTree, PaneWidget, rfplot::RFPlot, sat_manager::SatManager},
+    workspace::WorkspaceShared,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Dummy;
 
 impl PaneWidget for Dummy {
-    fn update(&mut self, _: panes::Message) -> Task<panes::Message> {
+    fn update(&mut self, _: panes::Message, _: &WorkspaceShared) -> Task<panes::Message> {
         Task::none()
     }
 
-    fn view(&self, _: Size) -> Element<'_, panes::Message> {
+    fn view(&self, _: Size, _: &WorkspaceShared) -> Element<'_, panes::Message> {
         let pane = |name, pane| {
             button(text(name))
                 .width(Length::Fill)
