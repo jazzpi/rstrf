@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use iced::{
     Element, Length, Size, Task,
-    widget::{checkbox, column, scrollable, table, text},
+    widget::{checkbox, column, container, scrollable, table, text},
 };
 use iced_aw::{menu_bar, menu_items};
 use rstrf::{
@@ -25,17 +25,19 @@ pub enum Message {
     DoLoadTLEs(PathBuf),
     DoLoadFrequencies(PathBuf),
     SatelliteToggled(usize, bool),
+    ToggleAllSatellites(bool),
 }
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct SatManager {
-    // In the future, this will hold e.g. column visibility settings
+    #[serde(default)]
+    show_all: bool,
 }
 
 impl SatManager {
     pub fn new() -> Self {
-        Self {}
+        Self { show_all: false }
     }
 }
 
@@ -111,6 +113,18 @@ impl PaneWidget for SatManager {
                             .collect(),
                     ),
                 )),
+                Message::ToggleAllSatellites(active) => {
+                    self.show_all = active;
+                    Task::done(PaneMessage::ToWorkspace(
+                        WorkspaceMessage::SatellitesChanged(
+                            workspace
+                                .satellites
+                                .iter()
+                                .map(|(sat, _)| (sat.clone(), active))
+                                .collect(),
+                        ),
+                    ))
+                }
             },
             _ => Task::none(),
         }
@@ -158,7 +172,13 @@ impl PaneWidget for SatManager {
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let result: Element<'_, Message> = column![mb, table].into();
+        let toggle_all = container(
+            checkbox(self.show_all)
+                .label("Show all satellites")
+                .on_toggle(Message::ToggleAllSatellites),
+        )
+        .padding([4, 10]);
+        let result: Element<'_, Message> = column![mb, toggle_all, table].into();
         result.map(PaneMessage::from)
     }
 
