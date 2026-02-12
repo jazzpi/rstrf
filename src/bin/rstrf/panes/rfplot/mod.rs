@@ -199,7 +199,7 @@ impl PaneWidget for RFPlot {
                 (button_f("Load file(s)", Some(Message::PickSpectrogram))),
             ))
         )));
-        let controls = self.shared.controls.view().map(Message::from);
+        let controls = self.shared.controls.view(&self.shared).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)

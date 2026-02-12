@@ -1,9 +1,12 @@
 use glam::Vec2;
 use iced::{
     Element, Length, Task,
-    widget::{self, slider, text},
+    alignment::Vertical,
+    widget::{self, Row, slider, text},
 };
-use rstrf::coord::{PlotAreaToDataNormalized, data_normalized, plot_area};
+use rstrf::coord::{
+    DataNormalizedToDataAbsolute, PlotAreaToDataNormalized, data_normalized, plot_area,
+};
 use serde::{Deserialize, Serialize};
 
 const ZOOM_MIN: f32 = 0.0;
@@ -29,6 +32,8 @@ pub struct Controls {
     signal_sigma: f32,
     /// Bandwidth around track points
     track_bw: f32,
+    #[serde(default)]
+    show_controls: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +49,7 @@ pub enum Message {
     UpdateMaxPower(f32),
     UpdateSignalSigma(f32),
     UpdateTrackBW(f32),
+    ToggleControls,
 }
 
 impl Controls {
@@ -96,66 +102,98 @@ impl Controls {
     fn control<'a>(
         label: &'static str,
         control: impl Into<Element<'a, Message>>,
-    ) -> Element<'a, Message> {
-        widget::row![text(label), control.into()].spacing(10).into()
+        value: impl Into<String>,
+    ) -> Row<'a, Message> {
+        widget::row![
+            text(label).width(Length::FillPortion(3)),
+            widget::container(control).width(Length::FillPortion(5)),
+            text(value.into()).width(Length::FillPortion(2)),
+        ]
+        .spacing(4)
+        .align_y(Vertical::Center)
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
-        widget::row![
-            Self::control(
-                "Zoom Time",
-                slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.x, move |zoom| {
-                    Message::UpdateZoomX(zoom)
-                })
-                .step(0.01)
-                .width(Length::Fill)
-            ),
-            Self::control(
-                "Zoom Freq",
-                slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.y, move |zoom| {
-                    Message::UpdateZoomY(zoom)
-                })
-                .step(0.01)
-                .width(Length::Fill)
-            ),
-            Self::control(
-                "Min Power",
-                slider(
-                    self.power_bounds.0..=self.power_bounds.1,
-                    self.power_range.0,
-                    move |power| { Message::UpdateMinPower(power) }
-                )
-                .step(0.1)
-                .width(Length::Fill)
-            ),
-            Self::control(
-                "Max Power",
-                slider(
-                    self.power_bounds.0..=self.power_bounds.1,
-                    self.power_range.1,
-                    move |power| { Message::UpdateMaxPower(power) }
-                )
-                .step(0.1)
-                .width(Length::Fill)
-            ),
-            Self::control(
-                "Signal Thresh",
-                slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, move |sigma| {
-                    Message::UpdateSignalSigma(sigma)
-                })
-                .step(0.1)
-                .width(Length::Fill)
-            ),
-            Self::control(
-                "Track BW",
-                slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, move |bw| {
-                    Message::UpdateTrackBW(bw)
-                })
-                .step(100.0)
-                .width(Length::Fill)
-            ),
-        ]
-        .into()
+    fn button<'a>(label: &'a str, msg: Message) -> Element<'a, Message> {
+        widget::button(widget::text(label).size(14))
+            .style(widget::button::primary)
+            .on_press(msg)
+            .into()
+    }
+
+    pub fn view(&self, shared: &super::SharedState) -> Element<'_, Message> {
+        let buttons = widget::row![Self::button("C", Message::ToggleControls)].spacing(4);
+        let mut result = widget::column![buttons].spacing(4);
+        if self.show_controls
+            && let Some(spectrogram) = &shared.spectrogram
+        {
+            let bounds = self.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
+            result = result.push(
+                widget::grid![
+                    Self::control(
+                        "Zoom Time",
+                        slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.x, move |zoom| {
+                            Message::UpdateZoomX(zoom)
+                        })
+                        .step(0.01)
+                        .width(Length::Fill),
+                        format!("{:.0} s", bounds.0.width),
+                    ),
+                    Self::control(
+                        "Zoom Freq",
+                        slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.y, move |zoom| {
+                            Message::UpdateZoomY(zoom)
+                        })
+                        .step(0.01)
+                        .width(Length::Fill),
+                        format!("{:.0} kHz", bounds.0.height / 1000.0),
+                    ),
+                    Self::control(
+                        "Min Power",
+                        slider(
+                            self.power_bounds.0..=self.power_bounds.1,
+                            self.power_range.0,
+                            Message::UpdateMinPower,
+                        )
+                        .step(0.1)
+                        .width(Length::Fill),
+                        format!("{:.1} dB", self.power_range.0),
+                    ),
+                    Self::control(
+                        "Max Power",
+                        slider(
+                            self.power_bounds.0..=self.power_bounds.1,
+                            self.power_range.1,
+                            Message::UpdateMaxPower,
+                        )
+                        .step(0.1)
+                        .width(Length::Fill),
+                        format!("{:.1} dB", self.power_range.1),
+                    ),
+                    Self::control(
+                        "Signal Thresh",
+                        slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, move |sigma| {
+                            Message::UpdateSignalSigma(sigma)
+                        })
+                        .step(0.1)
+                        .width(Length::Fill),
+                        format!("{:.1}", self.signal_sigma),
+                    ),
+                    Self::control(
+                        "Track BW",
+                        slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, move |bw| {
+                            Message::UpdateTrackBW(bw)
+                        })
+                        .step(100.0)
+                        .width(Length::Fill),
+                        format!("{:.1} kHz", self.track_bw / 1000.0),
+                    ),
+                ]
+                .columns(2)
+                .spacing(8)
+                .height(Length::Shrink),
+            );
+        }
+        result.into()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -209,6 +247,7 @@ impl Controls {
             Message::UpdateTrackBW(bw) => {
                 self.track_bw = bw;
             }
+            Message::ToggleControls => self.show_controls = !self.show_controls,
         }
         self.snap_to_bounds();
         Task::none()
@@ -245,6 +284,7 @@ impl Default for Controls {
             power_range: (0.0, 0.0),
             signal_sigma: 5.0,
             track_bw: 10e3,
+            show_controls: true,
         }
     }
 }
