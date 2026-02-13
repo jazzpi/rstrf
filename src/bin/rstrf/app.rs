@@ -24,7 +24,6 @@ pub struct AppModel {
     /// Configuration data that persists between application runs.
     config: Config,
     panes: panes::PaneGridState,
-    focused_pane: Option<pane_grid::Pane>,
     workspace_path: Option<PathBuf>,
     workspace: Workspace,
 }
@@ -39,7 +38,6 @@ pub enum Message {
     ClosePane(pane_grid::Pane),
     ToggleMaximizePane(pane_grid::Pane),
     SplitPane(pane_grid::Pane, pane_grid::Axis),
-    PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     WorkspaceEvent(workspace::Event),
@@ -81,7 +79,6 @@ impl AppModel {
         let mut app = AppModel {
             config: Config::default(),
             panes,
-            focused_pane: None,
             workspace_path: flags.workspace,
             workspace: Workspace::default(),
         };
@@ -110,7 +107,6 @@ impl AppModel {
             ))
         )));
         let pane_grid = PaneGrid::new(&self.panes, move |id, pane, is_maximized| {
-            let is_focused = Some(id) == self.focused_pane;
             let title = text(pane.title());
             let title_bar = pane_grid::TitleBar::new(title)
                 .controls(pane_grid::Controls::new(
@@ -142,24 +138,15 @@ impl AppModel {
                     .spacing(5),
                 ))
                 .padding(10)
-                .style(if is_focused {
-                    style::title_bar_focused
-                } else {
-                    style::title_bar_unfocused
-                });
+                .style(style::title_bar);
             pane_grid::Content::new(responsive(move |size| {
                 pane.view(size, &self.workspace.shared)
                     .map(move |m| Message::PaneMessage(id, m))
             }))
             .title_bar(title_bar)
-            .style(if is_focused {
-                style::pane_focused
-            } else {
-                style::pane_unfocused
-            })
+            .style(style::pane)
         })
         .spacing(10)
-        .on_click(Message::PaneClicked)
         .on_drag(Message::PaneDragged)
         .on_resize(10, Message::PaneResized);
         column![mb, pane_grid].into()
@@ -234,11 +221,10 @@ impl AppModel {
                         panes::Message::ReplacePane(panes::Pane::Dummy(Box::new(Dummy))),
                     ));
                 }
-                let Some((_, sibling)) = self.panes.close(pane) else {
+                if self.panes.close(pane).is_none() {
                     log::warn!("Tried to close unknown pane {:?}", pane);
                     return Task::none();
                 };
-                self.focused_pane = Some(sibling);
             }
             Message::ToggleMaximizePane(pane) => {
                 if self.panes.maximized().is_some() {
@@ -249,9 +235,6 @@ impl AppModel {
             }
             Message::SplitPane(pane, axis) => {
                 self.panes.split(axis, pane, Box::new(Dummy));
-            }
-            Message::PaneClicked(pane) => {
-                self.focused_pane = Some(pane);
             }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                 self.panes.drop(pane, target);
@@ -349,16 +332,7 @@ impl AppModel {
 mod style {
     use iced::{Border, Theme, widget::container::Style};
 
-    pub fn title_bar_focused(theme: &Theme) -> Style {
-        let palette = theme.extended_palette();
-        Style {
-            text_color: Some(palette.primary.strong.text),
-            background: Some(palette.primary.strong.color.into()),
-            ..Style::default()
-        }
-    }
-
-    pub fn title_bar_unfocused(theme: &Theme) -> Style {
+    pub fn title_bar(theme: &Theme) -> Style {
         let palette = theme.extended_palette();
         Style {
             text_color: Some(palette.background.strong.text),
@@ -367,20 +341,7 @@ mod style {
         }
     }
 
-    pub fn pane_focused(theme: &Theme) -> Style {
-        let palette = theme.extended_palette();
-        Style {
-            background: Some(palette.background.weak.color.into()),
-            border: Border {
-                width: 2.0,
-                color: palette.primary.strong.color,
-                ..Border::default()
-            },
-            ..Style::default()
-        }
-    }
-
-    pub fn pane_unfocused(theme: &Theme) -> Style {
+    pub fn pane(theme: &Theme) -> Style {
         let palette = theme.extended_palette();
         Style {
             background: Some(palette.background.weak.color.into()),
