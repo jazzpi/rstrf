@@ -2,9 +2,10 @@ use std::{collections::HashMap, path::PathBuf};
 
 use iced::{
     Element, Length, Size, Task,
-    widget::{checkbox, column, container, scrollable, table, text, text_input},
+    alignment::Horizontal,
+    widget::{Column, button, checkbox, column, container, scrollable, table, text, text_input},
 };
-use iced_aw::{menu_bar, menu_items};
+use iced_aw::{card, menu_bar, menu_items};
 use rstrf::{
     menu::{button_f, button_s, submenu, view_menu},
     orbit::Satellite,
@@ -149,10 +150,31 @@ impl PaneWidget for SatManager {
         let mb = view_menu(menu_bar!((
             button_s("File", None),
             submenu(menu_items!(
-                (button_f("Load frequencies", Some(Message::LoadFrequencies))),
                 (button_f("Load TLEs", Some(Message::LoadTLEs))),
+                (button_f("Load frequencies", Some(Message::LoadFrequencies))),
             ))
         )));
+        let onboarding = if workspace.satellites.is_empty() {
+            let head: Element<'_, Message> = text("TIP").into();
+            let content: Element<'_, Message> = column![
+                text("You don't have any satellites loaded yet. Try loading some TLEs from the File menu or the button below."),
+                button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs)
+            ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
+            Some(card(head, content).style(iced_aw::style::card::info))
+        } else if workspace
+            .satellites
+            .iter()
+            .all(|(sat, _)| sat.tx_freq == 0.0)
+        {
+            let head: Element<'_, Message> = text("TIP").into();
+            let content: Element<'_, Message> = column![
+                text("You don't have any transmit frequencies set for the satellites. Try editing the frequency fields, or loading an STRF frequencies.txt file from the File menu or the button below."),
+                button(text("Load Frequencies")).style(button::primary).width(200.0).on_press(Message::LoadFrequencies)
+            ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
+            Some(card(head, content).style(iced_aw::style::card::info))
+        } else {
+            None
+        };
         let columns = [
             table::column(
                 text("Norad ID"),
@@ -216,7 +238,12 @@ impl PaneWidget for SatManager {
                 .on_toggle(Message::ToggleAllSatellites),
         )
         .padding([4, 10]);
-        let result: Element<'_, Message> = column![mb, toggle_all, table].into();
+        let mut content = Column::new().spacing(4).padding(8);
+        if let Some(onboarding) = onboarding {
+            content = content.push(onboarding);
+        }
+        content = content.push(toggle_all).push(table);
+        let result: Element<'_, Message> = column![mb, content].into();
         result.map(PaneMessage::from)
     }
 
