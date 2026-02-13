@@ -311,7 +311,7 @@ impl AppModel {
                     self.workspace_path = Some(path.clone());
                     Ok(Task::future(async move {
                         match tokio::fs::write(path.clone(), json).await {
-                            Ok(_) => log::info!("Saved workspace to {path:?}"),
+                            Ok(_) => log::debug!("Saved workspace to {path:?}"),
                             Err(e) => log::error!("Failed to save workspace to {path:?}: {e:?}"),
                         }
                     })
