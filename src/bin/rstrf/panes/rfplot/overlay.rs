@@ -127,7 +127,7 @@ impl Overlay {
                     .draw_series(LineSeries::new(
                         izip!(time.iter(), freq.iter(), za.iter()).filter_map(|(&t, &f, &za)| {
                             if za < std::f64::consts::FRAC_PI_2 {
-                                Some((t as f32, (f - sat.tx_freq) as f32))
+                                Some((t as f32, (f as f32 - spectrogram.freq)))
                             } else {
                                 None
                             }
@@ -140,14 +140,14 @@ impl Overlay {
                 let first_visible =
                     izip!(time.iter(), freq.iter(), za.iter()).position(|(&t, &f, &za)| {
                         x.contains(&(t as f32))
-                            && y.contains(&((f - sat.tx_freq) as f32))
+                            && y.contains(&(f as f32 - spectrogram.freq))
                             && za < std::f64::consts::FRAC_PI_2
                     });
                 let Some(first_visible) = first_visible else {
                     continue;
                 };
                 let first_time = (time[first_visible] as f32).max(x.start);
-                let first_freq = (freq[first_visible] - sat.tx_freq) as f32;
+                let first_freq = freq[first_visible] as f32 - spectrogram.freq;
                 chart
                     .draw_series(vec![Text::new(
                         format!("{:06}", id),

@@ -8,8 +8,10 @@ use serde_with::{DisplayFromStr, serde_as};
 use crate::panes::{Pane, PaneTree, SplitAxis, rfplot::RFPlot, sat_manager::SatManager};
 
 #[derive(Clone)]
+#[allow(clippy::enum_variant_names)]
 pub enum Message {
     SatellitesChanged(Vec<(Satellite, bool)>),
+    SatelliteChanged(usize, Box<(Satellite, bool)>),
     FrequenciesChanged(HashMap<u64, f64>),
 }
 
@@ -26,6 +28,13 @@ impl std::fmt::Debug for Message {
             }
             Message::FrequenciesChanged(freqs) => {
                 write!(f, "Message::FrequenciesChanged(len={})", freqs.len())
+            }
+            Message::SatelliteChanged(idx, data) => {
+                write!(
+                    f,
+                    "Message::SatelliteChanged(idx={}, sat={:?}, active={})",
+                    idx, data.0, data.1
+                )
             }
         }
     }
@@ -51,6 +60,14 @@ impl Workspace {
         match message {
             Message::SatellitesChanged(sats) => {
                 self.shared.satellites = sats;
+                Task::done(Event::SatellitesChanged)
+            }
+            Message::SatelliteChanged(idx, data) => {
+                log::debug!("SatelliteChanged({}, {:?})", idx, data);
+                match self.shared.satellites.get_mut(idx) {
+                    Some(sat) => *sat = *data,
+                    None => log::error!("Got SatelliteChanged for non-existent index {}", idx),
+                };
                 Task::done(Event::SatellitesChanged)
             }
             Message::FrequenciesChanged(freqs) => {

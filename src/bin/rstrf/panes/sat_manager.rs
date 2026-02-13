@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use iced::{
     Element, Length, Size, Task,
-    widget::{checkbox, column, container, scrollable, table, text},
+    widget::{checkbox, column, container, scrollable, table, text, text_input},
 };
 use iced_aw::{menu_bar, menu_items};
 use rstrf::{
@@ -11,7 +11,7 @@ use rstrf::{
     util::pick_file,
 };
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
+use serde_with::{DisplayFromStr, serde_as};
 
 use crate::{
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
@@ -26,6 +26,9 @@ pub enum Message {
     DoLoadFrequencies(PathBuf),
     SatelliteToggled(usize, bool),
     ToggleAllSatellites(bool),
+    SatelliteEdited(usize, Box<Satellite>),
+    SatelliteEditCommited(usize),
+    Nop,
 }
 
 #[serde_as]
@@ -33,11 +36,17 @@ pub enum Message {
 pub struct SatManager {
     #[serde(default)]
     show_all: bool,
+    #[serde(default)]
+    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
+    sat_buffer: HashMap<usize, Satellite>,
 }
 
 impl SatManager {
     pub fn new() -> Self {
-        Self { show_all: false }
+        Self {
+            show_all: false,
+            sat_buffer: HashMap::new(),
+        }
     }
 }
 
@@ -81,9 +90,6 @@ impl PaneWidget for SatManager {
                     rstrf::orbit::load_frequencies(&path)
                         .await
                         .map_err(|e| format!("{e:?}"))
-                    // PaneMessage::SatManager(Message::FrequenciesLoaded(
-                    //     freqs,
-                    // ))
                 })
                 .then(|result| match result {
                     Ok(freqs) => {
@@ -97,22 +103,15 @@ impl PaneWidget for SatManager {
                         Task::none()
                     }
                 }),
-                Message::SatelliteToggled(idx, active) => Task::done(PaneMessage::ToWorkspace(
-                    WorkspaceMessage::SatellitesChanged(
-                        workspace
-                            .satellites
-                            .iter()
-                            .enumerate()
-                            .map(|(i, (sat, was_active))| {
-                                if i == idx {
-                                    (sat.clone(), active)
-                                } else {
-                                    (sat.clone(), *was_active)
-                                }
-                            })
-                            .collect(),
-                    ),
-                )),
+                Message::SatelliteToggled(idx, active) => match workspace.satellites.get(idx) {
+                    Some((sat, _)) => Task::done(PaneMessage::ToWorkspace(
+                        WorkspaceMessage::SatelliteChanged(idx, Box::new((sat.clone(), active))),
+                    )),
+                    None => {
+                        log::error!("Got SatelliteToggle for non-existend index {}", idx);
+                        Task::none()
+                    }
+                },
                 Message::ToggleAllSatellites(active) => {
                     self.show_all = active;
                     Task::done(PaneMessage::ToWorkspace(
@@ -125,6 +124,22 @@ impl PaneWidget for SatManager {
                         ),
                     ))
                 }
+                Message::SatelliteEdited(id, sat) => {
+                    self.sat_buffer.insert(id, *sat);
+                    Task::none()
+                }
+                Message::SatelliteEditCommited(idx) => {
+                    match (self.sat_buffer.remove(&idx), workspace.satellites.get(idx)) {
+                        (Some(buf_data), Some(old_data)) => Task::done(PaneMessage::ToWorkspace(
+                            WorkspaceMessage::SatelliteChanged(
+                                idx,
+                                Box::new((buf_data, old_data.1)),
+                            ),
+                        )),
+                        _ => Task::none(),
+                    }
+                }
+                Message::Nop => Task::none(),
             },
             _ => Task::none(),
         }
@@ -153,8 +168,23 @@ impl PaneWidget for SatManager {
             }),
             table::column(
                 text("Frequency (MHz)"),
-                |(_, (sat, _)): (usize, (Satellite, bool))| {
-                    text(format!("{:3}", sat.tx_freq / 1e6))
+                |(id, (sat, _)): (usize, (Satellite, bool))| {
+                    text_input("...", format!("{:.3}", sat.tx_freq / 1e6).as_str())
+                        .on_input(move |freq| {
+                            let sat = sat.clone();
+                            freq.parse::<f64>()
+                                .ok()
+                                .map(move |freq| {
+                                    let sat = Satellite {
+                                        tx_freq: freq * 1e6,
+                                        ..sat.clone()
+                                    };
+                                    Message::SatelliteEdited(id, Box::new(sat))
+                                })
+                                .unwrap_or(Message::Nop)
+                        })
+                        .on_submit(Message::SatelliteEditCommited(id))
+                        .width(Length::Fixed(100.0))
                 },
             ),
             table::column(
@@ -167,7 +197,15 @@ impl PaneWidget for SatManager {
         ];
         let table: Element<'_, Message> = scrollable(table(
             columns,
-            workspace.satellites.iter().cloned().enumerate(),
+            workspace.satellites.iter().enumerate().map(|(id, data)| {
+                (
+                    id,
+                    self.sat_buffer
+                        .get(&id)
+                        .map(|sat| (sat.clone(), data.1))
+                        .unwrap_or(data.clone()),
+                )
+            }),
         ))
         .width(Length::Fill)
         .height(Length::Fill)
