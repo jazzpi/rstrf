@@ -41,6 +41,7 @@ pub enum Message {
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     WorkspaceEvent(workspace::Event),
+    WorkspaceNew,
     WorkspaceOpen,
     WorkspaceSave,
     WorkspaceSaveAs,
@@ -96,6 +97,7 @@ impl AppModel {
         let mb = view_menu(menu_bar!((
             button_s("Workspace", None),
             submenu(menu_items!(
+                (button_f("New", Some(Message::WorkspaceNew))),
                 (button_f("Open", Some(Message::WorkspaceOpen))),
                 (button_f("Save", Some(Message::WorkspaceSave))),
                 (button_f("Save as...", Some(Message::WorkspaceSaveAs))),
@@ -304,6 +306,11 @@ impl AppModel {
                     Ok(task) => return task,
                     Err(err) => log::error!("Failed to save workspace: {:?}", err),
                 }
+            }
+            Message::WorkspaceNew => {
+                self.workspace_path = None;
+                self.workspace = Workspace::default();
+                return self.reset_workspace();
             }
         }
         Task::none()
