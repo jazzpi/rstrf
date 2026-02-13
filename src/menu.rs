@@ -112,20 +112,28 @@ pub fn checkbox<'a, Message: Clone + 'a>(
 pub fn view_menu<'a, Message: 'a>(
     bar: MenuBar<'a, Message, Theme, Renderer>,
 ) -> Element<'a, Message> {
-    bar.draw_path(DrawPath::Backdrop)
-        .close_on_background_click_global(true)
-        .close_on_item_click_global(true)
-        .padding(5.0)
-        .style(|theme: &Theme, status: awstyle::Status| Style {
-            path_border: Border {
-                radius: Radius::new(6.0),
-                ..Default::default()
-            },
-            path: theme.extended_palette().primary.weak.color.into(),
-            ..awstyle::menu_bar::primary(theme, status)
-        })
-        .width(Length::Fill)
-        .into()
+    // MenuBar seems to ignore the .width(Length::Fill) call
+    container(
+        bar.draw_path(DrawPath::Backdrop)
+            .close_on_background_click_global(true)
+            .close_on_item_click_global(true)
+            .padding(5.0)
+            .style(|theme: &Theme, status: awstyle::Status| Style {
+                path_border: Border {
+                    radius: Radius::new(6.0),
+                    ..Default::default()
+                },
+                path: theme.extended_palette().primary.weak.color.into(),
+                ..awstyle::menu_bar::primary(theme, status)
+            })
+            .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .style(|theme| container::Style {
+        background: Some(theme.extended_palette().background.base.color.into()),
+        ..container::Style::default()
+    })
+    .into()
 }
 
 pub fn submenu<'a, Message: Clone + 'a>(
