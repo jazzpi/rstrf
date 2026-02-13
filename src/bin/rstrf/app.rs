@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::panes::dummy::Dummy;
-use crate::widgets::square_button;
+use crate::widgets::{Icon, icon_button};
 use crate::workspace::{self, Workspace};
 use crate::{Args, panes};
 use iced::Application;
@@ -109,32 +109,35 @@ impl AppModel {
                 ))
             ))
         )));
-        let pane_grid = PaneGrid::new(&self.panes, move |id, pane, _is_maximized| {
+        let pane_grid = PaneGrid::new(&self.panes, move |id, pane, is_maximized| {
             let is_focused = Some(id) == self.focused_pane;
             let title = text(pane.title());
             let title_bar = pane_grid::TitleBar::new(title)
                 .controls(pane_grid::Controls::new(
                     row![
-                        // TODO: Use icons
-                        square_button(
-                            "H",
+                        icon_button(
+                            Icon::SplitHorizontally,
                             "Split horizontally",
                             Message::SplitPane(id, pane_grid::Axis::Horizontal),
-                            button::primary
-                        ),
-                        square_button(
-                            "V",
-                            "Split vertically",
-                            Message::SplitPane(id, pane_grid::Axis::Vertical),
-                            button::primary
-                        ),
-                        square_button(
-                            "M",
-                            "Maximize",
-                            Message::ToggleMaximizePane(id),
                             button::secondary
                         ),
-                        square_button("X", "Close", Message::ClosePane(id), button::danger),
+                        icon_button(
+                            Icon::SplitVertically,
+                            "Split vertically",
+                            Message::SplitPane(id, pane_grid::Axis::Vertical),
+                            button::secondary
+                        ),
+                        icon_button(
+                            if is_maximized {
+                                Icon::Restore
+                            } else {
+                                Icon::Maximize
+                            },
+                            "Maximize",
+                            Message::ToggleMaximizePane(id),
+                            button::primary
+                        ),
+                        icon_button(Icon::Close, "Close", Message::ClosePane(id), button::danger),
                     ]
                     .spacing(5),
                 ))

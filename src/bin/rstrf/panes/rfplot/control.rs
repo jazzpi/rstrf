@@ -9,7 +9,7 @@ use rstrf::coord::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::widgets::square_button;
+use crate::widgets::{Icon, icon_button};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 8.0;
@@ -117,14 +117,14 @@ impl Controls {
 
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, Message> {
         let buttons = widget::row![
-            square_button(
-                "C",
+            icon_button(
+                Icon::Sliders,
                 "Toggle controls",
                 Message::ToggleControls,
                 widget::button::primary
             ),
-            square_button(
-                "R",
+            icon_button(
+                Icon::ZoomReset,
                 "Reset view",
                 Message::ResetView,
                 widget::button::primary
