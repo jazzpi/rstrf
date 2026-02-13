@@ -121,7 +121,11 @@ impl Controls {
     }
 
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, Message> {
-        let buttons = widget::row![Self::button("C", Message::ToggleControls)].spacing(4);
+        let buttons = widget::row![
+            Self::button("C", Message::ToggleControls),
+            Self::button("R", Message::ResetView),
+        ]
+        .spacing(4);
         let mut result = widget::column![buttons].spacing(4);
         if self.show_controls
             && let Some(spectrogram) = &shared.spectrogram
