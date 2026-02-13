@@ -117,8 +117,18 @@ impl Controls {
 
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, Message> {
         let buttons = widget::row![
-            square_button("C", Message::ToggleControls, widget::button::primary),
-            square_button("R", Message::ResetView, widget::button::primary),
+            square_button(
+                "C",
+                "Toggle controls",
+                Message::ToggleControls,
+                widget::button::primary
+            ),
+            square_button(
+                "R",
+                "Reset view",
+                Message::ResetView,
+                widget::button::primary
+            ),
         ]
         .spacing(4);
         let mut result = widget::column![buttons].spacing(4);

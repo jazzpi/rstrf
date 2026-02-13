@@ -118,16 +118,23 @@ impl AppModel {
                         // TODO: Use icons
                         square_button(
                             "H",
+                            "Split horizontally",
                             Message::SplitPane(id, pane_grid::Axis::Horizontal),
                             button::primary
                         ),
                         square_button(
                             "V",
+                            "Split vertically",
                             Message::SplitPane(id, pane_grid::Axis::Vertical),
                             button::primary
                         ),
-                        square_button("M", Message::ToggleMaximizePane(id), button::secondary),
-                        square_button("X", Message::ClosePane(id), button::danger),
+                        square_button(
+                            "M",
+                            "Maximize",
+                            Message::ToggleMaximizePane(id),
+                            button::secondary
+                        ),
+                        square_button("X", "Close", Message::ClosePane(id), button::danger),
                     ]
                     .spacing(5),
                 ))
