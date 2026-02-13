@@ -3,6 +3,7 @@
 mod app;
 mod config;
 mod panes;
+mod widgets;
 mod workspace;
 
 use clap::Parser;

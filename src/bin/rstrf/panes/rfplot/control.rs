@@ -9,6 +9,8 @@ use rstrf::coord::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::widgets::square_button;
+
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 8.0;
 
@@ -113,17 +115,10 @@ impl Controls {
         .align_y(Vertical::Center)
     }
 
-    fn button<'a>(label: &'a str, msg: Message) -> Element<'a, Message> {
-        widget::button(widget::text(label).size(14))
-            .style(widget::button::primary)
-            .on_press(msg)
-            .into()
-    }
-
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, Message> {
         let buttons = widget::row![
-            Self::button("C", Message::ToggleControls),
-            Self::button("R", Message::ResetView),
+            square_button("C", Message::ToggleControls, widget::button::primary),
+            square_button("R", Message::ResetView, widget::button::primary),
         ]
         .spacing(4);
         let mut result = widget::column![buttons].spacing(4);
