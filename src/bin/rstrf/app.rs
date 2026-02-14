@@ -5,6 +5,7 @@ use crate::panes::dummy::Dummy;
 use crate::widgets::{Icon, icon_button};
 use crate::workspace::{self, Workspace};
 use crate::{Args, panes};
+use anyhow::Context;
 use iced::Application;
 use iced::widget::{PaneGrid, button, column, container, pane_grid, responsive, row, text};
 use iced::window::Settings;
@@ -14,24 +15,35 @@ use iced_aw::{menu_bar, menu_items};
 use rfd::AsyncFileDialog;
 use rstrf::menu::{button_f, button_s, checkbox, submenu, view_menu};
 use rstrf::util::pick_file;
+use space_track::SpaceTrack;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+/// State that is shared across the entire application, but not persisted in the workspace.
+#[derive(Default)]
+pub struct AppShared {
+    // SpaceTrack saves/refreshes its credentials seamlessly, which means all methods on it require
+    // mutable access.
+    pub space_track: Option<Arc<Mutex<SpaceTrack>>>,
+}
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
 pub struct AppModel {
-    #[allow(dead_code)]
+    config_path: PathBuf,
     /// Configuration data that persists between application runs.
     config: Config,
     panes: panes::PaneGridState,
     workspace_path: Option<PathBuf>,
     workspace: Workspace,
+    shared_state: AppShared,
 }
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
-    #[allow(dead_code)]
     UpdateConfig(Config),
     #[allow(clippy::enum_variant_names)]
     PaneMessage(pane_grid::Pane, panes::Message),
@@ -73,15 +85,47 @@ impl AppModel {
         let (panes, _) = panes::PaneGridState::new(Box::new(panes::dummy::Dummy));
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
+
+        let config_path = match dirs::config_dir() {
+            Some(mut path) => {
+                path.push("rstrf");
+                match std::fs::create_dir_all(&path) {
+                    Ok(_) => {
+                        path.push("config.json");
+                        path
+                    }
+                    Err(err) => {
+                        log::error!("Failed to create config directory {:?}: {:?}", path, err);
+                        "/dev/null".into()
+                    }
+                }
+            }
+            None => {
+                log::error!("Failed to get config directory");
+                "/dev/null".into()
+            }
+        };
+
+        let config = match Self::load_config(&config_path) {
+            Ok(config) => config,
+            Err(err) => {
+                log::error!("Failed to load config: {:?}", err);
+                Config::default()
+            }
+        };
+        tasks.push(Task::done(Message::UpdateConfig(config)));
+
         if let Some(ref path) = flags.workspace {
             tasks.push(Task::done(Message::WorkspaceDoLoad(path.clone())));
         }
 
         let mut app = AppModel {
+            config_path,
             config: Config::default(),
             panes,
             workspace_path: flags.workspace,
             workspace: Workspace::default(),
+            shared_state: AppShared::default(),
         };
         tasks.push(app.reset_workspace());
         let command = Task::batch(tasks);
@@ -143,7 +187,7 @@ impl AppModel {
                 .style(style::title_bar);
             pane_grid::Content::new(
                 container(responsive(move |size| {
-                    pane.view(size, &self.workspace.shared)
+                    pane.view(size, &self.workspace.shared, &self.shared_state)
                         .map(move |m| Message::PaneMessage(id, m))
                 }))
                 .padding(2),
@@ -182,7 +226,7 @@ impl AppModel {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::UpdateConfig(config) => {
-                self.config = config;
+                return self.update_config(config);
             }
             Message::WorkspaceEvent(event) => {
                 let tasks = self.panes.iter_mut().map(|(id, pane)| {
@@ -201,17 +245,20 @@ impl AppModel {
                             panes::Pane::Dummy(inner) => inner.clone(),
                         };
                         return pane
-                            .init(&self.workspace.shared)
+                            .init(&self.workspace.shared, &self.shared_state)
                             .map(move |msg| Message::PaneMessage(id, msg));
                     }
                 }
                 panes::Message::ToWorkspace(message) => {
                     return self.workspace.update(message).map(Message::WorkspaceEvent);
                 }
+                panes::Message::UpdateConfig(config) => {
+                    return self.update_config(config);
+                }
                 _ => match self.panes.get_mut(id) {
                     Some(pane) => {
                         return pane
-                            .update(pane_message, &self.workspace.shared)
+                            .update(pane_message, &self.workspace.shared, &self.shared_state)
                             .map(move |m| Message::PaneMessage(id, m));
                     }
                     None => {
@@ -325,7 +372,7 @@ impl AppModel {
 
     fn reset_workspace(&mut self) -> Task<Message> {
         log::debug!("Loaded workspace");
-        let panes = panes::from_workspace(&self.workspace);
+        let panes = panes::from_workspace(&self.workspace, &self.shared_state);
         match panes {
             Ok((state, task)) => {
                 self.panes = state;
@@ -336,6 +383,38 @@ impl AppModel {
                 Task::none()
             }
         }
+    }
+
+    fn load_config(path: &PathBuf) -> anyhow::Result<Config> {
+        let reader =
+            std::fs::File::open(path).context(format!("Failed to open config file: {:?}", path))?;
+        let config = serde_json::from_reader(reader)
+            .context(format!("Failed to parse config file: {:?}", path))?;
+        Ok(config)
+    }
+
+    fn save_config(&self) -> anyhow::Result<()> {
+        let json = serde_json::to_string(&self.config)?;
+        std::fs::write(&self.config_path, json).context(format!(
+            "Failed to write config file: {:?}",
+            self.config_path
+        ))?;
+        Ok(())
+    }
+
+    fn update_config(&mut self, config: Config) -> Task<Message> {
+        self.shared_state.space_track = config.space_track_creds.as_ref().map(|(user, pass)| {
+            Arc::new(Mutex::new(SpaceTrack::new(space_track::Credentials {
+                identity: user.clone(),
+                password: pass.clone(),
+            })))
+        });
+        self.config = config;
+        match self.save_config() {
+            Ok(_) => log::debug!("Saved config"),
+            Err(err) => log::error!("Failed to save config: {:?}", err),
+        }
+        Task::none()
     }
 }
 

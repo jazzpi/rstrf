@@ -4,6 +4,8 @@ use iced::{Point, Rectangle};
 use itertools::izip;
 use ndarray::Array1;
 use rfd::AsyncFileDialog;
+use sgp4::Elements;
+use space_track::GeneralPerturbation;
 
 // TODO: How can we implement this for f32 as well?
 pub fn minmax(arr: &Array1<f64>) -> (f64, f64) {
@@ -68,4 +70,8 @@ pub async fn pick_file(filters: &[(&str, &[&str])]) -> Option<PathBuf> {
         .pick_file()
         .await
         .map(|file| file.path().to_path_buf())
+}
+
+pub fn spacetrack_to_sgp4(sat: &GeneralPerturbation) -> Option<Elements> {
+    serde_json::from_str(&serde_json::to_string(sat).ok()?).ok()
 }

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+    app::AppShared,
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget, rfplot::control::Controls},
     workspace::{Event, WorkspaceShared},
 };
@@ -88,7 +89,7 @@ impl RFPlot {
 }
 
 impl PaneWidget for RFPlot {
-    fn init(&mut self, workspace: &WorkspaceShared) -> Task<PaneMessage> {
+    fn init(&mut self, workspace: &WorkspaceShared, app: &AppShared) -> Task<PaneMessage> {
         let spectrogram_task = if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
@@ -96,6 +97,7 @@ impl PaneWidget for RFPlot {
             self.update(
                 Message::LoadSpectrogram(self.shared.spectrogram_files.clone()).into(),
                 workspace,
+                app,
             )
         };
         let overlay_task = self
@@ -105,7 +107,12 @@ impl PaneWidget for RFPlot {
         Task::batch(vec![spectrogram_task, overlay_task])
     }
 
-    fn update(&mut self, message: PaneMessage, workspace: &WorkspaceShared) -> Task<PaneMessage> {
+    fn update(
+        &mut self,
+        message: PaneMessage,
+        workspace: &WorkspaceShared,
+        _app: &AppShared,
+    ) -> Task<PaneMessage> {
         match message {
             PaneMessage::RFPlot(message) => match message {
                 Message::Control(message) => self
@@ -179,7 +186,12 @@ impl PaneWidget for RFPlot {
         }
     }
 
-    fn view(&self, _size: Size, _workspace: &WorkspaceShared) -> Element<'_, PaneMessage> {
+    fn view(
+        &self,
+        _size: Size,
+        _workspace: &WorkspaceShared,
+        _config: &AppShared,
+    ) -> Element<'_, PaneMessage> {
         // The plot is implemented as a stack of two layers: the spectrogram itself (see
         // `shader.rs`) and the overlay (see `overlay.rs`).
 

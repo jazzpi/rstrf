@@ -3,6 +3,8 @@ use iced::{Element, Size, Task, widget::pane_grid};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    app::AppShared,
+    config::Config,
     panes::{dummy::Dummy, rfplot::RFPlot, sat_manager::SatManager},
     workspace::{self, Workspace, WorkspaceShared},
 };
@@ -17,6 +19,7 @@ pub enum Message {
     SatManager(sat_manager::Message),
     ToWorkspace(workspace::Message),
     ReplacePane(Pane),
+    UpdateConfig(Config),
 }
 
 #[derive(Debug, Clone)]
@@ -38,10 +41,15 @@ impl From<sat_manager::Message> for Message {
 }
 
 pub trait PaneWidget {
-    fn init(&mut self, _workspace: &WorkspaceShared) -> Task<Message> {
+    fn init(&mut self, _workspace: &WorkspaceShared, _app: &AppShared) -> Task<Message> {
         Task::none()
     }
-    fn update(&mut self, message: Message, workspace: &WorkspaceShared) -> Task<Message>;
+    fn update(
+        &mut self,
+        message: Message,
+        workspace: &WorkspaceShared,
+        app: &AppShared,
+    ) -> Task<Message>;
     fn workspace_event(
         &mut self,
         _event: workspace::Event,
@@ -49,7 +57,12 @@ pub trait PaneWidget {
     ) -> Task<Message> {
         Task::none()
     }
-    fn view(&self, size: Size, workspace: &WorkspaceShared) -> Element<'_, Message>;
+    fn view(
+        &self,
+        size: Size,
+        workspace: &WorkspaceShared,
+        app: &AppShared,
+    ) -> Element<'_, Message>;
     fn title(&self) -> String;
     fn to_tree(&self) -> PaneTree;
 }
@@ -133,10 +146,13 @@ pub type PaneGridState = pane_grid::State<Box<dyn PaneWidget>>;
 /// allow splitting subtrees -- only existing panes (leafs). So we first find the leftmost leaf of
 /// both subtrees, and split the leftmost leaf of the left subtree with the leftmost leaf of the
 /// right subtree. Afterwards, we recursively build the subtrees.
-pub fn from_workspace(workspace: &Workspace) -> anyhow::Result<(PaneGridState, Task<PaneMessage>)> {
+pub fn from_workspace(
+    workspace: &Workspace,
+    app: &AppShared,
+) -> anyhow::Result<(PaneGridState, Task<PaneMessage>)> {
     let leftmost = workspace.panes.leftmost_leaf();
     let mut widget = build_widget(leftmost);
-    let task = widget.init(&workspace.shared);
+    let task = widget.init(&workspace.shared, app);
     let (mut state, initial_pane) = PaneGridState::new(widget);
     let mut tasks = vec![task.map(move |message| PaneMessage {
         id: initial_pane,
@@ -145,6 +161,7 @@ pub fn from_workspace(workspace: &Workspace) -> anyhow::Result<(PaneGridState, T
 
     build_rest(
         &workspace.shared,
+        app,
         &workspace.panes,
         &mut state,
         initial_pane,
@@ -157,6 +174,7 @@ pub fn from_workspace(workspace: &Workspace) -> anyhow::Result<(PaneGridState, T
 
 fn build_rest(
     workspace: &WorkspaceShared,
+    app: &AppShared,
     tree: &PaneTree,
     state: &mut PaneGridState,
     left_pane: pane_grid::Pane,
@@ -169,7 +187,7 @@ fn build_rest(
         PaneTree::Split { axis, ratio, a, b } => {
             let right_leftmost = b.leftmost_leaf();
             let mut widget = build_widget(right_leftmost);
-            let task = widget.init(workspace);
+            let task = widget.init(workspace, app);
             let (right_pane, split) = state
                 .split((*axis).into(), left_pane, widget)
                 .ok_or(anyhow::anyhow!("Could not split pane"))?;
@@ -179,8 +197,8 @@ fn build_rest(
                 message,
             }));
 
-            build_rest(workspace, a, state, left_pane, tasks, left_leftmost)?;
-            build_rest(workspace, b, state, right_pane, tasks, right_leftmost)?;
+            build_rest(workspace, app, a, state, left_pane, tasks, left_leftmost)?;
+            build_rest(workspace, app, b, state, right_pane, tasks, right_leftmost)?;
 
             Ok(())
         }

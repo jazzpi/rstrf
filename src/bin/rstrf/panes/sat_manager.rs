@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use iced::{
     Element, Font, Length, Size, Task,
@@ -13,15 +13,19 @@ use iced_aw::{card, menu_bar, menu_items};
 use rstrf::{
     menu::{button_f, button_s, submenu, view_menu},
     orbit::Satellite,
-    util::pick_file,
+    util::{pick_file, spacetrack_to_sgp4},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use space_track::{GeneralPerturbationField, Predicate, SpaceTrack};
 use strum::{EnumIter, IntoEnumIterator};
+use tokio::sync::Mutex;
 
 use crate::{
+    app::AppShared,
+    config::Config,
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
-    widgets::{Icon, icon_button, toolbar},
+    widgets::{Form, Icon, form, icon_button, toolbar},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
@@ -37,6 +41,11 @@ pub enum Message {
     SatelliteEditCommited(usize),
     ToggleColumnControls,
     ToggleColumn(TableColumn, bool),
+    SpaceTrackToggle,
+    SpaceTrackUpdateAll,
+    SpaceTrackUpdateVisible,
+    SpaceTrackLogOut,
+    SpaceTrackForm(form::Message),
     Nop,
 }
 
@@ -108,6 +117,11 @@ pub struct SatManager {
     #[serde(default)]
     show_column_controls: bool,
     #[serde(default)]
+    show_spacetrack: bool,
+    #[serde(skip)]
+    #[serde(default = "SatManager::create_spacetrack_form")]
+    spacetrack_form: Form,
+    #[serde(default)]
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     sat_buffer: HashMap<usize, Satellite>,
     #[serde(default = "SatManager::default_columns")]
@@ -123,9 +137,79 @@ impl SatManager {
         Self {
             show_all: false,
             show_column_controls: false,
+            show_spacetrack: false,
+            spacetrack_form: SatManager::create_spacetrack_form(),
             sat_buffer: HashMap::new(),
             columns: Self::default_columns(),
         }
+    }
+
+    fn create_spacetrack_form() -> Form {
+        Form::new(
+            vec![
+                ("Username".into(), form::Field::Text(String::new())),
+                ("Password".into(), form::Field::Password(String::new())),
+            ],
+            "Log in".into(),
+        )
+    }
+
+    fn spacetrack_update(
+        space_track: Option<Arc<Mutex<SpaceTrack>>>,
+        mut satellites: Vec<(Satellite, bool)>,
+        active_only: bool,
+    ) -> Task<PaneMessage> {
+        let Some(space_track) = space_track else {
+            return Task::none();
+        };
+        let space_track = space_track.clone();
+        let mut norad_ids = Vec::new();
+        let mut id_to_idx = HashMap::new();
+        for (idx, (sat, active)) in satellites.iter().enumerate() {
+            if !active_only || *active {
+                let norad_id = sat.norad_id() as u32;
+                norad_ids.push(norad_id);
+                id_to_idx.insert(norad_id, idx);
+            }
+        }
+        Task::future(async move {
+            let mut space_track = space_track.lock().await;
+            let cfg = space_track::Config::empty()
+                .predicate(Predicate::build_range_list(
+                    GeneralPerturbationField::NoradCatId,
+                    norad_ids,
+                ))
+                .predicate(Predicate {
+                    field: GeneralPerturbationField::Epoch,
+                    value: ">now-10".to_string()
+                })
+                .predicate(Predicate {
+                    field: GeneralPerturbationField::DecayDate,
+                    value: "null-val".to_string()
+                });
+            space_track.gp(cfg).await
+        }).then(move |result| match result {
+            Ok(sats) => {
+                for sat in sats {
+                    let Some(elements) = spacetrack_to_sgp4(&sat) else {
+                        log::error!("Failed to convert Space-Track data to SGP4 elements for satellite with NORAD ID {}", sat.norad_cat_id);
+                        continue;
+                    };
+                    let Some(idx) = id_to_idx.get(&(sat.norad_cat_id as u32)) else {
+                        log::error!("Got Space-Track data for NORAD ID {} which is not in the current satellite list", sat.norad_cat_id);
+                        continue;
+                    };
+                    satellites[*idx].0.elements = elements;
+                }
+                Task::done(PaneMessage::ToWorkspace(
+                    WorkspaceMessage::SatellitesChanged(satellites.clone()),
+                ))
+            },
+            Err(err) => {
+                log::error!("Failed to fetch data from Space-Track: {err}");
+                Task::none()
+            }
+        })
     }
 }
 
@@ -134,6 +218,7 @@ impl PaneWidget for SatManager {
         &mut self,
         message: PaneMessage,
         workspace: &workspace::WorkspaceShared,
+        app: &AppShared,
     ) -> Task<PaneMessage> {
         match message {
             PaneMessage::SatManager(message) => match message {
@@ -226,13 +311,45 @@ impl PaneWidget for SatManager {
                     self.columns.insert(column, visible);
                     Task::none()
                 }
+                Message::SpaceTrackToggle => {
+                    self.show_spacetrack = !self.show_spacetrack;
+                    Task::none()
+                }
                 Message::Nop => Task::none(),
+                Message::SpaceTrackUpdateAll => Self::spacetrack_update(
+                    app.space_track.clone(),
+                    workspace.satellites.clone(),
+                    false,
+                ),
+                Message::SpaceTrackUpdateVisible => Self::spacetrack_update(
+                    app.space_track.clone(),
+                    workspace.satellites.clone(),
+                    true,
+                ),
+                Message::SpaceTrackLogOut => Task::done(PaneMessage::UpdateConfig(Config {
+                    space_track_creds: None,
+                })),
+                Message::SpaceTrackForm(form::Message::Submit) => {
+                    let values = self.spacetrack_form.field_values();
+                    Task::done(PaneMessage::UpdateConfig(Config {
+                        space_track_creds: Some((values[0].clone(), values[1].clone())),
+                    }))
+                }
+                Message::SpaceTrackForm(form_msg) => {
+                    self.spacetrack_form.update(form_msg);
+                    Task::none()
+                }
             },
             _ => Task::none(),
         }
     }
 
-    fn view(&self, _size: Size, workspace: &WorkspaceShared) -> Element<'_, PaneMessage> {
+    fn view(
+        &self,
+        _size: Size,
+        workspace: &WorkspaceShared,
+        app_state: &AppShared,
+    ) -> Element<'_, PaneMessage> {
         let mb = view_menu(menu_bar!((
             button_s("File", None),
             submenu(menu_items!(
@@ -315,6 +432,12 @@ impl PaneWidget for SatManager {
                 Message::ToggleColumnControls,
                 button::primary,
             ),
+            icon_button(
+                Icon::Download,
+                "Fetch orbital elements",
+                Message::SpaceTrackToggle,
+                button::primary,
+            ),
         ]);
         let mut controls = column![buttons].spacing(8);
         if self.show_column_controls {
@@ -339,6 +462,42 @@ impl PaneWidget for SatManager {
                 ]
                 .spacing(6),
             );
+        }
+        if self.show_spacetrack {
+            let space_track: Element<'_, Message> = match app_state.space_track {
+                Some(_) => container(
+                    column![
+                        button("Update all satellites from Space-Track")
+                            .style(button::primary)
+                            .on_press(Message::SpaceTrackUpdateAll)
+                            .width(Length::Fill),
+                        button("Update visible satellites from Space-Track")
+                            .style(button::primary)
+                            .on_press(Message::SpaceTrackUpdateVisible)
+                            .width(Length::Fill),
+                        button("Log out of Space-Track")
+                            .style(button::danger)
+                            .on_press(Message::SpaceTrackLogOut)
+                            .width(Length::Fill),
+                    ]
+                    .padding([0, 50])
+                    .spacing(6)
+                )
+                .center_x(Length::Fill)
+                .into(),
+                None =>
+                    card(
+                        "Missing Credentials", column![
+                            text("To fetch orbital elements from Space-Track, please enter your credentials."),
+                            self.spacetrack_form.view().map(Message::SpaceTrackForm)
+                        ]
+                        .spacing(10)
+                        .width(Length::Fill)
+                    )
+                    .style(iced_aw::style::card::warning)
+                    .into()
+            };
+            controls = controls.push(space_track);
         }
         let controls = container(controls)
             .padding(8)

@@ -9,6 +9,10 @@ use iced::widget::svg;
 use iced::widget::tooltip;
 use iced::widget::{button, text};
 
+pub mod form;
+
+pub use form::Form;
+
 pub enum Icon {
     Close,
     Maximize,
@@ -21,6 +25,7 @@ pub enum Icon {
     Eye,
     EyeOff,
     ViewColumns,
+    Download,
 }
 
 impl From<Icon> for svg::Handle {
@@ -53,6 +58,7 @@ impl From<Icon> for svg::Handle {
             Icon::ViewColumns => {
                 include_bytes!("../../../../resources/icons/majesticons--view-columns.svg")
             }
+            Icon::Download => include_bytes!("../../../../resources/icons/bytesize--download.svg"),
         };
         svg::Handle::from_memory(bytes)
     }
