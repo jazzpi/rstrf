@@ -43,6 +43,7 @@ pub enum Message {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, Serialize, Deserialize)]
 pub enum TableColumn {
     NoradId,
+    Epoch,
     Name,
     Frequency,
     Show,
@@ -52,6 +53,7 @@ impl TableColumn {
     pub fn header(&self) -> &'static str {
         match self {
             TableColumn::NoradId => "Norad ID",
+            TableColumn::Epoch => "Epoch",
             TableColumn::Name => "Name",
             TableColumn::Frequency => "Frequency (MHz)",
             TableColumn::Show => "Show",
@@ -61,6 +63,9 @@ impl TableColumn {
     pub fn view(self, idx: usize, sat: &Satellite, active: bool) -> Element<'static, Message> {
         match self {
             TableColumn::NoradId => text(sat.norad_id().to_string()).into(),
+            TableColumn::Epoch => {
+                text(sat.elements.datetime.format("%Y-%m-%d %H:%M").to_string()).into()
+            }
             TableColumn::Name => text(
                 sat.elements
                     .object_name
