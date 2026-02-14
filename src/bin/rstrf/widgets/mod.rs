@@ -16,6 +16,9 @@ pub enum Icon {
     Sliders,
     ZoomReset,
     TogglePredictions,
+    Eye,
+    EyeOff,
+    ViewColumns,
 }
 
 impl From<Icon> for svg::Handle {
@@ -42,6 +45,11 @@ impl From<Icon> for svg::Handle {
             }
             Icon::TogglePredictions => {
                 include_bytes!("../../../../resources/icons/toggle-predictions.svg")
+            }
+            Icon::Eye => include_bytes!("../../../../resources/icons/majesticons--eye.svg"),
+            Icon::EyeOff => include_bytes!("../../../../resources/icons/majesticons--eye-off.svg"),
+            Icon::ViewColumns => {
+                include_bytes!("../../../../resources/icons/majesticons--view-columns.svg")
             }
         };
         svg::Handle::from_memory(bytes)
@@ -72,7 +80,7 @@ pub fn icon_button<'a, Message: Clone + 'a>(
         .on_press(msg),
         container(text(tooltip_label))
             .padding(5)
-            .style(|theme| container::dark(theme)),
+            .style(container::dark),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_secs(1))

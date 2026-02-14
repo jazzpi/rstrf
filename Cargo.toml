@@ -37,6 +37,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 serde_with = "3.16.1"
 uuid = { version = "1.20.0", features = ["v4"] }
+strum = { version = "0.27.2", features = ["derive"] }
 
 [profile.release-with-debug]
 inherits = "release"

@@ -1,9 +1,13 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use iced::{
-    Element, Length, Size, Task,
+    Element, Font, Length, Size, Task,
     alignment::Horizontal,
-    widget::{Column, button, checkbox, column, container, scrollable, table, text, text_input},
+    font,
+    widget::{
+        Column, Grid, button, checkbox, column, container, grid::Sizing, row, scrollable, table,
+        text, text_input,
+    },
 };
 use iced_aw::{card, menu_bar, menu_items};
 use rstrf::{
@@ -13,9 +17,11 @@ use rstrf::{
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use strum::{EnumIter, IntoEnumIterator};
 
 use crate::{
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
+    widgets::{Icon, icon_button},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
@@ -26,10 +32,67 @@ pub enum Message {
     DoLoadTLEs(PathBuf),
     DoLoadFrequencies(PathBuf),
     SatelliteToggled(usize, bool),
-    ToggleAllSatellites(bool),
+    ToggleAllSatellites,
     SatelliteEdited(usize, Box<Satellite>),
     SatelliteEditCommited(usize),
+    ToggleColumnControls,
+    ToggleColumn(TableColumn, bool),
     Nop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, Serialize, Deserialize)]
+pub enum TableColumn {
+    NoradId,
+    Name,
+    Frequency,
+    Show,
+}
+
+impl TableColumn {
+    pub fn header(&self) -> &'static str {
+        match self {
+            TableColumn::NoradId => "Norad ID",
+            TableColumn::Name => "Name",
+            TableColumn::Frequency => "Frequency (MHz)",
+            TableColumn::Show => "Show",
+        }
+    }
+
+    pub fn view(self, idx: usize, sat: &Satellite, active: bool) -> Element<'static, Message> {
+        match self {
+            TableColumn::NoradId => text(sat.norad_id().to_string()).into(),
+            TableColumn::Name => text(
+                sat.elements
+                    .object_name
+                    .clone()
+                    .unwrap_or("N/A".to_string()),
+            )
+            .into(),
+            TableColumn::Frequency => {
+                let sat = sat.clone();
+                text_input("...", format!("{:.3}", sat.tx_freq / 1e6).as_str())
+                    .on_input(move |freq| {
+                        let sat = sat.clone();
+                        freq.parse::<f64>()
+                            .ok()
+                            .map(move |freq| {
+                                let sat = Satellite {
+                                    tx_freq: freq * 1e6,
+                                    ..sat.clone()
+                                };
+                                Message::SatelliteEdited(idx, Box::new(sat))
+                            })
+                            .unwrap_or(Message::Nop)
+                    })
+                    .on_submit(Message::SatelliteEditCommited(idx))
+                    .width(Length::Fixed(100.0))
+                    .into()
+            }
+            TableColumn::Show => checkbox(active)
+                .on_toggle(move |new_state| Message::SatelliteToggled(idx, new_state))
+                .into(),
+        }
+    }
 }
 
 #[serde_as]
@@ -38,15 +101,25 @@ pub struct SatManager {
     #[serde(default)]
     show_all: bool,
     #[serde(default)]
+    show_column_controls: bool,
+    #[serde(default)]
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     sat_buffer: HashMap<usize, Satellite>,
+    #[serde(default = "SatManager::default_columns")]
+    columns: HashMap<TableColumn, bool>,
 }
 
 impl SatManager {
+    fn default_columns() -> HashMap<TableColumn, bool> {
+        TableColumn::iter().map(|col| (col, true)).collect()
+    }
+
     pub fn new() -> Self {
         Self {
             show_all: false,
+            show_column_controls: false,
             sat_buffer: HashMap::new(),
+            columns: Self::default_columns(),
         }
     }
 }
@@ -113,14 +186,14 @@ impl PaneWidget for SatManager {
                         Task::none()
                     }
                 },
-                Message::ToggleAllSatellites(active) => {
-                    self.show_all = active;
+                Message::ToggleAllSatellites => {
+                    self.show_all = !self.show_all;
                     Task::done(PaneMessage::ToWorkspace(
                         WorkspaceMessage::SatellitesChanged(
                             workspace
                                 .satellites
                                 .iter()
-                                .map(|(sat, _)| (sat.clone(), active))
+                                .map(|(sat, _)| (sat.clone(), self.show_all))
                                 .collect(),
                         ),
                     ))
@@ -139,6 +212,14 @@ impl PaneWidget for SatManager {
                         )),
                         _ => Task::none(),
                     }
+                }
+                Message::ToggleColumnControls => {
+                    self.show_column_controls = !self.show_column_controls;
+                    Task::none()
+                }
+                Message::ToggleColumn(column, visible) => {
+                    self.columns.insert(column, visible);
+                    Task::none()
                 }
                 Message::Nop => Task::none(),
             },
@@ -175,74 +256,92 @@ impl PaneWidget for SatManager {
         } else {
             None
         };
-        let columns = [
-            table::column(
-                text("Norad ID"),
-                |(_, (sat, _)): (usize, (Satellite, bool))| text(sat.norad_id().to_string()),
-            ),
-            table::column(text("Name"), |(_, (sat, _)): (usize, (Satellite, bool))| {
-                text(
-                    sat.elements
-                        .object_name
-                        .clone()
-                        .unwrap_or("N/A".to_string()),
-                )
-            }),
-            table::column(
-                text("Frequency (MHz)"),
-                |(id, (sat, _)): (usize, (Satellite, bool))| {
-                    text_input("...", format!("{:.3}", sat.tx_freq / 1e6).as_str())
-                        .on_input(move |freq| {
-                            let sat = sat.clone();
-                            freq.parse::<f64>()
-                                .ok()
-                                .map(move |freq| {
-                                    let sat = Satellite {
-                                        tx_freq: freq * 1e6,
-                                        ..sat.clone()
-                                    };
-                                    Message::SatelliteEdited(id, Box::new(sat))
-                                })
-                                .unwrap_or(Message::Nop)
-                        })
-                        .on_submit(Message::SatelliteEditCommited(id))
-                        .width(Length::Fixed(100.0))
-                },
-            ),
-            table::column(
-                text("Show"),
-                |(idx, (_, active)): (usize, (Satellite, bool))| {
-                    checkbox(active)
-                        .on_toggle(move |new_state| Message::SatelliteToggled(idx, new_state))
-                },
-            ),
-        ];
-        let table: Element<'_, Message> = scrollable(table(
+        let columns = TableColumn::iter().filter_map(|col| {
+            self.columns.get(&col).and_then(|visible| {
+                visible.then(|| {
+                    table::column(
+                        text(col.header()),
+                        move |(idx, (sat, active)): (usize, (Satellite, bool))| {
+                            col.view(idx, &sat, active).map(Message::from)
+                        },
+                    )
+                })
+            })
+        });
+        let table = table(
             columns,
-            workspace.satellites.iter().enumerate().map(|(id, data)| {
-                (
-                    id,
-                    self.sat_buffer
-                        .get(&id)
-                        .map(|sat| (sat.clone(), data.1))
-                        .unwrap_or(data.clone()),
-                )
-            }),
-        ))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into();
-        let toggle_all = container(
-            checkbox(self.show_all)
-                .label("Show all satellites")
-                .on_toggle(Message::ToggleAllSatellites),
-        )
-        .padding([4, 10]);
+            workspace
+                .satellites
+                .iter()
+                .enumerate()
+                .map(|(id, (sat, active))| {
+                    let sat = self.sat_buffer.get(&id).unwrap_or(sat);
+                    (id, (sat.clone(), *active))
+                }),
+        );
+        let table: Element<'_, Message> = scrollable(table)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        let show_all = if self.show_all {
+            (Icon::EyeOff, "Hide all satellites")
+        } else {
+            (Icon::Eye, "Show all satellites")
+        };
+        let toggle_columns_label = if self.show_column_controls {
+            "Hide column controls"
+        } else {
+            "Show column controls"
+        };
+        let buttons = row![
+            icon_button(
+                show_all.0,
+                show_all.1,
+                Message::ToggleAllSatellites,
+                button::primary
+            ),
+            icon_button(
+                Icon::ViewColumns,
+                toggle_columns_label,
+                Message::ToggleColumnControls,
+                button::primary
+            )
+        ]
+        .padding([4, 10])
+        .spacing(10);
         let mut content = Column::new().spacing(4).padding(8);
         if let Some(onboarding) = onboarding {
             content = content.push(onboarding);
         }
-        content = content.push(toggle_all).push(table);
+        content = content.push(buttons);
+        if self.show_column_controls {
+            content = content.push(
+                container(
+                    column![
+                        text("Show columns:").font(Font {
+                            weight: font::Weight::Bold,
+                            ..Font::default()
+                        }),
+                        Grid::from_iter(TableColumn::iter().map(|col| {
+                            container(
+                                checkbox(self.columns.get(&col).copied().unwrap_or_default())
+                                    .label(col.header())
+                                    .on_toggle(move |visible| Message::ToggleColumn(col, visible)),
+                            )
+                            .center_y(Length::Shrink)
+                            .into()
+                        }))
+                        .height(Sizing::EvenlyDistribute(Length::Shrink))
+                        .fluid(200.0)
+                        .spacing(4)
+                    ]
+                    .spacing(6)
+                    .padding(6),
+                )
+                .style(container::secondary),
+            );
+        }
+        content = content.push(table);
         let result: Element<'_, Message> = column![mb, content].into();
         result.map(PaneMessage::from)
     }
