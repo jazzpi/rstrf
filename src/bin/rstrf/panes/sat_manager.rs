@@ -5,8 +5,8 @@ use iced::{
     alignment::Horizontal,
     font,
     widget::{
-        Column, Grid, button, checkbox, column, container, grid::Sizing, row, scrollable, table,
-        text, text_input,
+        Column, Grid, button, checkbox, column, container, grid::Sizing, scrollable, table, text,
+        text_input,
     },
 };
 use iced_aw::{card, menu_bar, menu_items};
@@ -21,7 +21,7 @@ use strum::{EnumIter, IntoEnumIterator};
 
 use crate::{
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
-    widgets::{Icon, icon_button},
+    widgets::{Icon, icon_button, toolbar},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
@@ -288,6 +288,10 @@ impl PaneWidget for SatManager {
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
+        let mut content = Column::new().spacing(4).padding(8);
+        if let Some(onboarding) = onboarding {
+            content = content.push(onboarding);
+        }
         let show_all = if self.show_all {
             (Icon::EyeOff, "Hide all satellites")
         } else {
@@ -298,55 +302,49 @@ impl PaneWidget for SatManager {
         } else {
             "Show column controls"
         };
-        let buttons = row![
+        let buttons = toolbar([
             icon_button(
                 show_all.0,
                 show_all.1,
                 Message::ToggleAllSatellites,
-                button::primary
+                button::primary,
             ),
             icon_button(
                 Icon::ViewColumns,
                 toggle_columns_label,
                 Message::ToggleColumnControls,
-                button::primary
-            )
-        ]
-        .padding([4, 10])
-        .spacing(10);
-        let mut content = Column::new().spacing(4).padding(8);
-        if let Some(onboarding) = onboarding {
-            content = content.push(onboarding);
-        }
-        content = content.push(buttons);
+                button::primary,
+            ),
+        ]);
+        let mut controls = column![buttons].spacing(8);
         if self.show_column_controls {
-            content = content.push(
-                container(
-                    column![
-                        text("Show columns:").font(Font {
-                            weight: font::Weight::Bold,
-                            ..Font::default()
-                        }),
-                        Grid::from_iter(TableColumn::iter().map(|col| {
-                            container(
-                                checkbox(self.columns.get(&col).copied().unwrap_or_default())
-                                    .label(col.header())
-                                    .on_toggle(move |visible| Message::ToggleColumn(col, visible)),
-                            )
-                            .center_y(Length::Shrink)
-                            .into()
-                        }))
-                        .height(Sizing::EvenlyDistribute(Length::Shrink))
-                        .fluid(200.0)
-                        .spacing(4)
-                    ]
-                    .spacing(6)
-                    .padding(6),
-                )
-                .style(container::secondary),
+            controls = controls.push(
+                column![
+                    text("Show columns:").font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    }),
+                    Grid::from_iter(TableColumn::iter().map(|col| {
+                        container(
+                            checkbox(self.columns.get(&col).copied().unwrap_or_default())
+                                .label(col.header())
+                                .on_toggle(move |visible| Message::ToggleColumn(col, visible)),
+                        )
+                        .center_y(Length::Shrink)
+                        .into()
+                    }))
+                    .height(Sizing::EvenlyDistribute(Length::Shrink))
+                    .fluid(200.0)
+                    .spacing(4)
+                ]
+                .spacing(6),
             );
         }
-        content = content.push(table);
+        let controls = container(controls)
+            .padding(8)
+            .width(Length::Fill)
+            .style(container::bordered_box);
+        content = content.push(controls).push(table);
         let result: Element<'_, Message> = column![mb, content].into();
         result.map(PaneMessage::from)
     }

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     panes::rfplot,
-    widgets::{Icon, icon_button},
+    widgets::{Icon, icon_button, toolbar},
 };
 
 const ZOOM_MIN: f32 = 0.0;
@@ -119,28 +119,27 @@ impl Controls {
     }
 
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, rfplot::Message> {
-        let buttons = widget::row![
+        let buttons = toolbar([
             icon_button(
                 Icon::Sliders,
                 "Toggle controls",
                 Message::ToggleControls.into(),
-                widget::button::primary
+                widget::button::primary,
             ),
             icon_button(
                 Icon::ZoomReset,
                 "Reset view",
                 Message::ResetView.into(),
-                widget::button::primary
+                widget::button::primary,
             ),
             icon_button(
                 Icon::TogglePredictions,
                 "Toggle predictions",
                 rfplot::overlay::Message::TogglePredictions.into(),
-                widget::button::primary
-            )
-        ]
-        .spacing(4);
-        let mut result = widget::column![buttons].spacing(4);
+                widget::button::primary,
+            ),
+        ]);
+        let mut result = widget::column![buttons].spacing(8);
         if self.show_controls
             && let Some(spectrogram) = &shared.spectrogram
         {
@@ -211,7 +210,11 @@ impl Controls {
                 .height(Length::Shrink),
             );
         }
-        result.into()
+        widget::container(result)
+            .padding(8)
+            .width(Length::Fill)
+            .style(widget::container::bordered_box)
+            .into()
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {

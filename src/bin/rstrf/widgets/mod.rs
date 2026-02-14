@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use iced::Element;
+use iced::Length;
 use iced::Theme;
+use iced::widget::Row;
 use iced::widget::container;
 use iced::widget::svg;
 use iced::widget::tooltip;
@@ -85,4 +87,13 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     )
     .delay(Duration::from_secs(1))
     .into()
+}
+
+pub fn toolbar<'a, Message: Clone + 'a>(
+    buttons: impl IntoIterator<Item = Element<'a, Message>>,
+) -> Element<'a, Message> {
+    Row::with_children(buttons)
+        .spacing(8)
+        .width(Length::Fill)
+        .into()
 }

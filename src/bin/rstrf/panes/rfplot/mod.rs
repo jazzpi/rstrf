@@ -220,9 +220,9 @@ impl PaneWidget for RFPlot {
 
         let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay,].into();
 
-        let contents: Element<'_, Message> = widget::column![plot_area, controls]
-            .padding(10)
-            .spacing(10)
+        let contents: Element<'_, Message> = widget::column![controls, plot_area]
+            .padding(8)
+            .spacing(4)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
