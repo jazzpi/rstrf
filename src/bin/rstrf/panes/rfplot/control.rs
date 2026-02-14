@@ -9,7 +9,10 @@ use rstrf::coord::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::widgets::{Icon, icon_button};
+use crate::{
+    panes::rfplot,
+    widgets::{Icon, icon_button},
+};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 8.0;
@@ -103,9 +106,9 @@ impl Controls {
 
     fn control<'a>(
         label: &'static str,
-        control: impl Into<Element<'a, Message>>,
+        control: impl Into<Element<'a, rfplot::Message>>,
         value: impl Into<String>,
-    ) -> Row<'a, Message> {
+    ) -> Row<'a, rfplot::Message> {
         widget::row![
             text(label).width(Length::FillPortion(3)),
             widget::container(control).width(Length::FillPortion(5)),
@@ -115,20 +118,26 @@ impl Controls {
         .align_y(Vertical::Center)
     }
 
-    pub fn view(&self, shared: &super::SharedState) -> Element<'_, Message> {
+    pub fn view(&self, shared: &super::SharedState) -> Element<'_, rfplot::Message> {
         let buttons = widget::row![
             icon_button(
                 Icon::Sliders,
                 "Toggle controls",
-                Message::ToggleControls,
+                Message::ToggleControls.into(),
                 widget::button::primary
             ),
             icon_button(
                 Icon::ZoomReset,
                 "Reset view",
-                Message::ResetView,
+                Message::ResetView.into(),
                 widget::button::primary
             ),
+            icon_button(
+                Icon::TogglePredictions,
+                "Toggle predictions",
+                rfplot::overlay::Message::TogglePredictions.into(),
+                widget::button::primary
+            )
         ]
         .spacing(4);
         let mut result = widget::column![buttons].spacing(4);
@@ -140,8 +149,8 @@ impl Controls {
                 widget::grid![
                     Self::control(
                         "Zoom Time",
-                        slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.x, move |zoom| {
-                            Message::UpdateZoomX(zoom)
+                        slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.x, |z| {
+                            Message::UpdateZoomX(z).into()
                         })
                         .step(0.01)
                         .width(Length::Fill),
@@ -149,8 +158,8 @@ impl Controls {
                     ),
                     Self::control(
                         "Zoom Freq",
-                        slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.y, move |zoom| {
-                            Message::UpdateZoomY(zoom)
+                        slider(ZOOM_MIN..=ZOOM_MAX, self.log_scale.y, |z| {
+                            Message::UpdateZoomY(z).into()
                         })
                         .step(0.01)
                         .width(Length::Fill),
@@ -161,7 +170,7 @@ impl Controls {
                         slider(
                             self.power_bounds.0..=self.power_bounds.1,
                             self.power_range.0,
-                            Message::UpdateMinPower,
+                            |p| Message::UpdateMinPower(p).into(),
                         )
                         .step(0.1)
                         .width(Length::Fill),
@@ -172,7 +181,7 @@ impl Controls {
                         slider(
                             self.power_bounds.0..=self.power_bounds.1,
                             self.power_range.1,
-                            Message::UpdateMaxPower,
+                            |p| Message::UpdateMaxPower(p).into(),
                         )
                         .step(0.1)
                         .width(Length::Fill),
@@ -180,8 +189,8 @@ impl Controls {
                     ),
                     Self::control(
                         "Signal Thresh",
-                        slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, move |sigma| {
-                            Message::UpdateSignalSigma(sigma)
+                        slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, |s| {
+                            Message::UpdateSignalSigma(s).into()
                         })
                         .step(0.1)
                         .width(Length::Fill),
@@ -189,8 +198,8 @@ impl Controls {
                     ),
                     Self::control(
                         "Track BW",
-                        slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, move |bw| {
-                            Message::UpdateTrackBW(bw)
+                        slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, |b| {
+                            Message::UpdateTrackBW(b).into()
                         })
                         .step(100.0)
                         .width(Length::Fill),

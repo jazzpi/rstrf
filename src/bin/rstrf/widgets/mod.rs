@@ -15,6 +15,7 @@ pub enum Icon {
     SplitVertically,
     Sliders,
     ZoomReset,
+    TogglePredictions,
 }
 
 impl From<Icon> for svg::Handle {
@@ -38,6 +39,9 @@ impl From<Icon> for svg::Handle {
             Icon::Sliders => include_bytes!("../../../../resources/icons/octicon--sliders-16.svg"),
             Icon::ZoomReset => {
                 include_bytes!("../../../../resources/icons/bytesize--zoom-reset.svg")
+            }
+            Icon::TogglePredictions => {
+                include_bytes!("../../../../resources/icons/toggle-predictions.svg")
             }
         };
         svg::Handle::from_memory(bytes)
