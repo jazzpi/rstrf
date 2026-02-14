@@ -6,7 +6,7 @@ use crate::widgets::{Icon, icon_button};
 use crate::workspace::{self, Workspace};
 use crate::{Args, panes};
 use iced::Application;
-use iced::widget::{PaneGrid, button, column, pane_grid, responsive, row, text};
+use iced::widget::{PaneGrid, button, column, container, pane_grid, responsive, row, text};
 use iced::window::Settings;
 use iced::window::settings::PlatformSpecific;
 use iced::{Element, Program, Subscription, Task, Theme};
@@ -141,17 +141,20 @@ impl AppModel {
                 ))
                 .padding(10)
                 .style(style::title_bar);
-            pane_grid::Content::new(responsive(move |size| {
-                pane.view(size, &self.workspace.shared)
-                    .map(move |m| Message::PaneMessage(id, m))
-            }))
+            pane_grid::Content::new(
+                container(responsive(move |size| {
+                    pane.view(size, &self.workspace.shared)
+                        .map(move |m| Message::PaneMessage(id, m))
+                }))
+                .padding(2),
+            )
             .title_bar(title_bar)
             .style(style::pane)
         })
         .spacing(10)
         .on_drag(Message::PaneDragged)
         .on_resize(10, Message::PaneResized);
-        column![mb, pane_grid].into()
+        column![mb, container(pane_grid).padding(4)].into()
     }
 
     /// Register subscriptions for this application.
