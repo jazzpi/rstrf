@@ -138,6 +138,12 @@ impl Controls {
                 rfplot::overlay::Message::TogglePredictions.into(),
                 widget::button::primary,
             ),
+            icon_button(
+                Icon::Grid,
+                "Toggle grid",
+                rfplot::overlay::Message::ToggleGrid.into(),
+                widget::button::primary,
+            ),
         ]);
         let mut result = widget::column![buttons].spacing(8);
         if self.show_controls

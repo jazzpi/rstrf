@@ -26,6 +26,7 @@ pub enum Icon {
     EyeOff,
     ViewColumns,
     Download,
+    Grid,
 }
 
 impl From<Icon> for svg::Handle {
@@ -59,6 +60,11 @@ impl From<Icon> for svg::Handle {
                 include_bytes!("../../../../resources/icons/majesticons--view-columns.svg")
             }
             Icon::Download => include_bytes!("../../../../resources/icons/bytesize--download.svg"),
+            Icon::Grid => {
+                include_bytes!(
+                    "../../../../resources/icons/material-symbols--grid-on-outline-sharp.svg"
+                )
+            }
         };
         svg::Handle::from_memory(bytes)
     }

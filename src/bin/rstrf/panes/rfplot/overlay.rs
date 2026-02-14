@@ -33,6 +33,7 @@ pub enum Message {
     SetSatellitePredictions(Option<orbit::Predictions>),
     SpectrogramUpdated,
     TogglePredictions,
+    ToggleGrid,
 }
 
 fn clamp_line_to_plot(
@@ -57,6 +58,8 @@ pub(super) struct Overlay {
     satellite_predictions: Option<orbit::Predictions>,
     #[serde(default = "yes")]
     show_predictions: bool,
+    #[serde(default)]
+    show_grid: bool,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
     #[serde(skip)]
@@ -69,6 +72,7 @@ impl Default for Overlay {
             satellites: Default::default(),
             satellite_predictions: Default::default(),
             show_predictions: true,
+            show_grid: Default::default(),
             track_points: Default::default(),
             signals: Default::default(),
             crosshair: Default::default(),
@@ -96,15 +100,20 @@ impl Overlay {
             .build_cartesian_2d(x.into_std(), y.into_std())
             .map_err(|e| format!("Failed to build chart: {:?}", e))?;
 
-        chart
-            .configure_mesh()
+        let mut mesh = chart.configure_mesh();
+        let mut frame = mesh
             .max_light_lines(0)
             .axis_style(WHITE)
             .label_style(&WHITE)
             .bold_line_style(WHITE.mix(0.4))
             .y_label_formatter(&|v| format!("{:.1}", v / 1000.0))
             .x_desc("Time [s]")
-            .y_desc("Frequency offset [kHz]")
+            .y_desc("Frequency offset [kHz]");
+        if !self.show_grid {
+            frame = frame.disable_mesh();
+        }
+
+        frame
             .draw()
             .map_err(|e| format!("Failed to draw mesh: {:?}", e))?;
 
@@ -506,6 +515,10 @@ impl Overlay {
             }
             Message::TogglePredictions => {
                 self.show_predictions = !self.show_predictions;
+                Task::none()
+            }
+            Message::ToggleGrid => {
+                self.show_grid = !self.show_grid;
                 Task::none()
             }
         }
