@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     panes::rfplot,
-    widgets::{Icon, icon_button, toolbar},
+    widgets::{Icon, ToolbarButton, toolbar},
 };
 
 const ZOOM_MIN: f32 = 0.0;
@@ -120,36 +120,36 @@ impl Controls {
 
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, rfplot::Message> {
         let buttons = toolbar([
-            icon_button(
-                Icon::Sliders,
-                "Toggle controls",
-                Message::ToggleControls.into(),
-                widget::button::primary,
-            ),
-            icon_button(
-                Icon::ZoomReset,
-                "Reset view",
-                Message::ResetView.into(),
-                widget::button::primary,
-            ),
-            icon_button(
-                Icon::TogglePredictions,
-                "Toggle predictions",
-                rfplot::overlay::Message::TogglePredictions.into(),
-                widget::button::primary,
-            ),
-            icon_button(
-                Icon::Grid,
-                "Toggle grid",
-                rfplot::overlay::Message::ToggleGrid.into(),
-                widget::button::primary,
-            ),
-            icon_button(
-                Icon::Crosshair,
-                "Toggle crosshair",
-                rfplot::overlay::Message::ToggleCrosshair.into(),
-                widget::button::primary,
-            ),
+            ToolbarButton::IconButton {
+                icon: Icon::Sliders,
+                tooltip: "Toggle controls",
+                msg: Message::ToggleControls.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::IconButton {
+                icon: Icon::ZoomReset,
+                tooltip: "Reset view",
+                msg: Message::ResetView.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::IconButton {
+                icon: Icon::TogglePredictions,
+                tooltip: "Toggle predictions",
+                msg: rfplot::overlay::Message::TogglePredictions.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::IconButton {
+                icon: Icon::Grid,
+                tooltip: "Toggle grid",
+                msg: rfplot::overlay::Message::ToggleGrid.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::IconButton {
+                icon: Icon::Crosshair,
+                tooltip: "Toggle crosshair",
+                msg: rfplot::overlay::Message::ToggleCrosshair.into(),
+                style: widget::button::primary,
+            },
         ]);
         let mut result = widget::column![buttons].spacing(8);
         if self.show_controls

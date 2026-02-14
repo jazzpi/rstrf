@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use iced::Element;
 use iced::Length;
+use iced::Renderer;
 use iced::Theme;
 use iced::widget::Row;
 use iced::widget::container;
@@ -12,7 +13,11 @@ use iced::widget::{button, text};
 pub mod form;
 
 pub use form::Form;
+use iced_aw::Menu;
+use iced_aw::MenuBar;
+use iced_aw::menu;
 
+#[derive(Clone, Copy)]
 pub enum Icon {
     Close,
     Maximize,
@@ -103,10 +108,52 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     .into()
 }
 
+pub enum ToolbarButton<Message: Clone> {
+    IconButton {
+        icon: Icon,
+        tooltip: &'static str,
+        msg: Message,
+        style: fn(&Theme, button::Status) -> button::Style,
+    },
+    SubmenuButton {
+        toplevel: Box<ToolbarButton<Message>>,
+        submenu: Vec<ToolbarButton<Message>>,
+    },
+}
+
+impl<'a, Message: Clone + 'a> ToolbarButton<Message> {
+    pub fn view(&self) -> Element<'a, Message> {
+        match self {
+            ToolbarButton::IconButton {
+                icon,
+                tooltip,
+                msg,
+                style,
+            } => icon_button(*icon, tooltip, msg.clone(), *style),
+            ToolbarButton::SubmenuButton { toplevel, .. } => toplevel.view(),
+        }
+    }
+}
+
+impl<'a, Message: Clone + 'a> From<ToolbarButton<Message>>
+    for menu::Item<'a, Message, Theme, Renderer>
+{
+    fn from(button: ToolbarButton<Message>) -> Self {
+        let view = button.view();
+        match button {
+            ToolbarButton::IconButton { .. } => menu::Item::new(view),
+            ToolbarButton::SubmenuButton { submenu, .. } => menu::Item::with_menu(
+                view,
+                Menu::new(submenu.into_iter().map(|b| b.into()).collect()),
+            ),
+        }
+    }
+}
+
 pub fn toolbar<'a, Message: Clone + 'a>(
-    buttons: impl IntoIterator<Item = Element<'a, Message>>,
+    buttons: impl IntoIterator<Item = ToolbarButton<Message>>,
 ) -> Element<'a, Message> {
-    Row::with_children(buttons)
+    MenuBar::new(buttons.into_iter().map(|b| b.into()).collect())
         .spacing(8)
         .width(Length::Fill)
         .into()

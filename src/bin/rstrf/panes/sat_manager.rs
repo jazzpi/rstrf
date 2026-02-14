@@ -25,7 +25,7 @@ use crate::{
     app::AppShared,
     config::Config,
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
-    widgets::{Form, Icon, form, icon_button, toolbar},
+    widgets::{Form, Icon, ToolbarButton, form, toolbar},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
@@ -420,24 +420,24 @@ impl PaneWidget for SatManager {
             "Show column controls"
         };
         let buttons = toolbar([
-            icon_button(
-                show_all.0,
-                show_all.1,
-                Message::ToggleAllSatellites,
-                button::primary,
-            ),
-            icon_button(
-                Icon::ViewColumns,
-                toggle_columns_label,
-                Message::ToggleColumnControls,
-                button::primary,
-            ),
-            icon_button(
-                Icon::Download,
-                "Fetch orbital elements",
-                Message::SpaceTrackToggle,
-                button::primary,
-            ),
+            ToolbarButton::IconButton {
+                icon: show_all.0,
+                tooltip: show_all.1,
+                msg: Message::ToggleAllSatellites.into(),
+                style: button::primary,
+            },
+            ToolbarButton::IconButton {
+                icon: Icon::ViewColumns,
+                tooltip: toggle_columns_label,
+                msg: Message::ToggleColumnControls.into(),
+                style: button::primary,
+            },
+            ToolbarButton::IconButton {
+                icon: Icon::Download,
+                tooltip: "Fetch orbital elements",
+                msg: Message::SpaceTrackToggle.into(),
+                style: button::primary,
+            },
         ]);
         let mut controls = column![buttons].spacing(8);
         if self.show_column_controls {
