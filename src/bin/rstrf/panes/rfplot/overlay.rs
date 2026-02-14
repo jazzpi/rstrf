@@ -34,6 +34,7 @@ pub enum Message {
     SpectrogramUpdated,
     TogglePredictions,
     ToggleGrid,
+    ToggleCrosshair,
 }
 
 fn clamp_line_to_plot(
@@ -60,6 +61,8 @@ pub(super) struct Overlay {
     show_predictions: bool,
     #[serde(default)]
     show_grid: bool,
+    #[serde(default)]
+    show_crosshair: bool,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
     #[serde(skip)]
@@ -75,6 +78,7 @@ impl Default for Overlay {
             show_grid: Default::default(),
             track_points: Default::default(),
             signals: Default::default(),
+            show_crosshair: Default::default(),
             crosshair: Default::default(),
         }
     }
@@ -226,7 +230,8 @@ impl Overlay {
                 }
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
-        if let Some(crosshair) = &self.crosshair
+        if self.show_crosshair
+            && let Some(crosshair) = &self.crosshair
             && bounds.contains(*crosshair)
         {
             let style = ShapeStyle {
@@ -519,6 +524,10 @@ impl Overlay {
             }
             Message::ToggleGrid => {
                 self.show_grid = !self.show_grid;
+                Task::none()
+            }
+            Message::ToggleCrosshair => {
+                self.show_crosshair = !self.show_crosshair;
                 Task::none()
             }
         }

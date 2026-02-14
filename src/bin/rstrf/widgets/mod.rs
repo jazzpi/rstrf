@@ -27,6 +27,7 @@ pub enum Icon {
     ViewColumns,
     Download,
     Grid,
+    Crosshair,
 }
 
 impl From<Icon> for svg::Handle {
@@ -65,6 +66,7 @@ impl From<Icon> for svg::Handle {
                     "../../../../resources/icons/material-symbols--grid-on-outline-sharp.svg"
                 )
             }
+            Icon::Crosshair => include_bytes!("../../../../resources/icons/toggle-crosshair.svg"),
         };
         svg::Handle::from_memory(bytes)
     }

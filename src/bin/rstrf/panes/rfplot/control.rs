@@ -144,6 +144,12 @@ impl Controls {
                 rfplot::overlay::Message::ToggleGrid.into(),
                 widget::button::primary,
             ),
+            icon_button(
+                Icon::Crosshair,
+                "Toggle crosshair",
+                rfplot::overlay::Message::ToggleCrosshair.into(),
+                widget::button::primary,
+            ),
         ]);
         let mut result = widget::column![buttons].spacing(8);
         if self.show_controls
