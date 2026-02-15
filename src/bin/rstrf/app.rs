@@ -57,7 +57,7 @@ impl AppModel {
     pub fn create(args: Args) -> Daemon<impl Program<Message = Message, Theme = Theme>> {
         iced::daemon(move || Self::init(args.clone()), Self::update, Self::view)
             .subscription(Self::subscription)
-            .theme(Theme::Dark)
+            .theme(Self::theme)
             .title(Self::title)
     }
 
@@ -195,6 +195,10 @@ impl AppModel {
             None => "Unknown Window".into(),
         };
         format!("rSTRF - {}", window_title)
+    }
+
+    fn theme<State>(&self, _: State) -> Theme {
+        self.shared_state.config.theme.into()
     }
 
     fn load_config(path: &PathBuf) -> anyhow::Result<Config> {

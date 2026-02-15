@@ -4,11 +4,16 @@ use iced::{
     Element, Font, Length, Task,
     alignment::Vertical,
     font,
-    widget::{Space, button, column, container, row, rule, space, text, text_input},
+    widget::{Space, button, column, container, pick_list, row, rule, space, text, text_input},
 };
 use space_track::SpaceTrack;
+use strum::VariantArray;
 
-use crate::{app::AppShared, config::Config, widgets::form::number_input};
+use crate::{
+    app::AppShared,
+    config::{BuiltinTheme, Config},
+    widgets::form::number_input,
+};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -20,6 +25,7 @@ pub enum Message {
     SiteLatitude(f64),
     SiteLongitude(f64),
     SiteAltitude(f64),
+    ThemeSelected(BuiltinTheme),
     Submit,
 }
 
@@ -75,6 +81,26 @@ impl Window {
     {
         let label_text = text(label).font(BOLD).width(Length::FillPortion(1));
         let input = number_input("", value, precision, on_input)
+            .padding(10)
+            .width(Length::FillPortion(3));
+        row![label_text, input]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(Vertical::Center)
+            .into()
+    }
+
+    fn dropdown_field<'a, T>(
+        label: &'a str,
+        value: Option<T>,
+        options: &'a [T],
+        on_selected: impl Fn(T) -> Message + 'a,
+    ) -> Element<'a, Message>
+    where
+        T: ToString + PartialEq + Clone,
+    {
+        let label_text = text(label).font(BOLD).width(Length::FillPortion(1));
+        let input = pick_list(options, value, on_selected)
             .padding(10)
             .width(Length::FillPortion(3));
         row![label_text, input]
@@ -177,6 +203,18 @@ impl Window {
             ],
         )
     }
+
+    fn view_appearance(&self) -> Element<'_, Message> {
+        Self::view_group(
+            "Appearance",
+            column![Self::dropdown_field(
+                "Theme",
+                Some(self.working_copy.theme),
+                BuiltinTheme::VARIANTS,
+                Message::ThemeSelected
+            )],
+        )
+    }
 }
 
 impl super::Window for Window {
@@ -188,6 +226,7 @@ impl super::Window for Window {
         let result: Element<Message> = column![
             self.view_spacetrack(),
             self.view_site(),
+            self.view_appearance(),
             button("Apply")
                 .on_press(Message::Submit)
                 .padding(10)
@@ -281,6 +320,10 @@ impl super::Window for Window {
                 }
                 Message::SiteAltitude(alt) => {
                     self.working_copy.site.get_or_insert_default().altitude = alt;
+                    Task::none()
+                }
+                Message::ThemeSelected(theme) => {
+                    self.working_copy.theme = theme;
                     Task::none()
                 }
                 Message::Submit => Task::done(super::Message::ToApp(Box::new(
