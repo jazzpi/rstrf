@@ -6,6 +6,4 @@ Icon=de.jazzpi.rstrf
 Exec=rstrf %F
 Terminal=false
 StartupNotify=true
-Categories=COSMIC
-Keywords=COSMIC
 MimeType=
