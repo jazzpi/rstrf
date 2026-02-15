@@ -2,17 +2,25 @@ use iced::{Element, Subscription, Task};
 
 use crate::app::{self, AppShared};
 
+pub mod preferences;
 pub mod workspace;
 
 #[derive(Debug, Clone)]
 pub enum Message {
     ToApp(Box<app::Message>),
     Workspace(workspace::Message),
+    Preferences(preferences::Message),
 }
 
 impl From<workspace::Message> for Message {
     fn from(msg: workspace::Message) -> Self {
         Message::Workspace(msg)
+    }
+}
+
+impl From<preferences::Message> for Message {
+    fn from(msg: preferences::Message) -> Self {
+        Message::Preferences(msg)
     }
 }
 

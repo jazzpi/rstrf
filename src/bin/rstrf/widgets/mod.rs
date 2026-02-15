@@ -13,6 +13,8 @@ use iced::widget::svg;
 use iced::widget::tooltip;
 use iced::widget::{button, text};
 
+// TODO: should we still keep this around?
+#[allow(unused)]
 pub mod form;
 
 pub use form::Form;

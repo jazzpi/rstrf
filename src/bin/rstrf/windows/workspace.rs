@@ -96,26 +96,39 @@ impl super::Window for Window {
     }
 
     fn view<'a>(&'a self, app: &'a AppShared) -> Element<'a, super::Message> {
-        let mb = view_menu(menu_bar!((
-            button_s("Workspace", None),
-            submenu(menu_items!(
-                (button_f(
-                    "New window",
-                    Some(super::Message::ToApp(Box::new(
-                        app::Message::OpenWorkspace(None)
-                    )))
-                )),
-                (button_f("New", Some(Message::WorkspaceNew.into()))),
-                (button_f("Open", Some(Message::WorkspaceOpen.into()))),
-                (button_f("Save", Some(Message::WorkspaceSave.into()))),
-                (button_f("Save as...", Some(Message::WorkspaceSaveAs.into()))),
-                (checkbox(
-                    "Auto-save",
-                    Some(Message::WorkspaceToggleAutoSave.into()),
-                    self.workspace.auto_save
+        let mb = view_menu(menu_bar!(
+            (
+                button_s("Workspace", None),
+                submenu(menu_items!(
+                    (button_f(
+                        "New window",
+                        Some(super::Message::ToApp(Box::new(
+                            app::Message::OpenWorkspace(None)
+                        )))
+                    )),
+                    (button_f("New", Some(Message::WorkspaceNew.into()))),
+                    (button_f("Open", Some(Message::WorkspaceOpen.into()))),
+                    (button_f("Save", Some(Message::WorkspaceSave.into()))),
+                    (button_f("Save as...", Some(Message::WorkspaceSaveAs.into()))),
+                    (checkbox(
+                        "Auto-save",
+                        Some(Message::WorkspaceToggleAutoSave.into()),
+                        self.workspace.auto_save
+                    ))
                 ))
-            ))
-        )));
+            ),
+            (
+                button_s("Edit", None),
+                submenu(menu_items!(
+                    (button_f(
+                        "Preferences",
+                        Some(super::Message::ToApp(Box::new(
+                            app::Message::OpenPreferences
+                        )))
+                    )),
+                ))
+            )
+        ));
         let pane_grid: Element<Message> =
             PaneGrid::new(&self.panes, move |id, pane, is_maximized| {
                 let title = text(pane.title());
@@ -207,10 +220,8 @@ impl super::Window for Window {
                                 .update(message)
                                 .map(|e| Message::WorkspaceEvent(e).into());
                         }
-                        panes::Message::UpdateConfig(config) => {
-                            return Task::done(super::Message::ToApp(Box::new(
-                                app::Message::UpdateConfig(config),
-                            )));
+                        panes::Message::ToApp(msg) => {
+                            return Task::done(super::Message::ToApp(msg));
                         }
                         _ => match self.panes.get_mut(id) {
                             Some(pane) => {
@@ -330,7 +341,7 @@ impl super::Window for Window {
                 }
                 Task::none()
             }
-            super::Message::ToApp(_) => Task::none(),
+            _ => Task::none(),
         }
     }
 

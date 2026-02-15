@@ -22,14 +22,14 @@ pub struct AppShared {
     // SpaceTrack saves/refreshes its credentials seamlessly, which means all methods on it require
     // mutable access.
     pub space_track: Option<Arc<Mutex<SpaceTrack>>>,
+    /// Configuration data that persists between application runs.
+    pub config: Config,
 }
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
 pub struct AppModel {
     config_path: PathBuf,
-    /// Configuration data that persists between application runs.
-    config: Config,
     shared_state: AppShared,
     windows: HashMap<window::Id, Box<dyn Window>>,
 }
@@ -40,6 +40,8 @@ pub enum Message {
     UpdateConfig(Config),
     OpenWorkspace(Option<PathBuf>),
     WindowOpenedWorkspace(window::Id, Option<PathBuf>),
+    OpenPreferences,
+    WindowOpenedPreferences(window::Id),
     WindowClosed(window::Id),
     #[allow(clippy::enum_variant_names)]
     WindowMessage(window::Id, windows::Message),
@@ -92,7 +94,6 @@ impl AppModel {
 
         let app = AppModel {
             config_path,
-            config: Config::default(),
             shared_state: AppShared::default(),
             windows: HashMap::default(),
         };
@@ -141,6 +142,14 @@ impl AppModel {
                 self.windows.insert(id, Box::new(window));
                 task.map(move |msg| Message::WindowMessage(id, msg))
             }
+            Message::OpenPreferences => Self::open_window().map(Message::WindowOpenedPreferences),
+            Message::WindowOpenedPreferences(id) => {
+                self.windows.insert(
+                    id,
+                    Box::new(windows::preferences::Window::new(&self.shared_state)),
+                );
+                Task::none()
+            }
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
                 if self.windows.is_empty() {
@@ -185,7 +194,7 @@ impl AppModel {
     }
 
     fn save_config(&self) -> anyhow::Result<()> {
-        let json = serde_json::to_string(&self.config)?;
+        let json = serde_json::to_string(&self.shared_state.config)?;
         std::fs::write(&self.config_path, json).context(format!(
             "Failed to write config file: {:?}",
             self.config_path
@@ -200,7 +209,7 @@ impl AppModel {
                 password: pass.clone(),
             })))
         });
-        self.config = config;
+        self.shared_state.config = config;
         match self.save_config() {
             Ok(_) => log::debug!("Saved config"),
             Err(err) => log::error!("Failed to save config: {:?}", err),

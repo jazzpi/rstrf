@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::AppShared,
-    config::Config,
     panes::{dummy::Dummy, rfplot::RFPlot, sat_manager::SatManager},
     workspace::{self, Workspace, WorkspaceShared},
 };
@@ -18,8 +17,8 @@ pub enum Message {
     RFPlot(rfplot::Message),
     SatManager(sat_manager::Message),
     ToWorkspace(workspace::Message),
+    ToApp(Box<crate::app::Message>),
     ReplacePane(Pane),
-    UpdateConfig(Config),
 }
 
 #[derive(Debug, Clone)]

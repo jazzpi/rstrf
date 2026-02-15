@@ -22,8 +22,7 @@ use strum::{EnumIter, IntoEnumIterator};
 use tokio::sync::Mutex;
 
 use crate::{
-    app::AppShared,
-    config::Config,
+    app::{self, AppShared},
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
     widgets::{Form, Icon, ToolbarButton, form, toolbar},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
@@ -44,8 +43,6 @@ pub enum Message {
     SpaceTrackToggle,
     SpaceTrackUpdateAll,
     SpaceTrackUpdateVisible,
-    SpaceTrackLogOut,
-    SpaceTrackForm(form::Message),
     Nop,
 }
 
@@ -326,19 +323,6 @@ impl PaneWidget for SatManager {
                     workspace.satellites.clone(),
                     true,
                 ),
-                Message::SpaceTrackLogOut => Task::done(PaneMessage::UpdateConfig(Config {
-                    space_track_creds: None,
-                })),
-                Message::SpaceTrackForm(form::Message::Submit) => {
-                    let values = self.spacetrack_form.field_values();
-                    Task::done(PaneMessage::UpdateConfig(Config {
-                        space_track_creds: Some((values[0].clone(), values[1].clone())),
-                    }))
-                }
-                Message::SpaceTrackForm(form_msg) => {
-                    self.spacetrack_form.update(form_msg);
-                    Task::none()
-                }
             },
             _ => Task::none(),
         }
@@ -353,15 +337,15 @@ impl PaneWidget for SatManager {
         let mb = view_menu(menu_bar!((
             button_s("File", None),
             submenu(menu_items!(
-                (button_f("Load TLEs", Some(Message::LoadTLEs))),
-                (button_f("Load frequencies", Some(Message::LoadFrequencies))),
+                (button_f("Load TLEs", Some(Message::LoadTLEs.into()))),
+                (button_f("Load frequencies", Some(Message::LoadFrequencies.into()))),
             ))
         )));
         let onboarding = if workspace.satellites.is_empty() {
-            let head: Element<'_, Message> = text("TIP").into();
-            let content: Element<'_, Message> = column![
+            let head: Element<'_, PaneMessage> = text("TIP").into();
+            let content: Element<'_, PaneMessage> = column![
                 text("You don't have any satellites loaded yet. Try loading some TLEs from the File menu or the button below."),
-                button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs)
+                button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
             Some(card(head, content).style(iced_aw::style::card::info))
         } else if workspace
@@ -369,10 +353,10 @@ impl PaneWidget for SatManager {
             .iter()
             .all(|(sat, _)| sat.tx_freq == 0.0)
         {
-            let head: Element<'_, Message> = text("TIP").into();
-            let content: Element<'_, Message> = column![
+            let head: Element<'_, PaneMessage> = text("TIP").into();
+            let content: Element<'_, PaneMessage> = column![
                 text("You don't have any transmit frequencies set for the satellites. Try editing the frequency fields, or loading an STRF frequencies.txt file from the File menu or the button below."),
-                button(text("Load Frequencies")).style(button::primary).width(200.0).on_press(Message::LoadFrequencies)
+                button(text("Load Frequencies")).style(button::primary).width(200.0).on_press(Message::LoadFrequencies.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
             Some(card(head, content).style(iced_aw::style::card::info))
         } else {
@@ -384,7 +368,7 @@ impl PaneWidget for SatManager {
                     table::column(
                         text(col.header()),
                         move |(idx, (sat, active)): (usize, (Satellite, bool))| {
-                            col.view(idx, &sat, active).map(Message::from)
+                            col.view(idx, &sat, active).map(PaneMessage::from)
                         },
                     )
                 })
@@ -401,7 +385,7 @@ impl PaneWidget for SatManager {
                     (id, (sat.clone(), *active))
                 }),
         );
-        let table: Element<'_, Message> = scrollable(table)
+        let table: Element<'_, PaneMessage> = scrollable(table)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
@@ -423,19 +407,19 @@ impl PaneWidget for SatManager {
             ToolbarButton::Icon {
                 icon: show_all.0,
                 tooltip: show_all.1,
-                msg: Message::ToggleAllSatellites,
+                msg: Message::ToggleAllSatellites.into(),
                 style: button::primary,
             },
             ToolbarButton::Icon {
                 icon: Icon::ViewColumns,
                 tooltip: toggle_columns_label,
-                msg: Message::ToggleColumnControls,
+                msg: Message::ToggleColumnControls.into(),
                 style: button::primary,
             },
             ToolbarButton::Icon {
                 icon: Icon::Download,
                 tooltip: "Fetch orbital elements",
-                msg: Message::SpaceTrackToggle,
+                msg: Message::SpaceTrackToggle.into(),
                 style: button::primary,
             },
         ]);
@@ -451,7 +435,9 @@ impl PaneWidget for SatManager {
                         container(
                             checkbox(self.columns.get(&col).copied().unwrap_or_default())
                                 .label(col.header())
-                                .on_toggle(move |visible| Message::ToggleColumn(col, visible)),
+                                .on_toggle(move |visible| {
+                                    Message::ToggleColumn(col, visible).into()
+                                }),
                         )
                         .center_y(Length::Shrink)
                         .into()
@@ -464,20 +450,16 @@ impl PaneWidget for SatManager {
             );
         }
         if self.show_spacetrack {
-            let space_track: Element<'_, Message> = match app_state.space_track {
+            let space_track: Element<'_, PaneMessage> = match app_state.space_track {
                 Some(_) => container(
                     column![
                         button("Update all satellites from Space-Track")
                             .style(button::primary)
-                            .on_press(Message::SpaceTrackUpdateAll)
+                            .on_press(Message::SpaceTrackUpdateAll.into())
                             .width(Length::Fill),
                         button("Update visible satellites from Space-Track")
                             .style(button::primary)
-                            .on_press(Message::SpaceTrackUpdateVisible)
-                            .width(Length::Fill),
-                        button("Log out of Space-Track")
-                            .style(button::danger)
-                            .on_press(Message::SpaceTrackLogOut)
+                            .on_press(Message::SpaceTrackUpdateVisible.into())
                             .width(Length::Fill),
                     ]
                     .padding([0, 50])
@@ -488,8 +470,8 @@ impl PaneWidget for SatManager {
                 None =>
                     card(
                         "Missing Credentials", column![
-                            text("To fetch orbital elements from Space-Track, please enter your credentials."),
-                            self.spacetrack_form.view().map(Message::SpaceTrackForm)
+                            text("To fetch orbital elements from Space-Track, please set your credentials in the Preferences window."),
+                            button("Open Preferences").style(button::primary).on_press(PaneMessage::ToApp(Box::new(app::Message::OpenPreferences)))
                         ]
                         .spacing(10)
                         .width(Length::Fill)
@@ -504,8 +486,7 @@ impl PaneWidget for SatManager {
             .width(Length::Fill)
             .style(container::bordered_box);
         content = content.push(controls).push(table);
-        let result: Element<'_, Message> = column![mb, content].into();
-        result.map(PaneMessage::from)
+        column![mb, content].into()
     }
 
     fn title(&self) -> String {
