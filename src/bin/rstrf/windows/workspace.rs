@@ -196,7 +196,7 @@ impl super::Window for Window {
                     Message::WorkspaceEvent(event) => {
                         let tasks = self.panes.iter_mut().map(|(id, pane)| {
                             let id = *id;
-                            pane.workspace_event(event.clone(), &self.workspace.shared)
+                            pane.workspace_event(event.clone(), &self.workspace.shared, app)
                                 .map(move |m| Message::PaneMessage(id, m).into())
                         });
                         return Task::batch(tasks);
@@ -343,6 +343,10 @@ impl super::Window for Window {
             }
             _ => Task::none(),
         }
+    }
+
+    fn app_event(&mut self, event: app::AppEvent, _app: &AppShared) -> Task<super::Message> {
+        Task::done(Message::WorkspaceEvent(workspace::Event::App(event)).into())
     }
 
     fn subscription(&self) -> Subscription<super::Message> {

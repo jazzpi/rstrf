@@ -6,7 +6,6 @@ use iced::{
     font,
     widget::{
         Column, Grid, button, checkbox, column, container, grid::Sizing, scrollable, table, text,
-        text_input,
     },
 };
 use iced_aw::{card, menu_bar, menu_items};
@@ -24,7 +23,11 @@ use tokio::sync::Mutex;
 use crate::{
     app::{self, AppShared},
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
-    widgets::{Form, Icon, ToolbarButton, form, toolbar},
+    widgets::{
+        Form, Icon, ToolbarButton,
+        form::{self, number_input},
+        toolbar,
+    },
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
@@ -43,7 +46,6 @@ pub enum Message {
     SpaceTrackToggle,
     SpaceTrackUpdateAll,
     SpaceTrackUpdateVisible,
-    Nop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, Serialize, Deserialize)]
@@ -81,23 +83,17 @@ impl TableColumn {
             .into(),
             TableColumn::Frequency => {
                 let sat = sat.clone();
-                text_input("...", format!("{:.3}", sat.tx_freq / 1e6).as_str())
-                    .on_input(move |freq| {
-                        let sat = sat.clone();
-                        freq.parse::<f64>()
-                            .ok()
-                            .map(move |freq| {
-                                let sat = Satellite {
-                                    tx_freq: freq * 1e6,
-                                    ..sat.clone()
-                                };
-                                Message::SatelliteEdited(idx, Box::new(sat))
-                            })
-                            .unwrap_or(Message::Nop)
-                    })
-                    .on_submit(Message::SatelliteEditCommited(idx))
-                    .width(Length::Fixed(100.0))
-                    .into()
+                number_input("...", sat.tx_freq / 1e6, 3, move |freq| {
+                    let sat = sat.clone();
+                    let sat = Satellite {
+                        tx_freq: freq * 1e6,
+                        ..sat.clone()
+                    };
+                    Message::SatelliteEdited(idx, Box::new(sat))
+                })
+                .on_submit(Message::SatelliteEditCommited(idx))
+                .width(Length::Fixed(100.0))
+                .into()
             }
             TableColumn::Show => checkbox(active)
                 .on_toggle(move |new_state| Message::SatelliteToggled(idx, new_state))
@@ -312,7 +308,6 @@ impl PaneWidget for SatManager {
                     self.show_spacetrack = !self.show_spacetrack;
                     Task::none()
                 }
-                Message::Nop => Task::none(),
                 Message::SpaceTrackUpdateAll => Self::spacetrack_update(
                     app.space_track.clone(),
                     workspace.satellites.clone(),

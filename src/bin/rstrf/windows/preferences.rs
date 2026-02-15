@@ -1,3 +1,5 @@
+use std::{fmt::Display, str::FromStr};
+
 use iced::{
     Element, Font, Length, Task,
     alignment::Vertical,
@@ -6,7 +8,7 @@ use iced::{
 };
 use space_track::SpaceTrack;
 
-use crate::{app::AppShared, config::Config};
+use crate::{app::AppShared, config::Config, widgets::form::number_input};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -15,6 +17,9 @@ pub enum Message {
     SpacetrackVerify,
     SpacetrackVerified(bool),
     SpacetrackLogout,
+    SiteLatitude(f64),
+    SiteLongitude(f64),
+    SiteAltitude(f64),
     Submit,
 }
 
@@ -59,6 +64,43 @@ impl Window {
             .into()
     }
 
+    fn number_field<'a, T>(
+        label: &'a str,
+        value: T,
+        precision: usize,
+        on_input: impl Fn(T) -> Message + Clone + 'a,
+    ) -> Element<'a, Message>
+    where
+        T: Display + FromStr + Clone + 'a,
+    {
+        let label_text = text(label).font(BOLD).width(Length::FillPortion(1));
+        let input = number_input("", value, precision, on_input)
+            .padding(10)
+            .width(Length::FillPortion(3));
+        row![label_text, input]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(Vertical::Center)
+            .into()
+    }
+
+    fn view_group<'a>(
+        title: &'a str,
+        content: impl Into<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        container(
+            column![
+                text(title).font(BOLD).size(20),
+                rule::horizontal(2),
+                content.into()
+            ]
+            .padding(10)
+            .spacing(5),
+        )
+        .style(container::bordered_box)
+        .into()
+    }
+
     fn view_spacetrack(&self) -> Element<'_, Message> {
         let (username, password) = self
             .working_copy
@@ -92,10 +134,9 @@ impl Window {
         } else {
             Space::new().into()
         };
-        container(
+        Self::view_group(
+            "Space-Track Credentials",
             column![
-                text("SpaceTrack Credentials").font(BOLD).size(20),
-                rule::horizontal(2),
                 Self::text_field(
                     "Username",
                     &username,
@@ -111,12 +152,30 @@ impl Window {
                 row![logout_button, verify_button, verification_status]
                     .spacing(10)
                     .align_y(Vertical::Center)
-            ]
-            .padding(10)
-            .spacing(5),
+            ],
         )
-        .style(container::bordered_box)
-        .into()
+    }
+
+    fn view_site(&self) -> Element<'_, Message> {
+        let site = self.working_copy.site.clone().unwrap_or_default();
+        Self::view_group(
+            "Ground Site",
+            column![
+                Self::number_field(
+                    "Latitude (°)",
+                    site.latitude.to_degrees(),
+                    4,
+                    Message::SiteLatitude
+                ),
+                Self::number_field(
+                    "Longitude (°)",
+                    site.longitude.to_degrees(),
+                    4,
+                    Message::SiteLongitude
+                ),
+                Self::number_field("Altitude (km)", site.altitude, 3, Message::SiteAltitude),
+            ],
+        )
     }
 }
 
@@ -128,6 +187,7 @@ impl super::Window for Window {
     fn view<'a>(&'a self, _: &'a crate::app::AppShared) -> Element<'a, super::Message> {
         let result: Element<Message> = column![
             self.view_spacetrack(),
+            self.view_site(),
             button("Apply")
                 .on_press(Message::Submit)
                 .padding(10)
@@ -209,6 +269,18 @@ impl super::Window for Window {
                 Message::SpacetrackLogout => {
                     self.working_copy.space_track_creds = None;
                     self.spacetrack_verified = None;
+                    Task::none()
+                }
+                Message::SiteLatitude(lat) => {
+                    self.working_copy.site.get_or_insert_default().latitude = lat.to_radians();
+                    Task::none()
+                }
+                Message::SiteLongitude(lon) => {
+                    self.working_copy.site.get_or_insert_default().longitude = lon.to_radians();
+                    Task::none()
+                }
+                Message::SiteAltitude(alt) => {
+                    self.working_copy.site.get_or_insert_default().altitude = alt;
                     Task::none()
                 }
                 Message::Submit => Task::done(super::Message::ToApp(Box::new(

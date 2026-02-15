@@ -31,4 +31,7 @@ pub trait Window {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::none()
     }
+    fn app_event(&mut self, _event: app::AppEvent, _app: &AppShared) -> Task<Message> {
+        Task::none()
+    }
 }

@@ -12,14 +12,14 @@ use rstrf::{
         DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
         ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
-    orbit::{self, SatPrediction},
+    orbit::{self, SatPrediction, Site},
     signal,
     spectrogram::Spectrogram,
     util::clip_line,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::workspace::WorkspaceShared;
+use crate::{app::AppShared, workspace::WorkspaceShared};
 
 use super::{MouseInteraction, RFPlot, SharedState, control};
 
@@ -29,7 +29,7 @@ pub enum Message {
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
-    SatellitesUpdated,
+    UpdatePredictions,
     SetSatellitePredictions(Option<orbit::Predictions>),
     SpectrogramUpdated,
     TogglePredictions,
@@ -438,6 +438,7 @@ impl Overlay {
         message: Message,
         shared: &SharedState,
         workspace: &WorkspaceShared,
+        app: &AppShared,
     ) -> Task<Message> {
         match message {
             Message::AddTrackPoint(pos) => {
@@ -503,9 +504,9 @@ impl Overlay {
                 });
                 Task::none()
             }
-            Message::SatellitesUpdated => {
+            Message::UpdatePredictions => {
                 self.satellites = workspace.active_satellites();
-                self.predict_satellites(shared.spectrogram.as_ref())
+                self.predict_satellites(shared.spectrogram.as_ref(), app.config.site.as_ref())
             }
             Message::SetSatellitePredictions(predictions) => {
                 self.satellite_predictions = predictions;
@@ -516,7 +517,7 @@ impl Overlay {
                 self.track_points.clear();
                 self.signals.clear();
                 self.crosshair = None;
-                self.predict_satellites(shared.spectrogram.as_ref())
+                self.predict_satellites(shared.spectrogram.as_ref(), app.config.site.as_ref())
             }
             Message::TogglePredictions => {
                 self.show_predictions = !self.show_predictions;
@@ -533,9 +534,17 @@ impl Overlay {
         }
     }
 
-    fn predict_satellites(&self, spectrogram: Option<&Spectrogram>) -> Task<Message> {
+    fn predict_satellites(
+        &self,
+        spectrogram: Option<&Spectrogram>,
+        site: Option<&Site>,
+    ) -> Task<Message> {
         let Some(spectrogram) = spectrogram else {
             log::debug!("No spectrogram loaded, skipping pass predictions");
+            return Task::done(Message::SetSatellitePredictions(None));
+        };
+        let Some(site) = site else {
+            log::debug!("No site configured, skipping pass predictions");
             return Task::done(Message::SetSatellitePredictions(None));
         };
         if self.satellites.is_empty() {
@@ -547,9 +556,10 @@ impl Overlay {
 
         let start_time = spectrogram.start_time;
         let length_s = spectrogram.length().as_seconds_f64();
+        let site = site.clone();
         Task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
-                orbit::predict_satellites(satellites, start_time, length_s)
+                orbit::predict_satellites(satellites, start_time, length_s, &site)
             })
             .await;
             match result {

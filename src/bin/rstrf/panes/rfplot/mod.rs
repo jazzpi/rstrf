@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    app::AppShared,
+    app::{AppEvent, AppShared},
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget, rfplot::control::Controls},
     workspace::{Event, WorkspaceShared},
 };
@@ -101,7 +101,12 @@ impl PaneWidget for RFPlot {
         };
         let overlay_task = self
             .overlay
-            .update(overlay::Message::SatellitesUpdated, &self.shared, workspace)
+            .update(
+                overlay::Message::UpdatePredictions,
+                &self.shared,
+                workspace,
+                app,
+            )
             .map(|m| PaneMessage::RFPlot(m.into()));
         Task::batch(vec![spectrogram_task, overlay_task])
     }
@@ -110,7 +115,7 @@ impl PaneWidget for RFPlot {
         &mut self,
         message: PaneMessage,
         workspace: &WorkspaceShared,
-        _app: &AppShared,
+        app: &AppShared,
     ) -> Task<PaneMessage> {
         match message {
             PaneMessage::RFPlot(message) => match message {
@@ -121,7 +126,7 @@ impl PaneWidget for RFPlot {
                     .map(|m| PaneMessage::RFPlot(m.into())),
                 Message::Overlay(message) => self
                     .overlay
-                    .update(message, &self.shared, workspace)
+                    .update(message, &self.shared, workspace, app)
                     .map(|m| PaneMessage::RFPlot(m.into())),
                 Message::LoadSpectrogram(paths) => Task::future(async move {
                     let spec = rstrf::spectrogram::load(&paths).await;
@@ -141,6 +146,7 @@ impl PaneWidget for RFPlot {
                                 overlay::Message::SpectrogramUpdated,
                                 &self.shared,
                                 workspace,
+                                app,
                             )
                             .map(|m| PaneMessage::RFPlot(m.into()))
                     }
@@ -176,12 +182,29 @@ impl PaneWidget for RFPlot {
         &mut self,
         event: crate::workspace::Event,
         workspace: &WorkspaceShared,
+        app: &AppShared,
     ) -> Task<PaneMessage> {
         match event {
             Event::SatellitesChanged => self
                 .overlay
-                .update(overlay::Message::SatellitesUpdated, &self.shared, workspace)
+                .update(
+                    overlay::Message::UpdatePredictions,
+                    &self.shared,
+                    workspace,
+                    app,
+                )
                 .map(|m| PaneMessage::RFPlot(m.into())),
+            Event::App(event) => match event {
+                AppEvent::ConfigUpdated => self
+                    .overlay
+                    .update(
+                        overlay::Message::UpdatePredictions,
+                        &self.shared,
+                        workspace,
+                        app,
+                    )
+                    .map(|m| PaneMessage::RFPlot(m.into())),
+            },
         }
     }
 

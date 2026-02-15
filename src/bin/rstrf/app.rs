@@ -45,6 +45,12 @@ pub enum Message {
     WindowClosed(window::Id),
     #[allow(clippy::enum_variant_names)]
     WindowMessage(window::Id, windows::Message),
+    Event(AppEvent),
+}
+
+#[derive(Debug, Clone)]
+pub enum AppEvent {
+    ConfigUpdated,
 }
 
 impl AppModel {
@@ -174,6 +180,15 @@ impl AppModel {
                     }
                 },
             },
+            Message::Event(app_event) => {
+                let tasks = self.windows.iter_mut().map(|(id, window)| {
+                    let id = *id;
+                    window
+                        .app_event(app_event.clone(), &self.shared_state)
+                        .map(move |msg| Message::WindowMessage(id, msg))
+                });
+                Task::batch(tasks)
+            }
         }
     }
 
@@ -214,7 +229,7 @@ impl AppModel {
             Ok(_) => log::debug!("Saved config"),
             Err(err) => log::error!("Failed to save config: {:?}", err),
         }
-        Task::none()
+        Task::done(Message::Event(AppEvent::ConfigUpdated))
     }
 
     fn open_window() -> Task<window::Id> {

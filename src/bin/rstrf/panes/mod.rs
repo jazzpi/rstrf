@@ -53,6 +53,7 @@ pub trait PaneWidget {
         &mut self,
         _event: workspace::Event,
         _workspace: &WorkspaceShared,
+        _app: &AppShared,
     ) -> Task<Message> {
         Task::none()
     }

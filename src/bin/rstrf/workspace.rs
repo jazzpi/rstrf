@@ -5,7 +5,10 @@ use rstrf::orbit::Satellite;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 
-use crate::panes::{Pane, PaneTree, SplitAxis, rfplot::RFPlot, sat_manager::SatManager};
+use crate::{
+    app::AppEvent,
+    panes::{Pane, PaneTree, SplitAxis, rfplot::RFPlot, sat_manager::SatManager},
+};
 
 #[derive(Clone)]
 #[allow(clippy::enum_variant_names)]
@@ -18,6 +21,7 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub enum Event {
     SatellitesChanged,
+    App(AppEvent),
 }
 
 impl std::fmt::Debug for Message {

@@ -147,7 +147,7 @@ impl Satellite {
         &self,
         start: DateTime<Utc>,
         times: ArrayView1<f64>,
-        site: Site,
+        site: &Site,
     ) -> (Array1<f64>, Array1<f64>) {
         let mut frequencies = Array1::zeros(times.len());
         let mut angles = Array1::zeros(times.len());
@@ -188,6 +188,7 @@ impl Satellite {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Site {
     /// Latitude in radians
     pub latitude: f64,
@@ -248,22 +249,17 @@ pub fn predict_satellites(
     satellites: Vec<Satellite>,
     start_time: DateTime<Utc>,
     length_s: f64,
+    site: &Site,
 ) -> Predictions {
     let times = ndarray::Array1::linspace(
         0.0, length_s, 1000, // TODO: number of points
     );
-    // TODO: Make this configurable
-    const SITE: Site = Site {
-        latitude: 78.2244_f64.to_radians(),
-        longitude: 15.3952_f64.to_radians(),
-        altitude: 0.474,
-    };
     // TODO: Parallelize predictions?
     let (frequencies, zenith_angles) = satellites
         .iter()
         .map(|sat| {
             let id = sat.norad_id();
-            let (freq, za) = sat.predict_pass(start_time, times.view(), SITE);
+            let (freq, za) = sat.predict_pass(start_time, times.view(), site);
             ((id, freq), (id, za))
         })
         .unzip();

@@ -2,11 +2,13 @@
 
 use std::fmt::Debug;
 
+use rstrf::orbit::Site;
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     pub space_track_creds: Option<(String, String)>,
+    pub site: Option<Site>,
 }
 
 impl Debug for Config {
