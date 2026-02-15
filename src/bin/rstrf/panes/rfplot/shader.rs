@@ -8,7 +8,7 @@ use iced::{
     wgpu::{self, util::DeviceExt},
     widget::shader,
 };
-use rstrf::spectrogram::Spectrogram;
+use rstrf::{colormap::Colormap, spectrogram::Spectrogram};
 use uuid::Uuid;
 
 use super::{Controls, Message, MouseInteraction, RFPlot};
@@ -39,6 +39,7 @@ struct PrimitiveData {
     buffers: Buffers,
     bind_groups: BindGroups,
     spectrogram_id: Uuid,
+    colormap: Colormap,
 }
 
 pub struct Pipeline {
@@ -99,10 +100,15 @@ impl Pipeline {
             return;
         };
 
-        let primitive_data = self
-            .instances
-            .entry(primitive.id)
-            .or_insert_with_key(|id| Self::create_buffers(device, &self.pipeline, id, spectrogram));
+        let primitive_data = self.instances.entry(primitive.id).or_insert_with_key(|id| {
+            Self::create_buffers(
+                device,
+                &self.pipeline,
+                id,
+                spectrogram,
+                primitive.controls.colormap(),
+            )
+        });
 
         let bounds = primitive.controls.bounds();
         let uniforms = Uniforms {
@@ -125,6 +131,15 @@ impl Pipeline {
             ) = Self::create_spectrogram_buffers(device, &self.pipeline, spectrogram);
             primitive_data.spectrogram_id = spectrogram.id;
         }
+
+        if primitive_data.colormap != primitive.controls.colormap() {
+            queue.write_buffer(
+                &primitive_data.buffers.colormap,
+                0,
+                bytemuck::cast_slice(primitive.controls.colormap().buffer()),
+            );
+            primitive_data.colormap = primitive.controls.colormap();
+        }
     }
 
     fn create_buffers(
@@ -132,6 +147,7 @@ impl Pipeline {
         pipeline: &wgpu::RenderPipeline,
         id: &Uuid,
         spectrogram: &Spectrogram,
+        colormap: Colormap,
     ) -> PrimitiveData {
         let prefix = format!("spectrogram.{}", id);
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -143,8 +159,8 @@ impl Pipeline {
 
         let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(format!("{prefix}.buffer.colormap").as_str()),
-            contents: bytemuck::cast_slice(&super::colormap::MAGMA),
-            usage: wgpu::BufferUsages::STORAGE,
+            contents: bytemuck::cast_slice(colormap.buffer()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
         let uniform_bind_group_layout = pipeline.get_bind_group_layout(0);
@@ -177,6 +193,7 @@ impl Pipeline {
                 spectrogram: spectrogram_bind_group,
             },
             spectrogram_id: *id,
+            colormap,
         }
     }
 

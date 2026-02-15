@@ -4,10 +4,12 @@ use iced::{
     alignment::Vertical,
     widget::{self, Row, slider, text},
 };
-use rstrf::coord::{
-    DataNormalizedToDataAbsolute, PlotAreaToDataNormalized, data_normalized, plot_area,
+use rstrf::{
+    colormap::Colormap,
+    coord::{DataNormalizedToDataAbsolute, PlotAreaToDataNormalized, data_normalized, plot_area},
 };
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
 
 use crate::{
     panes::rfplot,
@@ -39,6 +41,8 @@ pub struct Controls {
     track_bw: f32,
     #[serde(default)]
     show_controls: bool,
+    #[serde(default)]
+    colormap: Colormap,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +59,7 @@ pub enum Message {
     UpdateSignalSigma(f32),
     UpdateTrackBW(f32),
     ToggleControls,
+    UpdateColormap(Colormap),
 }
 
 impl Controls {
@@ -104,6 +109,10 @@ impl Controls {
         self.track_bw
     }
 
+    pub fn colormap(&self) -> Colormap {
+        self.colormap
+    }
+
     fn control<'a>(
         label: &'static str,
         control: impl Into<Element<'a, rfplot::Message>>,
@@ -119,36 +128,54 @@ impl Controls {
     }
 
     pub fn view(&self, shared: &super::SharedState) -> Element<'_, rfplot::Message> {
+        let colormaps = Colormap::iter()
+            .map(|c| ToolbarButton::LabeledIcon {
+                icon: Icon::Colormap(c),
+                label: c.into(),
+                tooltip: c.into(),
+                msg: Message::UpdateColormap(c).into(),
+                style: widget::button::primary,
+            })
+            .collect();
         let buttons = toolbar([
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::Sliders,
                 tooltip: "Toggle controls",
                 msg: Message::ToggleControls.into(),
                 style: widget::button::primary,
             },
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::ZoomReset,
                 tooltip: "Reset view",
                 msg: Message::ResetView.into(),
                 style: widget::button::primary,
             },
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::TogglePredictions,
                 tooltip: "Toggle predictions",
                 msg: rfplot::overlay::Message::TogglePredictions.into(),
                 style: widget::button::primary,
             },
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::Grid,
                 tooltip: "Toggle grid",
                 msg: rfplot::overlay::Message::ToggleGrid.into(),
                 style: widget::button::primary,
             },
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::Crosshair,
                 tooltip: "Toggle crosshair",
                 msg: rfplot::overlay::Message::ToggleCrosshair.into(),
                 style: widget::button::primary,
+            },
+            ToolbarButton::Submenu {
+                toplevel: Box::new(ToolbarButton::Icon {
+                    icon: Icon::Colormap(shared.controls.colormap),
+                    tooltip: "Colormap",
+                    msg: rfplot::Message::Nop,
+                    style: widget::button::primary,
+                }),
+                submenu: colormaps,
             },
         ]);
         let mut result = widget::column![buttons].spacing(8);
@@ -281,6 +308,7 @@ impl Controls {
                 self.track_bw = bw;
             }
             Message::ToggleControls => self.show_controls = !self.show_controls,
+            Message::UpdateColormap(colormap) => self.colormap = colormap,
         }
         self.snap_to_bounds();
         Task::none()
@@ -318,6 +346,7 @@ impl Default for Controls {
             signal_sigma: 5.0,
             track_bw: 10e3,
             show_controls: true,
+            colormap: Default::default(),
         }
     }
 }

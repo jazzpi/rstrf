@@ -21,7 +21,6 @@ use crate::{
     workspace::{Event, WorkspaceShared},
 };
 
-mod colormap;
 mod control;
 pub mod overlay;
 mod shader;

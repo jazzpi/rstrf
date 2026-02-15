@@ -420,22 +420,22 @@ impl PaneWidget for SatManager {
             "Show column controls"
         };
         let buttons = toolbar([
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: show_all.0,
                 tooltip: show_all.1,
-                msg: Message::ToggleAllSatellites.into(),
+                msg: Message::ToggleAllSatellites,
                 style: button::primary,
             },
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::ViewColumns,
                 tooltip: toggle_columns_label,
-                msg: Message::ToggleColumnControls.into(),
+                msg: Message::ToggleColumnControls,
                 style: button::primary,
             },
-            ToolbarButton::IconButton {
+            ToolbarButton::Icon {
                 icon: Icon::Download,
                 tooltip: "Fetch orbital elements",
-                msg: Message::SpaceTrackToggle.into(),
+                msg: Message::SpaceTrackToggle,
                 style: button::primary,
             },
         ]);
