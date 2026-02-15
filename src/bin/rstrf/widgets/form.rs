@@ -7,7 +7,9 @@ use std::{
     str::FromStr,
 };
 
+// TODO: should we still keep the generic form around?
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub enum Message {
     Submit,
     UpdateField(usize, String),
@@ -19,6 +21,7 @@ pub enum Field {
     Password(String),
 }
 
+#[allow(unused)]
 impl Field {
     pub fn view(&self, idx: usize) -> Element<'_, Message> {
         match self {
@@ -56,6 +59,7 @@ pub struct Form {
     submit_label: String,
 }
 
+#[allow(unused)]
 impl Form {
     pub fn new(fields: Vec<(String, Field)>, submit_label: String) -> Self {
         Self {

@@ -59,9 +59,6 @@ impl AppModel {
             .subscription(Self::subscription)
             .theme(Theme::Dark)
             .title(Self::title)
-        // TODO
-        // .font()
-        // .presets()
     }
 
     /// Initializes the application with any given flags and startup commands.

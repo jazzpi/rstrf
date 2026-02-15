@@ -39,7 +39,6 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
-    // TODO: Handle out-of-bounds
     let time_idx = clamp(u32(in.texcoord.x * f32(uniforms.nslices)), 0u, uniforms.nslices - 1u);
     let freq_idx = clamp(u32(in.texcoord.y * f32(uniforms.nchan)), 0u, uniforms.nchan - 1u);
     let idx = time_idx * uniforms.nchan + freq_idx;

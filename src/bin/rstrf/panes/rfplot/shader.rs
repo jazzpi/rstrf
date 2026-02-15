@@ -319,7 +319,7 @@ impl shader::Program<Message> for RFPlot {
         Primitive::new(
             self.id,
             self.shared.controls,
-            self.shared.spectrogram.clone(), // TODO
+            self.shared.spectrogram.clone(),
         )
     }
 }

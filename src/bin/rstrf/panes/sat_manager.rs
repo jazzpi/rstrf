@@ -489,7 +489,6 @@ impl PaneWidget for SatManager {
     }
 
     fn to_tree(&self) -> PaneTree {
-        // TODO: turn this into into_tree(self)?
         PaneTree::Leaf(Pane::SatManager(Box::new(self.clone())))
     }
 }

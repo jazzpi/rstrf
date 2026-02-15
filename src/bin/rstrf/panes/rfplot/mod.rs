@@ -92,7 +92,6 @@ impl PaneWidget for RFPlot {
         let spectrogram_task = if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
-            // TODO: This resets the power bounds after loading the spectrogram
             self.update(
                 Message::LoadSpectrogram(self.shared.spectrogram_files.clone()).into(),
                 workspace,
