@@ -23,11 +23,7 @@ use tokio::sync::Mutex;
 use crate::{
     app::{self, AppShared},
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
-    widgets::{
-        Form, Icon, ToolbarButton,
-        form::{self, number_input},
-        toolbar,
-    },
+    widgets::{Icon, ToolbarButton, form::number_input, toolbar},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
 
@@ -105,19 +101,11 @@ impl TableColumn {
 #[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct SatManager {
-    #[serde(default)]
     show_all: bool,
-    #[serde(default)]
     show_column_controls: bool,
-    #[serde(default)]
     show_spacetrack: bool,
-    #[serde(skip)]
-    #[serde(default = "SatManager::create_spacetrack_form")]
-    spacetrack_form: Form,
-    #[serde(default)]
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     sat_buffer: HashMap<usize, Satellite>,
-    #[serde(default = "SatManager::default_columns")]
     columns: HashMap<TableColumn, bool>,
 }
 
@@ -131,20 +119,9 @@ impl SatManager {
             show_all: false,
             show_column_controls: false,
             show_spacetrack: false,
-            spacetrack_form: SatManager::create_spacetrack_form(),
             sat_buffer: HashMap::new(),
             columns: Self::default_columns(),
         }
-    }
-
-    fn create_spacetrack_form() -> Form {
-        Form::new(
-            vec![
-                ("Username".into(), form::Field::Text(String::new())),
-                ("Password".into(), form::Field::Password(String::new())),
-            ],
-            "Log in".into(),
-        )
     }
 
     fn spacetrack_update(

@@ -5,10 +5,21 @@ use std::fmt::Debug;
 use rstrf::orbit::Site;
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
+    pub version: String,
     pub space_track_creds: Option<(String, String)>,
     pub site: Option<Site>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            space_track_creds: None,
+            site: None,
+        }
+    }
 }
 
 impl Debug for Config {

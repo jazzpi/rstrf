@@ -15,7 +15,6 @@ use iced::widget::{button, text};
 
 pub mod form;
 
-pub use form::Form;
 use iced_aw::Menu;
 use iced_aw::MenuBar;
 use iced_aw::menu;

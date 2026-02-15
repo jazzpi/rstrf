@@ -16,6 +16,7 @@ pub enum Message {
 }
 
 #[derive(Clone, PartialEq)]
+#[allow(unused)]
 pub enum Field {
     Text(String),
     Password(String),

@@ -68,7 +68,6 @@ struct SharedState {
 pub struct RFPlot {
     shared: SharedState,
     overlay: overlay::Overlay,
-    #[serde(default = "Uuid::new_v4")]
     id: Uuid,
 }
 

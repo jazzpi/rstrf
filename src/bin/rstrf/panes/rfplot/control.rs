@@ -39,9 +39,7 @@ pub struct Controls {
     signal_sigma: f32,
     /// Bandwidth around track points
     track_bw: f32,
-    #[serde(default)]
     show_controls: bool,
-    #[serde(default)]
     colormap: Colormap,
 }
 

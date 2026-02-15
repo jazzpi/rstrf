@@ -46,10 +46,9 @@ impl std::fmt::Debug for Message {
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workspace {
+    pub version: String,
     pub panes: PaneTree,
-    #[serde(default)]
     pub auto_save: bool,
-    #[serde(default)]
     pub shared: WorkspaceShared,
 }
 
@@ -90,6 +89,7 @@ impl Workspace {
 impl Default for Workspace {
     fn default() -> Self {
         Self {
+            version: env!("CARGO_PKG_VERSION").to_string(),
             panes: PaneTree::Split {
                 axis: SplitAxis::Vertical,
                 ratio: 0.7,

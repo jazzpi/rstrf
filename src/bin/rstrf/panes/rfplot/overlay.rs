@@ -48,20 +48,13 @@ fn clamp_line_to_plot(
         .map(data_absolute::Point)
 }
 
-fn yes() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Overlay {
     satellites: Vec<orbit::Satellite>,
     #[serde(skip)]
     satellite_predictions: Option<orbit::Predictions>,
-    #[serde(default = "yes")]
     show_predictions: bool,
-    #[serde(default)]
     show_grid: bool,
-    #[serde(default)]
     show_crosshair: bool,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
