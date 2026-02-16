@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="magma" x1="0%" y1="0%" x2="0%" y2="50%" spreadMethod="reflect">
+      <stop offset="0%" stop-color="#b63679" />
+      <stop offset="25%" stop-color="#e65162" />
+      <stop offset="50%" stop-color="#fb8861" />
+      <stop offset="75%" stop-color="#fec488" />
+      <stop offset="100%" stop-color="#fdfec0" />
+    </linearGradient>
+  </defs>
+  <path fill="#090720" stroke="none" d="M10 12q40 0 54 16t54 16v72q-40 0 -54 -16t-54 -16z" />
+  <rect x="13" y="16" width="6" height="64" fill="url(#magma)" />
+  <rect x="29" y="17" width="6" height="64" fill="url(#magma)" />
+  <rect x="45" y="21" width="6" height="64" fill="url(#magma)" />
+  <rect x="61" y="32" width="6" height="64" fill="url(#magma)" />
+  <rect x="77" y="43" width="6" height="64" fill="url(#magma)" />
+  <rect x="93" y="47" width="6" height="64" fill="url(#magma)" />
+  <rect x="109" y="48" width="6" height="64" fill="url(#magma)" />
+  <path fill="none" stroke="#00ff00" stroke-width="2" d="M10 48q40 0 54 16t54 16" />
+</svg>

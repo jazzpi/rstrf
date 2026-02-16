@@ -239,6 +239,17 @@ impl AppModel {
                 application_id: "de.jazzpi.rstrf".into(),
                 ..Default::default()
             },
+            icon: Some(
+                window::icon::from_rgba(
+                    include_bytes!(
+                        "../../../resources/icons/hicolor/64x64/apps/de.jazzpi.rstrf.rgba"
+                    )
+                    .into(),
+                    64,
+                    64,
+                )
+                .unwrap(),
+            ),
             ..Default::default()
         });
         open

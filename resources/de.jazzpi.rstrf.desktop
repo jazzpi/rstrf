@@ -6,4 +6,5 @@ Icon=de.jazzpi.rstrf
 Exec=rstrf %F
 Terminal=false
 StartupNotify=true
+StartupWMClass=de.jazzpi.rstrf
 MimeType=

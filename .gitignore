@@ -14,3 +14,6 @@ debian/*
 !debian/source
 
 .vscode/
+
+# `nix build` output
+result
