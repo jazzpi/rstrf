@@ -1,4 +1,3 @@
-# Adapted from https://wiki.nixos.org/wiki/Rust#Installation_via_rustup
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -28,6 +27,17 @@
           dbus
         ];
         runtimeDependenciesPath = pkgs.lib.makeLibraryPath runtimeDependencies;
+        buildInputs = with pkgs; [
+          openssl
+          libxkbcommon
+          libGL
+          wayland
+          mesa
+          vulkan-loader
+          udev
+          fontconfig
+          openblas
+        ];
       in
       with pkgs;
       {
@@ -42,18 +52,7 @@
               pkg-config
               copyDesktopItems
             ];
-            buildInputs = [
-              # Libraries here
-              openssl
-              libxkbcommon
-              libGL
-              wayland
-              mesa
-              vulkan-loader
-              udev
-              fontconfig
-              openblas
-            ];
+            inherit buildInputs;
 
             cargoLock = {
               lockFile = ./Cargo.lock;
@@ -92,6 +91,7 @@
               };
           };
         };
+        # Adapted from https://wiki.nixos.org/wiki/Rust#Installation_via_rustup
         devShells.default = mkShell rec {
           strictDeps = true;
           nativeBuildInputs = [
@@ -99,18 +99,7 @@
             rustPlatform.bindgenHook
             pkg-config
           ];
-          buildInputs = [
-            # Libraries here
-            openssl
-            libxkbcommon
-            libGL
-            wayland
-            mesa
-            vulkan-loader
-            udev
-            fontconfig
-            openblas
-          ];
+          inherit buildInputs;
           RUSTC_VERSION = "stable";
           shellHook =
             let
