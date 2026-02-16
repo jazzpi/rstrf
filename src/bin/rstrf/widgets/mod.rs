@@ -166,7 +166,7 @@ pub fn tooltip_button<'a, Message: Clone + 'a>(
             .style(container::dark),
         tooltip::Position::Bottom,
     )
-    .delay(Duration::from_secs(1))
+    .delay(Duration::from_millis(500))
     .into()
 }
 
