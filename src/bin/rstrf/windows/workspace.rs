@@ -7,7 +7,7 @@ use iced::{
 use iced_aw::{menu_bar, menu_items};
 use rfd::AsyncFileDialog;
 use rstrf::{
-    menu::{button_f, button_s, checkbox, submenu, view_menu},
+    menu::{checkbox, sublevel, submenu, toplevel, view_menu},
     util::pick_file,
 };
 
@@ -20,6 +20,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Nop,
     #[allow(clippy::enum_variant_names)]
     PaneMessage(pane_grid::Pane, panes::Message),
     ClosePane(pane_grid::Pane),
@@ -98,18 +99,18 @@ impl super::Window for Window {
     fn view<'a>(&'a self, app: &'a AppShared) -> Element<'a, super::Message> {
         let mb = view_menu(menu_bar!(
             (
-                button_s("Workspace", None),
+                toplevel("Workspace", Some(Message::Nop.into())),
                 submenu(menu_items!(
-                    (button_f(
+                    (sublevel(
                         "New window",
                         Some(super::Message::ToApp(Box::new(
                             app::Message::OpenWorkspace(None)
                         )))
                     )),
-                    (button_f("New", Some(Message::WorkspaceNew.into()))),
-                    (button_f("Open", Some(Message::WorkspaceOpen.into()))),
-                    (button_f("Save", Some(Message::WorkspaceSave.into()))),
-                    (button_f("Save as...", Some(Message::WorkspaceSaveAs.into()))),
+                    (sublevel("New", Some(Message::WorkspaceNew.into()))),
+                    (sublevel("Open", Some(Message::WorkspaceOpen.into()))),
+                    (sublevel("Save", Some(Message::WorkspaceSave.into()))),
+                    (sublevel("Save as...", Some(Message::WorkspaceSaveAs.into()))),
                     (checkbox(
                         "Auto-save",
                         Some(Message::WorkspaceToggleAutoSave.into()),
@@ -118,9 +119,9 @@ impl super::Window for Window {
                 ))
             ),
             (
-                button_s("Edit", None),
+                toplevel("Edit", Some(Message::Nop.into())),
                 submenu(menu_items!(
-                    (button_f(
+                    (sublevel(
                         "Preferences",
                         Some(super::Message::ToApp(Box::new(
                             app::Message::OpenPreferences
@@ -193,6 +194,7 @@ impl super::Window for Window {
         match message {
             super::Message::Workspace(message) => {
                 match message {
+                    Message::Nop => (),
                     Message::WorkspaceEvent(event) => {
                         let tasks = self.panes.iter_mut().map(|(id, pane)| {
                             let id = *id;

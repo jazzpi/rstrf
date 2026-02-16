@@ -1,5 +1,5 @@
 use iced::{
-    Border, Color, Element, Length, Renderer, Theme, alignment,
+    Border, Element, Length, Renderer, Theme, alignment,
     border::Radius,
     widget::{self, button, container, text},
 };
@@ -11,16 +11,16 @@ use iced_aw::{
 
 // Adapted from the iced_aw example
 
-fn base_button<'a, Message: Clone>(
-    content: impl Into<Element<'a, Message>>,
-) -> button::Button<'a, Message> {
-    button(content).padding([4, 8]).style(|theme, status| {
-        use button::{Status, Style};
+mod style {
+    use iced::{
+        Border, Color, Theme,
+        theme::palette::Extended,
+        widget::button::{Status, Style},
+    };
 
-        let palette = theme.extended_palette();
+    fn base(palette: &Extended, status: Status) -> Style {
         let base = Style {
             text_color: palette.background.base.text,
-            border: Border::default().rounded(6.0),
             ..Style::default()
         };
         match status {
@@ -29,15 +29,38 @@ fn base_button<'a, Message: Clone>(
             Status::Disabled => base.with_background(palette.secondary.weak.color),
             Status::Pressed => base.with_background(palette.primary.strong.color),
         }
-    })
+    }
+
+    pub(crate) fn toplevel(theme: &Theme, status: Status) -> Style {
+        let palette = theme.extended_palette();
+        let base = base(palette, status);
+        match status {
+            Status::Active => base.with_background(palette.background.neutral.color),
+            _ => base,
+        }
+    }
+
+    pub(crate) fn sublevel(theme: &Theme, status: Status) -> Style {
+        let palette = theme.extended_palette();
+        Style {
+            border: Border::default().rounded(6.0),
+            ..base(palette, status)
+        }
+    }
 }
 
-pub fn menu_button<'a, Message: Clone + 'a>(
+fn base_button<'a, Message: Clone>(
+    content: impl Into<Element<'a, Message>>,
+) -> button::Button<'a, Message> {
+    button(content).padding([4, 8])
+}
+
+fn menu_button<'a, Message: Clone + 'a>(
     label: &'a str,
     msg: Option<Message>,
     width: Option<Length>,
     height: Option<Length>,
-) -> Element<'a, Message> {
+) -> button::Button<'a, Message> {
     base_button(
         text(label)
             .height(height.unwrap_or(Length::Shrink))
@@ -46,21 +69,24 @@ pub fn menu_button<'a, Message: Clone + 'a>(
     .width(width.unwrap_or(Length::Shrink))
     .height(height.unwrap_or(Length::Shrink))
     .on_press_maybe(msg)
-    .into()
 }
 
-pub fn button_s<'a, Message: Clone + 'a>(
+pub fn toplevel<'a, Message: Clone + 'a>(
     label: &'a str,
     msg: Option<Message>,
 ) -> Element<'a, Message> {
     menu_button(label, msg, Some(Length::Shrink), Some(Length::Shrink))
+        .style(style::toplevel)
+        .into()
 }
 
-pub fn button_f<'a, Message: Clone + 'a>(
+pub fn sublevel<'a, Message: Clone + 'a>(
     label: &'a str,
     msg: Option<Message>,
 ) -> Element<'a, Message> {
     menu_button(label, msg, Some(Length::Fill), Some(Length::Shrink))
+        .style(style::sublevel)
+        .into()
 }
 
 pub fn checkbox<'a, Message: Clone + 'a>(
@@ -114,7 +140,7 @@ pub fn view_menu<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     // MenuBar seems to ignore the .width(Length::Fill) call
     container(
-        bar.draw_path(DrawPath::Backdrop)
+        bar.draw_path(DrawPath::FakeHovering)
             .close_on_background_click_global(true)
             .close_on_item_click_global(true)
             .padding(5.0)

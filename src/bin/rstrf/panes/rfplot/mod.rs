@@ -9,7 +9,7 @@ use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{
     coord::plot_area,
-    menu::{button_f, button_s, submenu, view_menu},
+    menu::{sublevel, submenu, toplevel, view_menu},
     spectrogram::Spectrogram,
 };
 use serde::{Deserialize, Serialize};
@@ -226,9 +226,9 @@ impl PaneWidget for RFPlot {
         }
 
         let mb = view_menu(menu_bar!((
-            button_s("Spectrogram", None),
+            toplevel("File", Some(Message::Nop)),
             submenu(menu_items!(
-                (button_f("Load file(s)", Some(Message::PickSpectrogram))),
+                (sublevel("Load spectrogram(s)", Some(Message::PickSpectrogram))),
             ))
         )));
         let controls = self.shared.controls.view(&self.shared).map(Message::from);

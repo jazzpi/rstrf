@@ -10,7 +10,7 @@ use iced::{
 };
 use iced_aw::{card, menu_bar, menu_items};
 use rstrf::{
-    menu::{button_f, button_s, submenu, view_menu},
+    menu::{sublevel, submenu, toplevel, view_menu},
     orbit::Satellite,
     util::{pick_file, spacetrack_to_sgp4},
 };
@@ -29,6 +29,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Nop,
     LoadTLEs,
     LoadFrequencies,
     DoLoadTLEs(PathBuf),
@@ -192,6 +193,7 @@ impl PaneWidget for SatManager {
     ) -> Task<PaneMessage> {
         match message {
             PaneMessage::SatManager(message) => match message {
+                Message::Nop => Task::none(),
                 Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
                     .and_then(|p| Task::done(PaneMessage::SatManager(Message::DoLoadTLEs(p)))),
                 Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
@@ -307,10 +309,10 @@ impl PaneWidget for SatManager {
         app_state: &AppShared,
     ) -> Element<'_, PaneMessage> {
         let mb = view_menu(menu_bar!((
-            button_s("File", None),
+            toplevel("File", Some(Message::Nop.into())),
             submenu(menu_items!(
-                (button_f("Load TLEs", Some(Message::LoadTLEs.into()))),
-                (button_f("Load frequencies", Some(Message::LoadFrequencies.into()))),
+                (sublevel("Load TLEs", Some(Message::LoadTLEs.into()))),
+                (sublevel("Load frequencies", Some(Message::LoadFrequencies.into()))),
             ))
         )));
         let onboarding = if workspace.satellites.is_empty() {
