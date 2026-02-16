@@ -16,9 +16,82 @@
         pkgs = import nixpkgs {
           inherit system;
         };
+        runtimeDependencies = with pkgs; [
+          libxkbcommon
+          wayland
+          mesa
+          libGL
+          libglvnd
+          vulkan-loader
+          udev
+          openblas
+          dbus
+        ];
+        runtimeDependenciesPath = pkgs.lib.makeLibraryPath runtimeDependencies;
       in
       with pkgs;
       {
+        packages = rec {
+          default = rstrf;
+          rstrf = rustPlatform.buildRustPackage {
+            pname = "rstrf";
+            version = "0.1.0";
+            src = ./.;
+
+            nativeBuildInputs = [
+              pkg-config
+              copyDesktopItems
+            ];
+            buildInputs = [
+              # Libraries here
+              openssl
+              libxkbcommon
+              libGL
+              wayland
+              mesa
+              vulkan-loader
+              udev
+              fontconfig
+              openblas
+            ];
+
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+              outputHashes = {
+                "plotters-iced2-0.14.0" = "sha256-STEowCxh3PbSWhxGEcIAUxM3uXwdFaM7GKjpW666uSg=";
+                "sgp4-2.3.0" = "sha256-xxv1P3V1v7Y37DHGQrR/Vrk9jofKDB37nsDhygQkmnM=";
+                "space_track-0.1.0" = "sha256-P69yU53a5MIMvBvmzXfr+S+14F21pQPUvHema7skqp4=";
+              };
+            };
+
+            postFixup = ''
+              rpath=$(patchelf --print-rpath $out/bin/rstrf)
+              patchelf --set-rpath "$rpath:${runtimeDependenciesPath}" $out/bin/rstrf
+            '';
+
+            postInstall = ''
+              for d in 32x32 64x64 128x128; do
+                install -Dm644 resources/icons/hicolor/$d/apps/de.jazzpi.rstrf.png \
+                  $out/share/icons/hicolor/$d/apps/de.jazzpi.rstrf.png
+              done
+              install -Dm644 resources/icons/hicolor/scalable/apps/de.jazzpi.rstrf.svg \
+                $out/share/icons/hicolor/scalable/apps/de.jazzpi.rstrf.svg
+            '';
+
+            desktopItems = [ ./resources/de.jazzpi.rstrf.desktop ];
+
+            meta =
+              let
+                inherit (lib) licenses platforms;
+              in
+              {
+                description = "Oxidized RF Satellite Tracking";
+                homepage = "https://github.com/jazzpi/rstrf";
+                license = licenses.gpl3Only;
+                platforms = platforms.linux;
+              };
+          };
+        };
         devShells.default = mkShell rec {
           strictDeps = true;
           nativeBuildInputs = [
@@ -37,17 +110,6 @@
             udev
             fontconfig
             openblas
-          ];
-          runtimeDependencies = [
-            libxkbcommon
-            wayland
-            mesa
-            libGL
-            libglvnd
-            vulkan-loader
-            udev
-            openblas
-            dbus
           ];
           RUSTC_VERSION = "stable";
           shellHook =
