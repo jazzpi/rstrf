@@ -66,7 +66,7 @@ cargo run --release
 
 The rSTRF workspace is composed of panes that you can split and rearrange:
 
-**TODO: VIDEO**
+![Pane grid demo](./docs/panegrid.gif)
 
 There are currently two types of panes:
 
