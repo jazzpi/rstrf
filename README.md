@@ -24,14 +24,22 @@ regularly for my day job.
 
 ## Installation
 
-If you use Nix: this repository includes a flake, so you can just
+### Ubuntu
+
+```sh
+sudo apt install build-essential libssl-dev pkg-config fontconfig \
+  libfontconfig1-dev libopenblas-dev
+```
+
+### Nix
+
+This repository includes a flake, so you can just
 
 ```sh
 nix run github:jazzpi/rstrf
 ```
 
-Otherwise, you might need to install dependencies. On Nix, these are the
-following (names might be slightly different on other Linux distributions):
+Alternatively, install these packages:
 
 ```
 libxkbcommon
@@ -43,9 +51,12 @@ vulkan-loader
 udev
 openblas
 dbus
+pkg-config
+openssl
+fontconfig
 ```
 
-Except for `openblas`, they're probably already installed.
+### Build
 
 You will also need to [install Rust](https://rust-lang.org/tools/install/),
 then:
