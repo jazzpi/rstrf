@@ -112,7 +112,17 @@ pub struct SatManager {
 
 impl SatManager {
     fn default_columns() -> HashMap<TableColumn, bool> {
-        TableColumn::iter().map(|col| (col, true)).collect()
+        TableColumn::iter()
+            .map(|col| {
+                (
+                    col,
+                    match col {
+                        TableColumn::NoradId | TableColumn::Frequency | TableColumn::Show => true,
+                        TableColumn::Epoch | TableColumn::Name => false,
+                    },
+                )
+            })
+            .collect()
     }
 
     pub fn new() -> Self {
