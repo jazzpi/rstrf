@@ -98,7 +98,7 @@ impl Default for Workspace {
                     Box::new(SatManager::new()),
                 ))),
             },
-            auto_save: true,
+            auto_save: false,
             shared: WorkspaceShared::default(),
         }
     }
