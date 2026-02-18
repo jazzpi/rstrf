@@ -10,14 +10,13 @@ I plan to add at least `rffit` and `rffft` as well.
 
 ---
 
-rSTRF is designed to be a bit more user-friendly to use than STRF. It features
+rSTRF uses GPU-accelerated plotting instead of STRF's pgplot, which enables
+fluid mouse-based panning and zooming in the waterfall. It also makes it easy to
+have multiple plots active at the same time.
 
-- mouse-based panning and zooming in the waterfall
-- buttons and sliders instead of CLI flags
-- workspaces of arbitrarily many panes (`rfplot`s) that you can save to disk
-- a more modern tech stack (Rust + Iced) that should make building a bit easier
-  (and theoretically even possible for Windows, although I haven't tested that)
-- a config menu
+The different tech stack (Rust + Iced) should make building a bit easier for
+non-Debian systems (and theoretically even possible for Windows, although I
+haven't tested that).
 
 It is still very much alpha software, but at least stable enough that I use it
 regularly for my day job.
