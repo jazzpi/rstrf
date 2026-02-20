@@ -210,6 +210,7 @@ impl super::Window for Window {
                                     panes::Pane::RFPlot(inner) => inner.clone(),
                                     panes::Pane::SatManager(inner) => inner.clone(),
                                     panes::Pane::Dummy(inner) => inner.clone(),
+                                    panes::Pane::Recordings(inner) => inner.clone(),
                                 };
                                 return pane
                                     .init(&self.workspace.shared, app)

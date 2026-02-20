@@ -1,3 +1,4 @@
+use chrono::Utc;
 use iced::{
     Element, Length,
     widget::{Column, TextInput, button, container, row, text, text_input},
@@ -126,5 +127,24 @@ where
             let on_input = on_input.clone();
             move |_| on_input(value)
         })
+    })
+}
+
+pub fn date_input<'a, Message>(
+    placeholder: &str,
+    value: chrono::DateTime<Utc>,
+    on_input: impl Fn(chrono::DateTime<Utc>) -> Message + Clone + 'a,
+) -> TextInput<'a, Message>
+where
+    Message: Clone,
+{
+    let s = value.to_rfc3339();
+    let s = &s[..s.len() - 1]; // Remove the trailing 'Z'
+    text_input(placeholder, s).on_input(move |mut s| {
+        if !s.ends_with('Z') {
+            s = format!("{}Z", s)
+        };
+        let date = s.parse::<chrono::DateTime<Utc>>().unwrap_or_else(|_| value);
+        on_input(date)
     })
 }
