@@ -75,7 +75,7 @@ END
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 struct Header {
     start_time: DateTime<Utc>,
     freq: f32,   // Hz
@@ -88,10 +88,6 @@ const HEADER_SIZE: usize = 256;
 impl Header {
     pub fn same_params(&self, other: &Self) -> bool {
         self.freq == other.freq && self.bw == other.bw && self.nchan == other.nchan
-    }
-
-    pub fn nth_following(&self, nth: i32) -> DateTime<Utc> {
-        self.start_time + chrono::Duration::milliseconds((self.length * 1000.0) as i64) * nth
     }
 }
 
@@ -152,17 +148,21 @@ impl Spectrogram {
             ensure!(
                 spectrogram.freq == first.freq
                     && spectrogram.bw == first.bw
-                    && spectrogram.slice_length == first.slice_length
+                    && (spectrogram.slice_length / first.slice_length - 1.0).abs() < 0.01
                     && spectrogram.nchan == first.nchan,
-                "Inconsistent spectrogram parameters during concatenation"
+                "Inconsistent spectrogram parameters during concatenation: {:?} vs {:?}",
+                spectrogram,
+                first
             );
             let prev = &components[i - 1];
             ensure!(
                 (spectrogram.start_time - prev.end_time())
                     .num_milliseconds()
                     .abs()
-                    < 10,
-                "Non-contiguous spectrograms during concatenation"
+                    < 500,
+                "Non-contiguous spectrograms during concatenation (expected {}, got {})",
+                prev.end_time(),
+                spectrogram.start_time
             );
         }
 
@@ -235,7 +235,7 @@ async fn load_file(path: &Path) -> Result<Spectrogram> {
     let file_size = file.metadata().await?.len() as usize;
     let mut reader = tokio::io::BufReader::new(file);
 
-    let header = parse_header(&mut reader)
+    let mut header = parse_header(&mut reader)
         .await
         .context("Failed to parse header")?;
     log::debug!("Parsed header: {:?}", header);
@@ -253,13 +253,18 @@ async fn load_file(path: &Path) -> Result<Spectrogram> {
     .await?;
     data_offset += header.nchan;
 
+    let mut prev_header = header.clone();
+
+    let mut slices_length = header.length;
+
     while data_offset < uninit.len() {
         let new_header = parse_header(&mut reader).await?;
         ensure!(
             header.same_params(&new_header),
             "Inconsistent spectrogram parameters detected"
         );
-        let expected_time = header.nth_following((data_offset / header.nchan) as i32);
+        let expected_time =
+            prev_header.start_time + Duration::milliseconds((prev_header.length * 1000.0) as i64);
         ensure!(
             // STRF sometimes has small differences in timestamps
             (new_header.start_time - expected_time)
@@ -276,6 +281,8 @@ async fn load_file(path: &Path) -> Result<Spectrogram> {
         )
         .await?;
         data_offset += header.nchan;
+        slices_length += new_header.length;
+        prev_header = new_header;
     }
 
     ensure!(
@@ -301,6 +308,8 @@ async fn load_file(path: &Path) -> Result<Spectrogram> {
         min_max.0,
         min_max.1
     );
+
+    header.length = slices_length / (raw_data.len() as f32 / header.nchan as f32);
 
     Spectrogram::new(&header, raw_data)
 }
