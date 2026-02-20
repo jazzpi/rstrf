@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::AppShared,
-    panes::{self, Pane, PaneTree, PaneWidget, rfplot::RFPlot, sat_manager::SatManager},
+    panes::{
+        self, Pane, PaneTree, PaneWidget, recordings::Recordings, rfplot::RFPlot,
+        sat_manager::SatManager,
+    },
     workspace::WorkspaceShared,
 };
 
@@ -33,6 +36,10 @@ impl PaneWidget for Dummy {
         let content: Element<'_, panes::Message> = column![
             pane("RFPlot", Pane::RFPlot(Box::new(RFPlot::new()))),
             pane("SatManager", Pane::SatManager(Box::new(SatManager::new()))),
+            pane(
+                "Recordings",
+                Pane::Recordings(Box::new(Recordings::default()))
+            )
         ]
         .spacing(20)
         .into();

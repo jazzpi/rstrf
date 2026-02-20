@@ -8,8 +8,13 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
-use ndarray::{ArcArray2, ArrayView2, Axis};
+use itertools::Itertools;
+use ndarray::{ArcArray2, Array1, Array2, ArrayView2, Axis};
 use ndarray_stats::QuantileExt;
+use rustfft::{FftPlanner, num_complex::Complex};
+use scirs2_signal::window::blackman;
+use serde::{Deserialize, Serialize};
+use strum::{Display, VariantArray};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
@@ -75,13 +80,13 @@ END
     Ok(())
 }
 
-#[derive(Debug)]
-struct Header {
-    start_time: DateTime<Utc>,
-    freq: f32,   // Hz
-    bw: f32,     // Hz
-    length: f32, // s
-    nchan: usize,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Header {
+    pub start_time: DateTime<Utc>,
+    pub freq: f32,   // Hz
+    pub bw: f32,     // Hz
+    pub length: f32, // s
+    pub nchan: usize,
 }
 const HEADER_SIZE: usize = 256;
 
@@ -350,4 +355,126 @@ async fn parse_data<R: tokio::io::AsyncRead + Unpin>(
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, VariantArray, Display)]
+pub enum SampleFormat {
+    CS8,
+    CS16,
+    CS32,
+    CS64,
+    CF32,
+    CF64,
+}
+
+impl SampleFormat {
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        match ext.to_lowercase().as_str() {
+            "cs8" => Some(SampleFormat::CS8),
+            "cs16" => Some(SampleFormat::CS16),
+            "cs32" => Some(SampleFormat::CS32),
+            "cs64" => Some(SampleFormat::CS64),
+            "cf32" => Some(SampleFormat::CF32),
+            "cf64" => Some(SampleFormat::CF64),
+            _ => None,
+        }
+    }
+
+    pub fn sample_size(&self) -> usize {
+        match self {
+            SampleFormat::CS8 => 2,
+            SampleFormat::CS16 => 4,
+            SampleFormat::CS32 | SampleFormat::CF32 => 8,
+            SampleFormat::CS64 | SampleFormat::CF64 => 16,
+        }
+    }
+
+    pub async fn read_sample<R: tokio::io::AsyncRead + Unpin>(
+        &self,
+        reader: &mut R,
+    ) -> Result<f32> {
+        match self {
+            SampleFormat::CS8 => Ok(reader.read_i8().await? as f32 / -(i8::MIN as f32)),
+            SampleFormat::CS16 => Ok(reader.read_i16_le().await? as f32 / -(i16::MIN as f32)),
+            SampleFormat::CS32 => Ok(reader.read_i32_le().await? as f32 / -(i32::MIN as f32)),
+            SampleFormat::CS64 => Ok(reader.read_i64_le().await? as f32 / -(i64::MIN as f32)),
+            SampleFormat::CF32 => Ok(reader.read_f32_le().await? as f32),
+            SampleFormat::CF64 => Ok(reader.read_f64_le().await? as f32),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct IqFormat {
+    pub samples: SampleFormat,
+    pub sample_rate: f32,
+}
+
+pub async fn load_iq_file(
+    path: &PathBuf,
+    format: IqFormat,
+    header: &Header,
+) -> Result<Spectrogram> {
+    let file = tokio::fs::File::open(path).await?;
+    let file_size = file.metadata().await?.len() as usize;
+    let n_samples = file_size / format.samples.sample_size();
+    ensure!(
+        n_samples % 2 == 0,
+        "IQ file must contain an even number of samples"
+    );
+
+    let mut reader = tokio::io::BufReader::new(file);
+
+    let mut samples: Vec<Complex<f32>> = Vec::with_capacity(n_samples);
+    let uninit = samples.spare_capacity_mut();
+    for value in uninit.iter_mut() {
+        let i = format.samples.read_sample(&mut reader).await?;
+        let q = format.samples.read_sample(&mut reader).await?;
+        value.write(Complex::new(i, q));
+    }
+    // SAFETY: We have initialized all elements via uninit
+    unsafe {
+        samples.set_len(n_samples);
+    }
+
+    let shape = (samples.len() / header.nchan, header.nchan);
+    let mut samples = Array2::from_shape_vec(shape, samples[..(shape.0 * shape.1)].to_vec())?;
+    // TODO: Rayon?
+    samples.mapv_inplace(|s| s * s);
+
+    let n_samples_per_slice = (header.length * format.sample_rate) as usize;
+    let n_windows = n_samples_per_slice / header.nchan;
+    let window = Array1::from_iter(
+        blackman(header.nchan, false)?
+            .iter()
+            .map(|&v| Complex::new(v as f32, 0.0)),
+    );
+
+    let fft = FftPlanner::new().plan_fft_forward(header.nchan);
+    // TODO: Changing between ndarrays and Vecs so much seems inefficient
+    // TODO: Rayon?
+    let data = samples
+        .outer_iter()
+        .map(|slice| {
+            let mut slice = slice.to_owned();
+            // Remove DC offset
+            let mean = slice.mean().unwrap_or(Complex::ZERO);
+            slice -= mean;
+            slice *= &window;
+            fft.process(&mut slice.as_slice_mut().unwrap());
+            slice.mapv(|s| 10.0 * (s.norm() + 1e-12).log10())
+        })
+        .chunks(n_windows)
+        .into_iter()
+        .map(|slice| {
+            let avg = slice
+                .into_iter()
+                .fold(Array1::from_elem(header.nchan, 0.0), |acc, s| acc + s)
+                / n_windows as f32;
+            avg.to_vec()
+        })
+        .flatten()
+        .collect_vec();
+
+    Spectrogram::new(&header, data)
 }

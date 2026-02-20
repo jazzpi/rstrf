@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::AppShared,
-    panes::{dummy::Dummy, rfplot::RFPlot, sat_manager::SatManager},
+    panes::{dummy::Dummy, recordings::Recordings, rfplot::RFPlot, sat_manager::SatManager},
     workspace::{self, Workspace, WorkspaceShared},
 };
 
 pub mod dummy;
+pub mod recordings;
 pub mod rfplot;
 pub mod sat_manager;
 
@@ -16,6 +17,7 @@ pub mod sat_manager;
 pub enum Message {
     RFPlot(rfplot::Message),
     SatManager(sat_manager::Message),
+    Recordings(recordings::Message),
     ToWorkspace(workspace::Message),
     ToApp(Box<crate::app::Message>),
     ReplacePane(Pane),
@@ -36,6 +38,12 @@ impl From<rfplot::Message> for Message {
 impl From<sat_manager::Message> for Message {
     fn from(message: sat_manager::Message) -> Self {
         Message::SatManager(message)
+    }
+}
+
+impl From<recordings::Message> for Message {
+    fn from(message: recordings::Message) -> Self {
+        Message::Recordings(message)
     }
 }
 
@@ -121,6 +129,7 @@ pub enum Pane {
     RFPlot(Box<RFPlot>),
     SatManager(Box<SatManager>),
     Dummy(Box<Dummy>),
+    Recordings(Box<Recordings>),
 }
 
 impl std::fmt::Debug for Pane {
@@ -129,6 +138,7 @@ impl std::fmt::Debug for Pane {
             Pane::RFPlot(_) => write!(f, "Pane::RFPlot"),
             Pane::SatManager(_) => write!(f, "Pane::SatManager"),
             Pane::Dummy(_) => write!(f, "Pane::Dummy"),
+            Pane::Recordings(_) => write!(f, "Pane::Recordings"),
         }
     }
 }
@@ -210,6 +220,7 @@ fn build_widget(pane: &Pane) -> Box<dyn PaneWidget> {
         Pane::RFPlot(widget) => widget.clone(),
         Pane::SatManager(widget) => widget.clone(),
         Pane::Dummy(widget) => widget.clone(),
+        Pane::Recordings(widget) => widget.clone(),
     }
 }
 
