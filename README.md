@@ -97,6 +97,16 @@ the preferences menu, you can also fetch updates through the Space-Track API.
 Make sure to [respect the API Use
 Guidlines](https://www.space-track.org/documentation#/api).
 
+## Troubleshooting
+
+You can enable debug logs and backtraces by setting the
+`RUST_LOG`/`RUST_BACKTRACE` environment variables:
+
+```sh
+export RUST_LOG=debug
+export RUST_BACKTRACE=1
+```
+
 ## `rsmedfilt`
 
 This repo also includes a CLI tool called `rsmedfilt` for preprocessing
