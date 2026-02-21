@@ -122,7 +122,7 @@ impl Pipeline {
 
         let bounds = primitive.controls.bounds();
         let mut left = 0.0;
-        for (i, chunk) in primitive_data.buffers.spectrogram.iter().enumerate() {
+        for chunk in primitive_data.buffers.spectrogram.iter() {
             let uniforms = Uniforms {
                 power_bounds: primitive.controls.power_range().into(),
                 nslices: chunk.nslices,
@@ -137,14 +137,6 @@ impl Pipeline {
             left += width;
             let vmin = bounds.0.y;
             let vmax = bounds.0.y + bounds.0.height;
-            log::debug!(
-                "Rendering chunk {} with x in [{:.3}, {:.3}] and v in [{:.3}, {:.3}]",
-                i,
-                xmin,
-                xmax,
-                vmin,
-                vmax
-            );
             let vertices = [
                 Vertex {
                     xy: Vec2::new(xmin, 0.0),
@@ -247,13 +239,6 @@ impl Pipeline {
             );
             return Vec::new();
         }
-        let chunk_width = chunk_size as f32 / data.len() as f32;
-        log::debug!(
-            "Chunk size: {}, data length: {}, chunk width: {:.3}",
-            chunk_size,
-            data.len(),
-            chunk_width
-        );
 
         let prefix = format!("spectrogram.{}", spectrogram.id);
 
@@ -263,11 +248,9 @@ impl Pipeline {
             .map(|(i, chunk)| {
                 let prefix = format!("{}.chunk{}", prefix, i);
                 log::debug!(
-                    "Creating chunk {} ({} bytes), min: {:.3}, max: {:.3}",
+                    "Creating chunk {} ({} bytes)",
                     prefix,
                     chunk.len() * std::mem::size_of::<f32>(),
-                    chunk.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
-                    chunk.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b))
                 );
                 let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(format!("{prefix}.buffer.vertex").as_str()),
