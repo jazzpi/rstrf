@@ -4721,7 +4721,7 @@ dependencies = [
 [[package]]
 name = "sgp4"
 version = "2.3.0"
-source = "git+https://github.com/jazzpi/sgp4?branch=partial-eq#bdfcee6a3c73ddbc77daf158050497aaa5b17a7c"
+source = "git+https://github.com/jazzpi/sgp4?branch=dev#f8fcd2c640f4ff147152c96dbb6b4d0aac537a6b"
 dependencies = [
  "chrono",
  "serde",
