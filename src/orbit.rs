@@ -68,29 +68,25 @@ pub async fn load_tles(
                 }
             }
             ParseState::AwaitLine1(title) => {
-                anyhow::ensure!(
-                    line.starts_with("1 "),
-                    "Expected line 1 of TLE, got: {}",
-                    line
-                );
-                ParseState::AwaitLine2(Some(title), line)
+                if line.starts_with("1 ") {
+                    ParseState::AwaitLine2(Some(title), line)
+                } else {
+                    log::warn!("Expected line 1 of TLE, got: {}", line);
+                    ParseState::AwaitLine1OrTitle
+                }
             }
             ParseState::AwaitLine2(title, line1) => {
-                anyhow::ensure!(
-                    line.starts_with("2 "),
-                    "Expected line 2 of TLE, got: {}",
-                    line
-                );
-                let elem = sgp4::Elements::from_tle(title, line1.as_bytes(), line.as_bytes())
-                    .context("Failed to parse TLE")?;
-                let constants = sgp4::Constants::from_elements(&elem)
-                    .context("Failed to derive SGP4 constants")?;
-                let tx_freq = tx_freqs.get(&elem.norad_id).copied().unwrap_or(0.0);
-                elements.push(Satellite {
-                    elements: elem,
-                    constants,
-                    tx_freq,
-                });
+                if line.starts_with("2 ") {
+                    let sat = Satellite::from_tle(title, &line1, &line, &tx_freqs);
+                    match sat {
+                        Ok(sat) => elements.push(sat),
+                        Err(e) => {
+                            log::warn!("Failed to parse TLE:\n{}\n{}\nError: {}", line1, line, e)
+                        }
+                    }
+                } else {
+                    log::warn!("Expected line 2 of TLE, got: {}", line);
+                }
                 ParseState::AwaitLine1OrTitle
             }
         };
@@ -137,6 +133,23 @@ impl PartialEq for Satellite {
 }
 
 impl Satellite {
+    pub fn from_tle(
+        title: Option<String>,
+        line1: &str,
+        line2: &str,
+        tx_freqs: &HashMap<u64, f64>,
+    ) -> anyhow::Result<Self> {
+        let elements = sgp4::Elements::from_tle(title, line1.as_bytes(), line2.as_bytes())
+            .context("Failed to parse TLE")?;
+        let constants =
+            sgp4::Constants::from_elements(&elements).context("Failed to derive SGP4 constants")?;
+        let tx_freq = tx_freqs.get(&elements.norad_id).copied().unwrap_or(0.0);
+        Ok(Satellite {
+            elements,
+            constants,
+            tx_freq,
+        })
+    }
     pub fn predict(&self, time: &NaiveDateTime) -> anyhow::Result<sgp4::Prediction> {
         let minutes = self.elements.datetime_to_minutes_since_epoch(time)?;
         let prediction = self.constants.propagate(minutes)?;
