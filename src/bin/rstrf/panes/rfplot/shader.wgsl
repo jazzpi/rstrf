@@ -1,17 +1,16 @@
 struct Uniforms {
-    x_bounds: vec2f,
-    y_bounds: vec2f,
     power_bounds: vec2f,
     nslices: u32,
     nchan: u32,
 }
 
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> color_map: array<vec4f>;
+@group(0) @binding(0) var<storage, read> color_map: array<vec4f>;
 @group(1) @binding(0) var<storage, read> spec_data: array<f32>;
+@group(1) @binding(1) var<uniform> uniforms: Uniforms;
 
 struct VertexIn {
     @location(0) xy: vec2f,
+    @location(1) uv: vec2f,
 }
 
 struct VertexOut {
@@ -21,11 +20,7 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    let uv = vec2f(
-        mix(uniforms.x_bounds.x, uniforms.x_bounds.y, in.xy.x),
-        mix(uniforms.y_bounds.x, uniforms.y_bounds.y, in.xy.y),
-    );
-    return VertexOut(vec4f(in.xy * 2.0 - 1.0, 0.0, 1.0), uv);
+    return VertexOut(vec4f(in.xy * 2.0 - 1.0, 0.0, 1.0), in.uv);
 }
 
 @fragment
