@@ -11,7 +11,7 @@ struct Uniforms {
 @group(1) @binding(0) var<storage, read> spec_data: array<f32>;
 
 struct VertexIn {
-    @builtin(vertex_index) vertex_index: u32,
+    @location(0) xy: vec2f,
 }
 
 struct VertexOut {
@@ -21,20 +21,11 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    var xy: vec2f;
-    switch in.vertex_index {
-        case 0u: { xy = vec2f(0.0, 0.0); }
-        case 1u: { xy = vec2f(1.0, 0.0); }
-        case 2u: { xy = vec2f(0.0, 1.0); }
-        case 3u: { xy = vec2f(0.0, 1.0); }
-        case 4u: { xy = vec2f(1.0, 0.0); }
-        default: { xy = vec2f(1.0, 1.0); }
-    }
     let uv = vec2f(
-        mix(uniforms.x_bounds.x, uniforms.x_bounds.y, xy.x),
-        mix(uniforms.y_bounds.x, uniforms.y_bounds.y, xy.y),
+        mix(uniforms.x_bounds.x, uniforms.x_bounds.y, in.xy.x),
+        mix(uniforms.y_bounds.x, uniforms.y_bounds.y, in.xy.y),
     );
-    return VertexOut(vec4f(xy * 2.0 - 1.0, 0.0, 1.0), uv);
+    return VertexOut(vec4f(in.xy * 2.0 - 1.0, 0.0, 1.0), uv);
 }
 
 @fragment

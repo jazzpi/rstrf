@@ -23,10 +23,37 @@ pub struct Uniforms {
     nchan: u32,
 }
 
-#[allow(dead_code)] // Keep buffers accessible for later features
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct Vertex {
+    xy: Vec2,
+}
+
+const VERTICES: [Vertex; 6] = [
+    Vertex {
+        xy: Vec2::new(0.0, 0.0),
+    },
+    Vertex {
+        xy: Vec2::new(1.0, 0.0),
+    },
+    Vertex {
+        xy: Vec2::new(0.0, 1.0),
+    },
+    Vertex {
+        xy: Vec2::new(1.0, 0.0),
+    },
+    Vertex {
+        xy: Vec2::new(1.0, 1.0),
+    },
+    Vertex {
+        xy: Vec2::new(0.0, 1.0),
+    },
+];
+
 struct Buffers {
     uniform: wgpu::Buffer,
     colormap: wgpu::Buffer,
+    vertex: wgpu::Buffer,
     spectrogram: wgpu::Buffer,
 }
 
@@ -62,7 +89,11 @@ impl shader::Pipeline for Pipeline {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                }],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState::default(),
@@ -179,6 +210,12 @@ impl Pipeline {
             ],
         });
 
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(format!("{prefix}.buffer.vertex").as_str()),
+            contents: bytemuck::cast_slice(&VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let (spectrogram_buffer, spectrogram_bind_group) =
             Self::create_spectrogram_buffers(device, pipeline, spectrogram);
 
@@ -186,6 +223,7 @@ impl Pipeline {
             buffers: Buffers {
                 uniform: uniform_buffer,
                 colormap: colormap_buffer,
+                vertex: vertex_buffer,
                 spectrogram: spectrogram_buffer,
             },
             bind_groups: BindGroups {
@@ -258,6 +296,7 @@ impl Pipeline {
         );
 
         pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, primitive_data.buffers.vertex.slice(..));
         pass.set_bind_group(0, &primitive_data.bind_groups.uniform, &[]);
         pass.set_bind_group(1, &primitive_data.bind_groups.spectrogram, &[]);
         pass.draw(0..6, 0..1);
