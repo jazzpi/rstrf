@@ -17,6 +17,7 @@ use super::{Controls, Message, MouseInteraction, RFPlot};
 #[repr(C)]
 pub struct Uniforms {
     power_bounds: Vec2,
+    pixel_size: Vec2,
     nslices: u32,
     nchan: u32,
 }
@@ -105,6 +106,7 @@ impl Pipeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         primitive: &Primitive,
+        viewport: &shader::Viewport,
     ) {
         let Some(spectrogram) = &primitive.spectrogram else {
             return;
@@ -123,15 +125,25 @@ impl Pipeline {
         let bounds = primitive.controls.bounds();
         let mut left = 0.0;
         for chunk in primitive_data.buffers.spectrogram.iter() {
+            let width = chunk.nslices as f32 / spectrogram.nslices as f32;
+            let pixel_size = Vec2::new(
+                bounds.0.width / viewport.physical_width() as f32 * spectrogram.nslices as f32,
+                bounds.0.height / viewport.physical_height() as f32 * spectrogram.nchan as f32,
+            );
+            log::debug!(
+                "Updating buffers for chunk with {} slices and pixel size {:?}",
+                chunk.nslices,
+                pixel_size
+            );
+
             let uniforms = Uniforms {
                 power_bounds: primitive.controls.power_range().into(),
                 nslices: chunk.nslices,
                 nchan: spectrogram.nchan as u32,
+                pixel_size,
             };
-
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
 
-            let width = chunk.nslices as f32 / spectrogram.nslices as f32;
             let xmin = (left - bounds.0.x) / bounds.0.width;
             let xmax = ((left + width) - bounds.0.x) / bounds.0.width;
             left += width;
@@ -372,9 +384,9 @@ impl shader::Primitive for Primitive {
         device: &iced::wgpu::Device,
         queue: &iced::wgpu::Queue,
         _bounds: &Rectangle,
-        _viewport: &shader::Viewport,
+        viewport: &shader::Viewport,
     ) {
-        pipeline.update_buffers(device, queue, self);
+        pipeline.update_buffers(device, queue, self, viewport);
     }
 
     fn render(
