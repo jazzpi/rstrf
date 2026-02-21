@@ -164,6 +164,7 @@ impl Satellite {
     ) -> (Array1<f64>, Array1<f64>) {
         let mut frequencies = Array1::zeros(times.len());
         let mut angles = Array1::zeros(times.len());
+        let mut warned = false;
         Zip::from(&times)
             .and(&mut frequencies)
             .and(&mut angles)
@@ -173,12 +174,15 @@ impl Satellite {
                 let prediction = match self.predict(&t) {
                     Ok(prediction) => prediction,
                     Err(e) => {
-                        log::warn!(
-                            "Failed to predict position for {} at time {}: {}",
-                            self.norad_id(),
-                            t,
-                            e
-                        );
+                        if !warned {
+                            log::warn!(
+                                "Failed to predict position for {} at time {}: {}",
+                                self.norad_id(),
+                                t,
+                                e
+                            );
+                            warned = true;
+                        }
                         *freq = f64::NAN;
                         *angle = f64::NAN;
                         return;
@@ -259,10 +263,11 @@ pub fn gmst_deriv_days(time: &NaiveDateTime) -> f64 {
 }
 
 pub fn predict_satellites(
-    satellites: Vec<Satellite>,
+    satellites: &[Satellite],
     start_time: DateTime<Utc>,
     length_s: f64,
     site: &Site,
+    visible_only: bool,
 ) -> Predictions {
     let times = ndarray::Array1::linspace(
         0.0, length_s, 1000, // TODO: number of points
@@ -270,10 +275,14 @@ pub fn predict_satellites(
     // TODO: Parallelize predictions?
     let (frequencies, zenith_angles) = satellites
         .iter()
-        .map(|sat| {
+        .filter_map(|sat| {
             let id = sat.norad_id();
             let (freq, za) = sat.predict_pass(start_time, times.view(), site);
-            ((id, freq), (id, za))
+            if visible_only && za.iter().all(|&angle| angle > std::f64::consts::FRAC_PI_2) {
+                None
+            } else {
+                Some(((id, freq), (id, za)))
+            }
         })
         .unzip();
     Predictions {
@@ -311,5 +320,9 @@ impl Predictions {
             frequency: self.frequencies.get(&id)?.view(),
             zenith_angle: self.zenith_angles.get(&id)?.view(),
         })
+    }
+
+    pub fn n_satellites(&self) -> usize {
+        self.frequencies.len()
     }
 }

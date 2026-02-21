@@ -128,6 +128,15 @@ impl Overlay {
                 else {
                     continue;
                 };
+                let first_visible =
+                    izip!(time.iter(), freq.iter(), za.iter()).position(|(&t, &f, &za)| {
+                        x.contains(&(t as f32))
+                            && y.contains(&(f as f32 - spectrogram.freq))
+                            && za < std::f64::consts::FRAC_PI_2
+                    });
+                let Some(first_visible) = first_visible else {
+                    continue;
+                };
 
                 chart
                     .draw_series(LineSeries::new(
@@ -143,15 +152,6 @@ impl Overlay {
                     .map_err(|e| format!("Could not draw line for satellite {}: {:?}", id, e))?
                     .label(format!("{:06}", id));
 
-                let first_visible =
-                    izip!(time.iter(), freq.iter(), za.iter()).position(|(&t, &f, &za)| {
-                        x.contains(&(t as f32))
-                            && y.contains(&(f as f32 - spectrogram.freq))
-                            && za < std::f64::consts::FRAC_PI_2
-                    });
-                let Some(first_visible) = first_visible else {
-                    continue;
-                };
                 let first_time = (time[first_visible] as f32).max(x.start);
                 let first_freq = freq[first_visible] as f32 - spectrogram.freq;
                 chart
@@ -502,6 +502,10 @@ impl Overlay {
                 self.predict_satellites(shared.spectrogram.as_ref(), app.config.site.as_ref())
             }
             Message::SetSatellitePredictions(predictions) => {
+                log::debug!(
+                    "Using {} satellite predictions",
+                    predictions.as_ref().map_or(0, |p| p.n_satellites())
+                );
                 self.satellite_predictions = predictions;
                 Task::none()
             }
@@ -552,7 +556,7 @@ impl Overlay {
         let site = site.clone();
         Task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
-                orbit::predict_satellites(satellites, start_time, length_s, &site)
+                orbit::predict_satellites(&satellites, start_time, length_s, &site, true)
             })
             .await;
             match result {
