@@ -21,8 +21,7 @@ env_logger = "0.11.8"
 log = "0.4.29"
 plotters = "0.3.7"
 duplicate = "2.0.1"
-# TODO: Switch to upstream version when https://github.com/neuromorphicsystems/sgp4/pull/20 is merged
-sgp4 = { git = "https://github.com/jazzpi/sgp4", branch = "dev", version = "2.3.0" }
+sgp4 = "2.4.0"
 ndarray-linalg = { version = "0.18.1", features = ["openblas-system"] }
 itertools = "0.14.0"
 copy-range = "0.1.1"
