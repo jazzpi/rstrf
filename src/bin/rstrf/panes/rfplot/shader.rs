@@ -32,6 +32,7 @@ struct Vertex {
 struct SpectrogramChunk {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
+    #[allow(dead_code)] // Keep this around in case we need it for future features
     spectrogram: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     nslices: u32,
@@ -256,15 +257,14 @@ impl Pipeline {
 
         let prefix = format!("spectrogram.{}", spectrogram.id);
 
-        let chunks = data
-            .chunks(chunk_size)
+        data.chunks(chunk_size)
             .enumerate()
             .map(|(i, chunk)| {
                 let prefix = format!("{}.chunk{}", prefix, i);
                 log::debug!(
                     "Creating chunk {} ({} bytes)",
                     prefix,
-                    chunk.len() * std::mem::size_of::<f32>(),
+                    std::mem::size_of_val(chunk)
                 );
                 let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(format!("{prefix}.buffer.vertex").as_str()),
@@ -311,8 +311,7 @@ impl Pipeline {
                     visible: true,
                 }
             })
-            .collect();
-        chunks
+            .collect()
     }
 
     fn render(
