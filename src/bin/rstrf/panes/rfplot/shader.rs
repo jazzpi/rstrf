@@ -35,6 +35,7 @@ struct SpectrogramChunk {
     spectrogram: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     nslices: u32,
+    visible: bool,
 }
 
 struct Buffers {
@@ -124,16 +125,20 @@ impl Pipeline {
 
         let bounds = primitive.controls.bounds();
         let mut left = 0.0;
-        for chunk in primitive_data.buffers.spectrogram.iter() {
+        for chunk in primitive_data.buffers.spectrogram.iter_mut() {
             let width = chunk.nslices as f32 / spectrogram.nslices as f32;
+            let xmin = (left - bounds.0.x) / bounds.0.width;
+            let xmax = ((left + width) - bounds.0.x) / bounds.0.width;
+            left += width;
+            chunk.visible = xmax > 0.0 && xmin < 1.0;
+
+            if !chunk.visible {
+                continue;
+            }
+
             let pixel_size = Vec2::new(
                 bounds.0.width / viewport.physical_width() as f32 * spectrogram.nslices as f32,
                 bounds.0.height / viewport.physical_height() as f32 * spectrogram.nchan as f32,
-            );
-            log::debug!(
-                "Updating buffers for chunk with {} slices and pixel size {:?}",
-                chunk.nslices,
-                pixel_size
             );
 
             let uniforms = Uniforms {
@@ -144,9 +149,6 @@ impl Pipeline {
             };
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
 
-            let xmin = (left - bounds.0.x) / bounds.0.width;
-            let xmax = ((left + width) - bounds.0.x) / bounds.0.width;
-            left += width;
             let vmin = bounds.0.y;
             let vmax = bounds.0.y + bounds.0.height;
             let vertices = [
@@ -306,6 +308,7 @@ impl Pipeline {
                     spectrogram: spectrogram_buffer,
                     bind_group,
                     nslices: (chunk.len() / spectrogram.nchan) as u32,
+                    visible: true,
                 }
             })
             .collect();
@@ -351,6 +354,9 @@ impl Pipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &primitive_data.buffers.colormap_bind, &[]);
         for chunk in &primitive_data.buffers.spectrogram {
+            if !chunk.visible {
+                continue;
+            }
             pass.set_vertex_buffer(0, chunk.vertices.slice(..));
             pass.set_bind_group(1, &chunk.bind_group, &[]);
             pass.draw(0..6, 0..1);
