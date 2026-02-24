@@ -58,7 +58,6 @@
               lockFile = ./Cargo.lock;
               outputHashes = {
                 "plotters-iced2-0.14.0" = "sha256-STEowCxh3PbSWhxGEcIAUxM3uXwdFaM7GKjpW666uSg=";
-                "sgp4-2.3.0" = "sha256-xxv1P3V1v7Y37DHGQrR/Vrk9jofKDB37nsDhygQkmnM=";
                 "space_track-0.1.0" = "sha256-P69yU53a5MIMvBvmzXfr+S+14F21pQPUvHema7skqp4=";
               };
             };
