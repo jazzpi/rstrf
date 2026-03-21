@@ -14,9 +14,8 @@ rSTRF uses GPU-accelerated plotting instead of STRF's pgplot, which enables
 fluid mouse-based panning and zooming in the waterfall. It also makes it easy to
 have multiple plots active at the same time.
 
-The different tech stack (Rust + Iced) should make building a bit easier for
-non-Debian systems (and theoretically even possible for Windows, although I
-haven't tested that).
+The different tech stack (Rust + Iced) makes building for Windows actually
+possible and should make building for non-Debian systems a bit easier.
 
 It is still very much alpha software, but at least stable enough that I use it
 regularly for my day job.
@@ -54,6 +53,23 @@ pkg-config
 openssl
 fontconfig
 ```
+
+### Windows
+
+Building on Windows is slightly more involved than on an average Linux system,
+mainly due to [`vcpkg`](https://vcpkg.io). If you don't have it installed, you
+can find instructions to do so
+[here](https://learn.microsoft.com/en-us/vcpkg/get_started/overview).
+
+After installing `vcpkg` (or if you already had it installed), it should be as
+simple as running:
+```sh
+vcpkg install openblas --triplet x64-windows
+```
+
+> [!TIP]
+> See [`openblas-src` repository README][openblas-src-readme] for more
+> information.
 
 ### Build
 
@@ -121,3 +137,5 @@ nix run github.com:jazzpi/rstrf#rsmedfilt --help
 # Other systems
 cargo run --bin rsmedfilt -- --help
 ```
+
+[openblas-src-readme]: https://github.com/blas-lapack-rs/openblas-src/blob/openblas-src-v0.10.14/README.md#windows-and-vcpkg
