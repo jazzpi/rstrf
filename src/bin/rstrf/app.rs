@@ -236,6 +236,7 @@ impl AppModel {
     fn open_window() -> Task<window::Id> {
         let (_, open) = window::open(Settings {
             platform_specific: PlatformSpecific {
+                #[cfg(target_os = "linux")]
                 application_id: "de.jazzpi.rstrf".into(),
                 ..Default::default()
             },
