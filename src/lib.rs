@@ -4,6 +4,7 @@ pub mod colormap;
 pub mod coord;
 pub mod menu;
 pub mod orbit;
+pub mod service;
 pub mod signal;
 pub mod spectrogram;
 pub mod util;

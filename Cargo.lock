@@ -4519,6 +4519,7 @@ dependencies = [
  "ndarray",
  "ndarray-linalg",
  "ndarray-stats",
+ "num-traits",
  "plotters",
  "plotters-iced2",
  "regex",
