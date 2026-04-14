@@ -39,24 +39,22 @@ impl From<sat_manager::Message> for Message {
     }
 }
 
+/// A cross-cutting effect that escapes a pane's own message type and must be handled by the parent.
+#[derive(Debug, Clone)]
+pub enum PaneEffect {
+    ToWorkspace(workspace::Message),
+}
+
+/// Return type for pane update functions: either a pane-local continuation or an escaped effect.
+#[derive(Debug, Clone)]
+pub enum PaneOut<M> {
+    Msg(M),
+    Effect(PaneEffect),
+}
+
+/// Shared interface for pane rendering and serialization. Does not include update logic, which is
+/// dispatched concretely by `AnyPane` so each pane can use its own message type without lifting.
 pub trait PaneWidget {
-    fn init(&mut self, _workspace: &WorkspaceShared, _app: &AppShared) -> Task<Message> {
-        Task::none()
-    }
-    fn update(
-        &mut self,
-        message: Message,
-        workspace: &WorkspaceShared,
-        app: &AppShared,
-    ) -> Task<Message>;
-    fn workspace_event(
-        &mut self,
-        _event: workspace::Event,
-        _workspace: &WorkspaceShared,
-        _app: &AppShared,
-    ) -> Task<Message> {
-        Task::none()
-    }
     fn view(
         &self,
         size: Size,
@@ -66,6 +64,99 @@ pub trait PaneWidget {
     fn title(&self) -> String;
     fn to_tree(&self) -> PaneTree;
 }
+
+/// A concrete enum over all pane types, used as the element type for `pane_grid::State`.
+///
+/// Unlike `Box<dyn PaneWidget>`, this allows `update`, `init`, and `workspace_event` to dispatch
+/// directly to each pane's own message type, so pane-internal code never references `panes::Message`.
+pub enum AnyPane {
+    RFPlot(Box<RFPlot>),
+    SatManager(Box<SatManager>),
+    Dummy(Box<Dummy>),
+}
+
+impl AnyPane {
+    fn as_dyn(&self) -> &dyn PaneWidget {
+        match self {
+            AnyPane::RFPlot(p) => p.as_ref(),
+            AnyPane::SatManager(p) => p.as_ref(),
+            AnyPane::Dummy(p) => p.as_ref(),
+        }
+    }
+
+    pub fn title(&self) -> String {
+        self.as_dyn().title()
+    }
+
+    pub fn view<'a>(
+        &'a self,
+        size: Size,
+        workspace: &'a WorkspaceShared,
+        app: &'a AppShared,
+    ) -> Element<'a, Message> {
+        self.as_dyn().view(size, workspace, app)
+    }
+
+    pub fn to_tree(&self) -> PaneTree {
+        self.as_dyn().to_tree()
+    }
+
+    pub fn init(&mut self, workspace: &WorkspaceShared, app: &AppShared) -> Task<Message> {
+        match self {
+            AnyPane::RFPlot(p) => p.init(workspace, app).map(Message::RFPlot),
+            AnyPane::SatManager(_) | AnyPane::Dummy(_) => Task::none(),
+        }
+    }
+
+    pub fn workspace_event(
+        &mut self,
+        event: workspace::Event,
+        workspace: &WorkspaceShared,
+        app: &AppShared,
+    ) -> Task<Message> {
+        match self {
+            AnyPane::RFPlot(p) => p
+                .workspace_event(event, workspace, app)
+                .map(Message::RFPlot),
+            AnyPane::SatManager(_) | AnyPane::Dummy(_) => Task::none(),
+        }
+    }
+
+    /// Dispatches the message to the correct pane's typed `update()`. The single lift from a
+    /// pane-local message type to `panes::Message` happens here, not inside each pane.
+    pub fn update(
+        &mut self,
+        message: Message,
+        workspace: &WorkspaceShared,
+        app: &AppShared,
+    ) -> Task<Message> {
+        match (self, message) {
+            (AnyPane::RFPlot(p), Message::RFPlot(m)) => {
+                p.update(m, workspace, app).map(Message::RFPlot)
+            }
+            (AnyPane::SatManager(p), Message::SatManager(m)) => {
+                p.update(m, workspace, app).map(|out| match out {
+                    PaneOut::Msg(m) => Message::SatManager(m),
+                    PaneOut::Effect(PaneEffect::ToWorkspace(w)) => Message::ToWorkspace(w),
+                })
+            }
+            (AnyPane::Dummy(p), m) => p.update(m, workspace, app),
+            _ => Task::none(),
+        }
+    }
+}
+
+impl From<&Pane> for AnyPane {
+    fn from(pane: &Pane) -> Self {
+        match pane {
+            Pane::RFPlot(p) => AnyPane::RFPlot(p.clone()),
+            Pane::SatManager(p) => AnyPane::SatManager(p.clone()),
+            Pane::Dummy(p) => AnyPane::Dummy(p.clone()),
+        }
+    }
+}
+
+pub type PaneGridState = pane_grid::State<AnyPane>;
 
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -133,8 +224,6 @@ impl std::fmt::Debug for Pane {
     }
 }
 
-pub type PaneGridState = pane_grid::State<Box<dyn PaneWidget>>;
-
 /// Generate a pane_grid::State from a (serializable) PaneTree
 ///
 /// Ideally, we could just uses pane_grid::State::from_configuration -- but we need the panes' IDs
@@ -151,9 +240,9 @@ pub fn from_workspace(
     app: &AppShared,
 ) -> anyhow::Result<(PaneGridState, Task<PaneMessage>)> {
     let leftmost = workspace.panes.leftmost_leaf();
-    let mut widget = build_widget(leftmost);
-    let task = widget.init(&workspace.shared, app);
-    let (mut state, initial_pane) = PaneGridState::new(widget);
+    let mut pane = AnyPane::from(leftmost);
+    let task = pane.init(&workspace.shared, app);
+    let (mut state, initial_pane) = PaneGridState::new(pane);
     let mut tasks = vec![task.map(move |message| PaneMessage {
         id: initial_pane,
         message,
@@ -186,10 +275,10 @@ fn build_rest(
         PaneTree::Leaf(_) => bail!("Unexpected leaf"),
         PaneTree::Split { axis, ratio, a, b } => {
             let right_leftmost = b.leftmost_leaf();
-            let mut widget = build_widget(right_leftmost);
-            let task = widget.init(workspace, app);
+            let mut pane = AnyPane::from(right_leftmost);
+            let task = pane.init(workspace, app);
             let (right_pane, split) = state
-                .split((*axis).into(), left_pane, widget)
+                .split((*axis).into(), left_pane, pane)
                 .ok_or(anyhow::anyhow!("Could not split pane"))?;
             state.resize(split, *ratio);
             tasks.push(task.map(move |message| PaneMessage {
@@ -202,14 +291,6 @@ fn build_rest(
 
             Ok(())
         }
-    }
-}
-
-fn build_widget(pane: &Pane) -> Box<dyn PaneWidget> {
-    match pane {
-        Pane::RFPlot(widget) => widget.clone(),
-        Pane::SatManager(widget) => widget.clone(),
-        Pane::Dummy(widget) => widget.clone(),
     }
 }
 

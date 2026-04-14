@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     app::{self, AppShared},
-    panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget},
+    panes::{Message as PaneMessage, Pane, PaneEffect, PaneOut, PaneTree, PaneWidget},
     widgets::{Icon, ToolbarButton, form::number_input, toolbar},
     workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
 };
@@ -139,7 +139,7 @@ impl SatManager {
         space_track: Option<Arc<Mutex<SpaceTrack>>>,
         mut satellites: Vec<(Satellite, bool)>,
         active_only: bool,
-    ) -> Task<PaneMessage> {
+    ) -> Task<PaneOut<Message>> {
         let Some(space_track) = space_track else {
             return Task::none();
         };
@@ -182,9 +182,9 @@ impl SatManager {
                     };
                     satellites[*idx].0.elements = elements;
                 }
-                Task::done(PaneMessage::ToWorkspace(
+                Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
                     WorkspaceMessage::SatellitesChanged(satellites.clone()),
-                ))
+                )))
             },
             Err(err) => {
                 log::error!("Failed to fetch data from Space-Track: {err}");
@@ -192,126 +192,119 @@ impl SatManager {
             }
         })
     }
+
+    pub fn update(
+        &mut self,
+        message: Message,
+        workspace: &workspace::WorkspaceShared,
+        app: &AppShared,
+    ) -> Task<PaneOut<Message>> {
+        match message {
+            Message::Nop => Task::none(),
+            Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
+                .and_then(|p| Task::done(PaneOut::Msg(Message::DoLoadTLEs(p)))),
+            Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
+                .and_then(|p| Task::done(PaneOut::Msg(Message::DoLoadFrequencies(p)))),
+            Message::DoLoadTLEs(path) => {
+                let frequencies = workspace.frequencies.clone();
+                Task::future(async move {
+                    let satellites: anyhow::Result<_> =
+                        rstrf::orbit::load_tles(&path, frequencies).await;
+                    satellites.map_err(|e| format!("{e:?}"))
+                })
+                .then(|result| match result {
+                    Ok(sats) => {
+                        log::info!("Loaded {} satellites", sats.len());
+                        Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
+                            WorkspaceMessage::SatellitesChanged(
+                                sats.into_iter().map(|sat| (sat, true)).collect(),
+                            ),
+                        )))
+                    }
+                    Err(err) => {
+                        log::error!("Failed to load satellites: {}", err);
+                        Task::none()
+                    }
+                })
+            }
+            Message::DoLoadFrequencies(path) => Task::future(async move {
+                rstrf::orbit::load_frequencies(&path)
+                    .await
+                    .map_err(|e| format!("{e:?}"))
+            })
+            .then(|result| match result {
+                Ok(freqs) => {
+                    log::info!("Loaded frequencies for {} satellites", freqs.len());
+                    Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
+                        WorkspaceMessage::FrequenciesChanged(freqs),
+                    )))
+                }
+                Err(err) => {
+                    log::error!("Failed to load frequencies: {}", err);
+                    Task::none()
+                }
+            }),
+            Message::SatelliteToggled(idx, active) => match workspace.satellites.get(idx) {
+                Some((sat, _)) => Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
+                    WorkspaceMessage::SatelliteChanged(idx, Box::new((sat.clone(), active))),
+                ))),
+                None => {
+                    log::error!("Got SatelliteToggle for non-existend index {}", idx);
+                    Task::none()
+                }
+            },
+            Message::ToggleAllSatellites => {
+                self.show_all = !self.show_all;
+                Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
+                    WorkspaceMessage::SatellitesChanged(
+                        workspace
+                            .satellites
+                            .iter()
+                            .map(|(sat, _)| (sat.clone(), self.show_all))
+                            .collect(),
+                    ),
+                )))
+            }
+            Message::SatelliteEdited(id, sat) => {
+                self.sat_buffer.insert(id, *sat);
+                Task::none()
+            }
+            Message::SatelliteEditCommited(idx) => {
+                match (self.sat_buffer.remove(&idx), workspace.satellites.get(idx)) {
+                    (Some(buf_data), Some(old_data)) => Task::done(PaneOut::Effect(
+                        PaneEffect::ToWorkspace(WorkspaceMessage::SatelliteChanged(
+                            idx,
+                            Box::new((buf_data, old_data.1)),
+                        )),
+                    )),
+                    _ => Task::none(),
+                }
+            }
+            Message::ToggleColumnControls => {
+                self.show_column_controls = !self.show_column_controls;
+                Task::none()
+            }
+            Message::ToggleColumn(column, visible) => {
+                self.columns.insert(column, visible);
+                Task::none()
+            }
+            Message::SpaceTrackToggle => {
+                self.show_spacetrack = !self.show_spacetrack;
+                Task::none()
+            }
+            Message::SpaceTrackUpdateAll => Self::spacetrack_update(
+                app.space_track.clone(),
+                workspace.satellites.clone(),
+                false,
+            ),
+            Message::SpaceTrackUpdateVisible => {
+                Self::spacetrack_update(app.space_track.clone(), workspace.satellites.clone(), true)
+            }
+        }
+    }
 }
 
 impl PaneWidget for SatManager {
-    fn update(
-        &mut self,
-        message: PaneMessage,
-        workspace: &workspace::WorkspaceShared,
-        app: &AppShared,
-    ) -> Task<PaneMessage> {
-        match message {
-            PaneMessage::SatManager(message) => match message {
-                Message::Nop => Task::none(),
-                Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
-                    .and_then(|p| Task::done(PaneMessage::SatManager(Message::DoLoadTLEs(p)))),
-                Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
-                    .and_then(|p| {
-                        Task::done(PaneMessage::SatManager(Message::DoLoadFrequencies(p)))
-                    }),
-                Message::DoLoadTLEs(path) => {
-                    let frequencies = workspace.frequencies.clone();
-                    Task::future(async move {
-                        let satellites: anyhow::Result<_> =
-                            rstrf::orbit::load_tles(&path, frequencies).await;
-                        satellites.map_err(|e| format!("{e:?}"))
-                    })
-                    .then(|result| match result {
-                        Ok(sats) => {
-                            log::info!("Loaded {} satellites", sats.len());
-                            Task::done(PaneMessage::ToWorkspace(
-                                WorkspaceMessage::SatellitesChanged(
-                                    sats.into_iter().map(|sat| (sat, true)).collect(),
-                                ),
-                            ))
-                        }
-                        Err(err) => {
-                            log::error!("Failed to load satellites: {}", err);
-                            Task::none()
-                        }
-                    })
-                }
-                Message::DoLoadFrequencies(path) => Task::future(async move {
-                    rstrf::orbit::load_frequencies(&path)
-                        .await
-                        .map_err(|e| format!("{e:?}"))
-                })
-                .then(|result| match result {
-                    Ok(freqs) => {
-                        log::info!("Loaded frequencies for {} satellites", freqs.len());
-                        Task::done(PaneMessage::ToWorkspace(
-                            WorkspaceMessage::FrequenciesChanged(freqs),
-                        ))
-                    }
-                    Err(err) => {
-                        log::error!("Failed to load frequencies: {}", err);
-                        Task::none()
-                    }
-                }),
-                Message::SatelliteToggled(idx, active) => match workspace.satellites.get(idx) {
-                    Some((sat, _)) => Task::done(PaneMessage::ToWorkspace(
-                        WorkspaceMessage::SatelliteChanged(idx, Box::new((sat.clone(), active))),
-                    )),
-                    None => {
-                        log::error!("Got SatelliteToggle for non-existend index {}", idx);
-                        Task::none()
-                    }
-                },
-                Message::ToggleAllSatellites => {
-                    self.show_all = !self.show_all;
-                    Task::done(PaneMessage::ToWorkspace(
-                        WorkspaceMessage::SatellitesChanged(
-                            workspace
-                                .satellites
-                                .iter()
-                                .map(|(sat, _)| (sat.clone(), self.show_all))
-                                .collect(),
-                        ),
-                    ))
-                }
-                Message::SatelliteEdited(id, sat) => {
-                    self.sat_buffer.insert(id, *sat);
-                    Task::none()
-                }
-                Message::SatelliteEditCommited(idx) => {
-                    match (self.sat_buffer.remove(&idx), workspace.satellites.get(idx)) {
-                        (Some(buf_data), Some(old_data)) => Task::done(PaneMessage::ToWorkspace(
-                            WorkspaceMessage::SatelliteChanged(
-                                idx,
-                                Box::new((buf_data, old_data.1)),
-                            ),
-                        )),
-                        _ => Task::none(),
-                    }
-                }
-                Message::ToggleColumnControls => {
-                    self.show_column_controls = !self.show_column_controls;
-                    Task::none()
-                }
-                Message::ToggleColumn(column, visible) => {
-                    self.columns.insert(column, visible);
-                    Task::none()
-                }
-                Message::SpaceTrackToggle => {
-                    self.show_spacetrack = !self.show_spacetrack;
-                    Task::none()
-                }
-                Message::SpaceTrackUpdateAll => Self::spacetrack_update(
-                    app.space_track.clone(),
-                    workspace.satellites.clone(),
-                    false,
-                ),
-                Message::SpaceTrackUpdateVisible => Self::spacetrack_update(
-                    app.space_track.clone(),
-                    workspace.satellites.clone(),
-                    true,
-                ),
-            },
-            _ => Task::none(),
-        }
-    }
-
     fn view(
         &self,
         _size: Size,

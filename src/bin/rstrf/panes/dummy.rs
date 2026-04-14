@@ -13,8 +13,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Dummy;
 
-impl PaneWidget for Dummy {
-    fn update(
+impl Dummy {
+    pub fn update(
         &mut self,
         _: panes::Message,
         _: &WorkspaceShared,
@@ -22,7 +22,9 @@ impl PaneWidget for Dummy {
     ) -> Task<panes::Message> {
         Task::none()
     }
+}
 
+impl PaneWidget for Dummy {
     fn view(&self, _: Size, _: &WorkspaceShared, _: &AppShared) -> Element<'_, panes::Message> {
         let pane = |name, pane| {
             button(text(name))

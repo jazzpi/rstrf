@@ -84,15 +84,13 @@ impl RFPlot {
             id,
         }
     }
-}
 
-impl PaneWidget for RFPlot {
-    fn init(&mut self, workspace: &WorkspaceShared, app: &AppShared) -> Task<PaneMessage> {
+    pub fn init(&mut self, workspace: &WorkspaceShared, app: &AppShared) -> Task<Message> {
         let spectrogram_task = if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
-                Message::LoadSpectrogram(self.shared.spectrogram_files.clone()).into(),
+                Message::LoadSpectrogram(self.shared.spectrogram_files.clone()),
                 workspace,
                 app,
             )
@@ -105,83 +103,70 @@ impl PaneWidget for RFPlot {
                 workspace,
                 app,
             )
-            .map(|m| PaneMessage::RFPlot(m.into()));
+            .map(Message::Overlay);
         Task::batch(vec![spectrogram_task, overlay_task])
     }
 
-    fn update(
+    pub fn update(
         &mut self,
-        message: PaneMessage,
+        message: Message,
         workspace: &WorkspaceShared,
         app: &AppShared,
-    ) -> Task<PaneMessage> {
+    ) -> Task<Message> {
         match message {
-            PaneMessage::RFPlot(message) => match message {
-                Message::Control(message) => self
-                    .shared
-                    .controls
-                    .update(message)
-                    .map(|m| PaneMessage::RFPlot(m.into())),
-                Message::Overlay(message) => self
-                    .overlay
-                    .update(message, &self.shared, workspace, app)
-                    .map(|m| PaneMessage::RFPlot(m.into())),
-                Message::LoadSpectrogram(paths) => Task::future(async move {
-                    let spec = rstrf::spectrogram::load(&paths).await;
-                    Message::SpectrogramLoaded(
-                        spec.map(|s| (paths, s)).map_err(|e| format!("{e:?}")),
-                    )
-                    .into()
-                }),
-                Message::SpectrogramLoaded(result) => match result {
-                    Ok((paths, spec)) => {
-                        log::info!("Loaded spectrogram: {spec:?}");
-                        self.shared.controls.set_power_bounds(spec.power_bounds);
-                        self.shared.spectrogram = Some(spec);
-                        self.shared.spectrogram_files = paths;
-                        self.overlay
-                            .update(
-                                overlay::Message::SpectrogramUpdated,
-                                &self.shared,
-                                workspace,
-                                app,
-                            )
-                            .map(|m| PaneMessage::RFPlot(m.into()))
-                    }
-                    Err(err) => {
-                        log::error!("Failed to load spectrogram: {err}");
-                        Task::none()
-                    }
-                },
-                Message::PickSpectrogram => Task::future(async {
-                    let files = AsyncFileDialog::new()
-                        .add_filter("RFFFT spectrograms", &["bin"])
-                        .add_filter("All files", &["*"])
-                        .pick_files()
-                        .await;
-                    if let Some(files) = files
-                        && !files.is_empty()
-                    {
-                        Message::LoadSpectrogram(
-                            files.iter().map(|f| f.path().to_path_buf()).collect(),
+            Message::Control(message) => self.shared.controls.update(message).map(Message::Control),
+            Message::Overlay(message) => self
+                .overlay
+                .update(message, &self.shared, workspace, app)
+                .map(Message::Overlay),
+            Message::LoadSpectrogram(paths) => Task::future(async move {
+                let spec = rstrf::spectrogram::load(&paths).await;
+                Message::SpectrogramLoaded(spec.map(|s| (paths, s)).map_err(|e| format!("{e:?}")))
+            }),
+            Message::SpectrogramLoaded(result) => match result {
+                Ok((paths, spec)) => {
+                    log::info!("Loaded spectrogram: {spec:?}");
+                    self.shared.controls.set_power_bounds(spec.power_bounds);
+                    self.shared.spectrogram = Some(spec);
+                    self.shared.spectrogram_files = paths;
+                    self.overlay
+                        .update(
+                            overlay::Message::SpectrogramUpdated,
+                            &self.shared,
+                            workspace,
+                            app,
                         )
-                        .into()
-                    } else {
-                        Message::Nop.into()
-                    }
-                }),
-                Message::Nop => Task::none(),
+                        .map(Message::Overlay)
+                }
+                Err(err) => {
+                    log::error!("Failed to load spectrogram: {err}");
+                    Task::none()
+                }
             },
-            _ => Task::none(),
+            Message::PickSpectrogram => Task::future(async {
+                let files = AsyncFileDialog::new()
+                    .add_filter("RFFFT spectrograms", &["bin"])
+                    .add_filter("All files", &["*"])
+                    .pick_files()
+                    .await;
+                if let Some(files) = files
+                    && !files.is_empty()
+                {
+                    Message::LoadSpectrogram(files.iter().map(|f| f.path().to_path_buf()).collect())
+                } else {
+                    Message::Nop
+                }
+            }),
+            Message::Nop => Task::none(),
         }
     }
 
-    fn workspace_event(
+    pub fn workspace_event(
         &mut self,
-        event: crate::workspace::Event,
+        event: Event,
         workspace: &WorkspaceShared,
         app: &AppShared,
-    ) -> Task<PaneMessage> {
+    ) -> Task<Message> {
         match event {
             Event::SatellitesChanged => self
                 .overlay
@@ -191,7 +176,7 @@ impl PaneWidget for RFPlot {
                     workspace,
                     app,
                 )
-                .map(|m| PaneMessage::RFPlot(m.into())),
+                .map(Message::Overlay),
             Event::App(event) => match event {
                 AppEvent::ConfigUpdated => self
                     .overlay
@@ -201,11 +186,13 @@ impl PaneWidget for RFPlot {
                         workspace,
                         app,
                     )
-                    .map(|m| PaneMessage::RFPlot(m.into())),
+                    .map(Message::Overlay),
             },
         }
     }
+}
 
+impl PaneWidget for RFPlot {
     fn view(
         &self,
         _size: Size,

@@ -48,7 +48,7 @@ impl Window {
     pub fn init(path: Option<PathBuf>) -> (Self, Task<super::Message>) {
         let mut tasks: Vec<Task<super::Message>> = Vec::new();
 
-        let (panes, _) = panes::PaneGridState::new(Box::new(panes::dummy::Dummy));
+        let (panes, _) = panes::PaneGridState::new(panes::AnyPane::Dummy(Box::new(panes::dummy::Dummy)));
 
         if let Some(ref path) = path {
             tasks.push(Task::done(Message::WorkspaceDoLoad(path.clone()).into()));
@@ -206,11 +206,7 @@ impl super::Window for Window {
                     Message::PaneMessage(id, pane_message) => match pane_message {
                         panes::Message::ReplacePane(new_pane) => {
                             if let Some(pane) = self.panes.get_mut(id) {
-                                *pane = match new_pane {
-                                    panes::Pane::RFPlot(inner) => inner.clone(),
-                                    panes::Pane::SatManager(inner) => inner.clone(),
-                                    panes::Pane::Dummy(inner) => inner.clone(),
-                                };
+                                *pane = panes::AnyPane::from(&new_pane);
                                 return pane
                                     .init(&self.workspace.shared, app)
                                     .map(move |msg| Message::PaneMessage(id, msg).into());
@@ -261,7 +257,7 @@ impl super::Window for Window {
                         }
                     }
                     Message::SplitPane(pane, axis) => {
-                        self.panes.split(axis, pane, Box::new(Dummy));
+                        self.panes.split(axis, pane, panes::AnyPane::Dummy(Box::new(Dummy)));
                     }
                     Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                         self.panes.drop(pane, target);
