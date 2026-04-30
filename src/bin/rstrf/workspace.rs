@@ -80,7 +80,7 @@ impl Workspace {
                     }
                 });
                 self.shared.frequencies = freqs;
-                Task::none()
+                Task::done(Event::SatellitesChanged)
             }
         }
     }

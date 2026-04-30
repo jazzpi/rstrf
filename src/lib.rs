@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+pub mod async_cache;
 pub mod colormap;
 pub mod coord;
 pub mod menu;

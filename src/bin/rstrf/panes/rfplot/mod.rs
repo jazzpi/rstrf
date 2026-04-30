@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    app::{AppEvent, AppShared},
+    app::AppShared,
     panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget, rfplot::control::Controls},
     workspace::{Event, WorkspaceShared},
 };
@@ -86,7 +86,7 @@ impl RFPlot {
     }
 
     pub fn init(&mut self, workspace: &WorkspaceShared, app: &AppShared) -> Task<Message> {
-        let spectrogram_task = if self.shared.spectrogram_files.is_empty() {
+        if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
@@ -94,17 +94,7 @@ impl RFPlot {
                 workspace,
                 app,
             )
-        };
-        let overlay_task = self
-            .overlay
-            .update(
-                overlay::Message::UpdatePredictions,
-                &self.shared,
-                workspace,
-                app,
-            )
-            .map(Message::Overlay);
-        Task::batch(vec![spectrogram_task, overlay_task])
+        }
     }
 
     pub fn update(
@@ -163,32 +153,14 @@ impl RFPlot {
 
     pub fn workspace_event(
         &mut self,
-        event: Event,
+        _event: Event,
         workspace: &WorkspaceShared,
         app: &AppShared,
     ) -> Task<Message> {
-        match event {
-            Event::SatellitesChanged => self
-                .overlay
-                .update(
-                    overlay::Message::UpdatePredictions,
-                    &self.shared,
-                    workspace,
-                    app,
-                )
-                .map(Message::Overlay),
-            Event::App(event) => match event {
-                AppEvent::ConfigUpdated => self
-                    .overlay
-                    .update(
-                        overlay::Message::UpdatePredictions,
-                        &self.shared,
-                        workspace,
-                        app,
-                    )
-                    .map(Message::Overlay),
-            },
-        }
+        // Trigger a prediction cache check
+        self.overlay
+            .update(overlay::Message::RefreshCache, &self.shared, workspace, app)
+            .map(Message::Overlay)
     }
 }
 

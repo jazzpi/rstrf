@@ -2,6 +2,7 @@
 //! itself (like axes and overlays). It is also responsible for the user interaction with the plot
 //! (like panning/zooming).
 
+use chrono::{DateTime, Duration, Utc};
 use copy_range::CopyRange;
 use iced::{Rectangle, Task, event::Status, keyboard, mouse, widget::canvas};
 use itertools::{Itertools, izip};
@@ -12,16 +13,46 @@ use rstrf::{
         DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
         ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
-    orbit::{self, SatPrediction, Site},
+    orbit::{self, SatPrediction, Satellite, Site},
     signal,
-    spectrogram::Spectrogram,
     util::clip_line,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{app::AppShared, workspace::WorkspaceShared};
+use rstrf::async_cache::AsyncCache;
 
 use super::{MouseInteraction, RFPlot, SharedState, control};
+
+/// All inputs that determine the satellite pass predictions. Keyed by value so the cache can detect
+/// any change — to satellites, spectrogram time window, or observer site — without an explicit
+/// invalidation call.
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) struct PredictionKey {
+    satellites: Vec<Satellite>,
+    start_time: DateTime<Utc>,
+    length: Duration,
+    site: Site,
+}
+
+fn prediction_key(
+    shared: &SharedState,
+    workspace: &WorkspaceShared,
+    app: &AppShared,
+) -> Option<PredictionKey> {
+    let spectrogram = shared.spectrogram.as_ref()?;
+    let site = app.config.site.as_ref()?.clone();
+    let satellites = workspace.active_satellites();
+    if satellites.is_empty() {
+        return None;
+    }
+    Some(PredictionKey {
+        satellites,
+        start_time: spectrogram.start_time,
+        length: spectrogram.length(),
+        site,
+    })
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -29,9 +60,12 @@ pub enum Message {
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
-    UpdatePredictions,
-    SetSatellitePredictions(Option<orbit::Predictions>),
     SpectrogramUpdated,
+    /// Trigger a prediction cache check without any other side effects. Send this when workspace
+    /// state (satellites, site) changes but the spectrogram is unchanged.
+    RefreshCache,
+    PredictionsReady(PredictionKey, orbit::Predictions),
+    PredictionFailed,
     TogglePredictions,
     ToggleGrid,
     ToggleCrosshair,
@@ -50,9 +84,8 @@ fn clamp_line_to_plot(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Overlay {
-    satellites: Vec<orbit::Satellite>,
     #[serde(skip)]
-    satellite_predictions: Option<orbit::Predictions>,
+    prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>,
     show_predictions: bool,
     show_grid: bool,
     show_crosshair: bool,
@@ -65,8 +98,7 @@ pub(super) struct Overlay {
 impl Default for Overlay {
     fn default() -> Self {
         Self {
-            satellites: Default::default(),
-            satellite_predictions: Default::default(),
+            prediction_cache: AsyncCache::default(),
             show_predictions: true,
             show_grid: Default::default(),
             track_points: Default::default(),
@@ -115,16 +147,16 @@ impl Overlay {
             .map_err(|e| format!("Failed to draw mesh: {:?}", e))?;
 
         if self.show_predictions
-            && let Some(satellite_predictions) = &self.satellite_predictions
+            && let Some((key, predictions)) = self.prediction_cache.get_stored()
         {
-            let time = &satellite_predictions.times;
-            for sat in &self.satellites {
+            let time = &predictions.times;
+            for sat in &key.satellites {
                 let id = sat.norad_id();
                 log::trace!("Plotting satellite {}", id);
                 let Some(SatPrediction {
                     frequency: freq,
                     zenith_angle: za,
-                }) = &satellite_predictions.for_id(id)
+                }) = &predictions.for_id(id)
                 else {
                     continue;
                 };
@@ -426,6 +458,44 @@ impl Overlay {
         }
     }
 
+    /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
+    /// recomputation. Called at the top of every `update()` so any incoming message acts as a
+    /// trigger.
+    fn check_cache(
+        &mut self,
+        shared: &SharedState,
+        workspace: &WorkspaceShared,
+        app: &AppShared,
+    ) -> Task<Message> {
+        let Some(key) = prediction_key(shared, workspace, app) else {
+            self.prediction_cache.reset();
+            return Task::none();
+        };
+        self.prediction_cache.request(key, |key| {
+            let length_s = key.length.num_milliseconds() as f64 / 1000.0;
+            Task::future(async move {
+                let key_for_msg = key.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    orbit::predict_satellites(
+                        &key.satellites,
+                        key.start_time,
+                        length_s,
+                        &key.site,
+                        true,
+                    )
+                })
+                .await;
+                match result {
+                    Ok(predictions) => Message::PredictionsReady(key_for_msg, predictions),
+                    Err(e) => {
+                        log::error!("Failed to predict satellite passes: {}", e);
+                        Message::PredictionFailed
+                    }
+                }
+            })
+        })
+    }
+
     pub fn update(
         &mut self,
         message: Message,
@@ -433,7 +503,9 @@ impl Overlay {
         workspace: &WorkspaceShared,
         app: &AppShared,
     ) -> Task<Message> {
-        match message {
+        let cache_task = self.check_cache(shared, workspace, app);
+
+        let msg_task = match message {
             Message::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
                 match self
@@ -451,7 +523,7 @@ impl Overlay {
                 } else {
                     let Some(spectrogram) = &shared.spectrogram else {
                         log::error!("No spectrogram loaded, cannot find signals");
-                        return Task::none();
+                        return cache_task;
                     };
                     let spectrogram = spectrogram.clone();
                     let track_points = self.track_points.clone();
@@ -497,24 +569,21 @@ impl Overlay {
                 });
                 Task::none()
             }
-            Message::UpdatePredictions => {
-                self.satellites = workspace.active_satellites();
-                self.predict_satellites(shared.spectrogram.as_ref(), app.config.site.as_ref())
-            }
-            Message::SetSatellitePredictions(predictions) => {
-                log::debug!(
-                    "Using {} satellite predictions",
-                    predictions.as_ref().map_or(0, |p| p.n_satellites())
-                );
-                self.satellite_predictions = predictions;
-                Task::none()
-            }
             Message::SpectrogramUpdated => {
-                self.satellite_predictions = None;
                 self.track_points.clear();
                 self.signals.clear();
                 self.crosshair = None;
-                self.predict_satellites(shared.spectrogram.as_ref(), app.config.site.as_ref())
+                Task::none()
+            }
+            Message::RefreshCache => Task::none(),
+            Message::PredictionsReady(key, predictions) => {
+                log::debug!("Using {} satellite predictions", predictions.n_satellites());
+                self.prediction_cache.store(key, predictions);
+                Task::none()
+            }
+            Message::PredictionFailed => {
+                log::error!("Prediction failed");
+                Task::none()
             }
             Message::TogglePredictions => {
                 self.show_predictions = !self.show_predictions;
@@ -528,45 +597,9 @@ impl Overlay {
                 self.show_crosshair = !self.show_crosshair;
                 Task::none()
             }
-        }
-    }
-
-    fn predict_satellites(
-        &self,
-        spectrogram: Option<&Spectrogram>,
-        site: Option<&Site>,
-    ) -> Task<Message> {
-        let Some(spectrogram) = spectrogram else {
-            log::debug!("No spectrogram loaded, skipping pass predictions");
-            return Task::done(Message::SetSatellitePredictions(None));
         };
-        let Some(site) = site else {
-            log::debug!("No site configured, skipping pass predictions");
-            return Task::done(Message::SetSatellitePredictions(None));
-        };
-        if self.satellites.is_empty() {
-            return Task::done(Message::SetSatellitePredictions(None));
-        }
 
-        log::debug!("Predicting {} satellites", self.satellites.len());
-        let satellites = self.satellites.clone();
-
-        let start_time = spectrogram.start_time;
-        let length_s = spectrogram.length().as_seconds_f64();
-        let site = site.clone();
-        Task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                orbit::predict_satellites(&satellites, start_time, length_s, &site, true)
-            })
-            .await;
-            match result {
-                Ok(predictions) => Message::SetSatellitePredictions(Some(predictions)),
-                Err(e) => {
-                    log::error!("Failed to predict satellite passes: {}", e);
-                    Message::SetSatellitePredictions(None)
-                }
-            }
-        })
+        Task::batch([cache_task, msg_task])
     }
 }
 
