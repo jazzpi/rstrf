@@ -14,6 +14,7 @@ debian/*
 !debian/source
 
 .vscode/
+.claude/
 
 # `nix build` output
 result
