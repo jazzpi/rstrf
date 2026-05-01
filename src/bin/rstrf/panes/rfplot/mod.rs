@@ -141,7 +141,9 @@ impl RFPlot {
             },
             Message::PickSpectrogram => Task::future(async {
                 let files = AsyncFileDialog::new()
-                    .add_filter("RFFFT spectrograms", &["bin"])
+                    .add_filter("Supported spectrogram formats", &["rstrf", "bin"])
+                    .add_filter("rSTRF spectrograms", &["rstrf"])
+                    .add_filter("STRF spectrograms", &["bin"])
                     .add_filter("All files", &["*"])
                     .pick_files()
                     .await;
