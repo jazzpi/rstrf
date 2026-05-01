@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::{app::AppShared, workspace::WorkspaceShared};
 use rstrf::async_cache::AsyncCache;
 
-use super::{MouseInteraction, RFPlot, SharedState, control};
+use super::{DragState, MouseInteraction, RFPlot, SharedState, control};
 
 /// All inputs that determine the satellite pass predictions. Keyed by value so the cache can detect
 /// any change — to satellites, spectrogram time window, or observer site — without an explicit
@@ -346,18 +346,27 @@ impl Overlay {
                 height: bounds.height,
             };
             if cursor.is_over(bounds) {
+                if state.modifiers.shift() {
+                    return (
+                        Status::Captured,
+                        Some(CMessage::ZoomDeltaX(plot_pos, *delta).into()),
+                    );
+                } else if state.modifiers.control() {
+                    return (
+                        Status::Captured,
+                        Some(CMessage::ZoomDeltaY(plot_pos, *delta).into()),
+                    );
+                }
                 return (
                     Status::Captured,
                     Some(CMessage::ZoomDelta(plot_pos, *delta).into()),
                 );
             } else if cursor.is_over(y_axis) {
-                // Zooming over y axis
                 return (
                     Status::Captured,
                     Some(CMessage::ZoomDeltaY(plot_pos, *delta).into()),
                 );
             } else if cursor.is_over(x_axis) {
-                // Zooming over x axis
                 return (
                     Status::Captured,
                     Some(CMessage::ZoomDeltaX(plot_pos, *delta).into()),
@@ -365,11 +374,11 @@ impl Overlay {
             }
         }
 
-        match state {
-            MouseInteraction::Idle => match event {
+        match state.drag {
+            DragState::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     if cursor.is_over(bounds) {
-                        *state = MouseInteraction::Panning(plot_pos);
+                        state.drag = DragState::Panning(plot_pos);
                         return (Status::Captured, None);
                     }
                 }
@@ -388,13 +397,13 @@ impl Overlay {
                 }
                 _ => {}
             },
-            MouseInteraction::Panning(prev_pos) => match event {
+            DragState::Panning(prev_pos) => match event {
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    *state = MouseInteraction::Idle;
+                    state.drag = DragState::Idle;
                 }
                 mouse::Event::CursorMoved { position: _ } => {
-                    let delta = plot_pos - *prev_pos;
-                    *state = MouseInteraction::Panning(plot_pos);
+                    let delta = plot_pos - prev_pos;
+                    state.drag = DragState::Panning(plot_pos);
                     return (Status::Captured, Some(CMessage::PanningDelta(delta).into()));
                 }
                 _ => {}
@@ -640,6 +649,10 @@ impl Chart<super::Message> for RFPlot {
                     .handle_mouse(state, event, bounds, cursor, &self.shared)
             }
             canvas::Event::Keyboard(event) => {
+                if let keyboard::Event::ModifiersChanged(modifiers) = event {
+                    state.modifiers = *modifiers;
+                    return (Status::Ignored, None);
+                }
                 self.overlay
                     .handle_keyboard(state, event, bounds, cursor, &self.shared)
             }
@@ -657,9 +670,9 @@ impl Chart<super::Message> for RFPlot {
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if cursor.is_over(bounds) {
-            match state {
-                MouseInteraction::Idle => mouse::Interaction::Idle,
-                MouseInteraction::Panning(_) => mouse::Interaction::Grabbing,
+            match state.drag {
+                DragState::Idle => mouse::Interaction::Idle,
+                DragState::Panning(_) => mouse::Interaction::Grabbing,
             }
         } else {
             mouse::Interaction::Idle

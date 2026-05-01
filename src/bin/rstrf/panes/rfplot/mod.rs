@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use iced::{
-    Element, Length, Padding, Size, Task,
+    Element, Length, Padding, Size, Task, keyboard,
     widget::{self, button, container},
 };
 use iced_aw::{menu_bar, menu_items};
@@ -48,7 +48,13 @@ impl From<overlay::Message> for Message {
 }
 
 #[derive(Default)]
-pub enum MouseInteraction {
+pub struct MouseInteraction {
+    pub drag: DragState,
+    pub modifiers: keyboard::Modifiers,
+}
+
+#[derive(Default, Clone, Copy)]
+pub enum DragState {
     #[default]
     Idle,
     Panning(plot_area::Point),
