@@ -51,3 +51,6 @@ debug = true
 [lints.clippy]
 # More concise for cases like .filter_map(|flag, val| flag.then(|| val))
 filter_map_bool_then = "allow"
+
+[dev-dependencies]
+tempfile = "3.27.0"

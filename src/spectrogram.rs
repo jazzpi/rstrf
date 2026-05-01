@@ -15,7 +15,28 @@ use uuid::Uuid;
 
 use crate::coord::data_absolute;
 
-/// Loads a spectrogram from the given file paths
+const RSTRF_MAGIC: &[u8; 8] = b"RSTRF\x01\n\0";
+/// Sentinel dB value written to gap slots in `.rstrf` files.
+pub const FILL_DB: f32 = -120.0;
+
+/// Raw spectrum read from a strf `.bin` file, including its per-spectrum timestamp.
+pub struct RawStrfSpectrum {
+    pub time: DateTime<Utc>,
+    /// Linear (not dB) power values, one per frequency channel.
+    pub power_linear: Vec<f32>,
+}
+
+/// Parameters shared by all spectra in a strf `.bin` file.
+pub struct StrfParams {
+    pub freq: f32,
+    pub bw: f32,
+    pub nchan: usize,
+}
+
+/// Loads a spectrogram from the given file paths.
+///
+/// Files ending in `.rstrf` are loaded as the constant-rate RSTRF format;
+/// all other files are treated as strf `.bin` files.
 pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
     if paths.is_empty() {
         bail!("No files provided");
@@ -32,8 +53,37 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
     Spectrogram::concatenate(&spectrograms)
 }
 
-/// Writes a spectrogram to the given file path
+/// Writes a spectrogram to the given file path in the RSTRF format.
 pub async fn save(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
+    let mut file = tokio::fs::File::create(path).await?;
+    let mut writer = tokio::io::BufWriter::new(&mut file);
+
+    // Header (64 bytes total)
+    writer.write_all(RSTRF_MAGIC).await?;
+    writer
+        .write_i64_le(spectrogram.start_time.timestamp_millis())
+        .await?;
+    writer.write_f64_le(spectrogram.freq as f64).await?;
+    writer.write_f64_le(spectrogram.bw as f64).await?;
+    writer.write_f64_le(spectrogram.slice_length as f64).await?;
+    writer.write_u32_le(spectrogram.nchan as u32).await?;
+    writer.write_u32_le(spectrogram.nslices as u32).await?;
+    writer.write_all(&[0u8; 16]).await?; // reserved
+
+    // Data: nslices * nchan f32 dB values, little-endian, row-major
+    for &value in spectrogram.data().iter() {
+        writer.write_f32_le(value).await?;
+    }
+
+    writer.flush().await?;
+    Ok(())
+}
+
+/// Writes a spectrogram to the given file path in the strf `.bin` format.
+///
+/// Use this when you need the output to be compatible with `rfplot` or other
+/// strf tools. For rstrf-internal use, prefer [`save`].
+pub async fn save_strf(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
     let mut file = tokio::fs::File::create(path).await?;
     let mut writer = tokio::io::BufWriter::new(&mut file);
 
@@ -72,7 +122,58 @@ END
         }
     }
 
+    writer.flush().await?;
     Ok(())
+}
+
+/// Reads all spectra from a strf `.bin` file with their per-spectrum timestamps.
+///
+/// Unlike [`load_strf_file`], this function does not enforce timestamp regularity, making
+/// it suitable for use by converters that need to handle gaps or jitter.
+pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, StrfParams)> {
+    let file = tokio::fs::File::open(path).await?;
+    let file_size = file.metadata().await?.len() as usize;
+    let mut reader = tokio::io::BufReader::new(file);
+
+    let first_header = parse_header(&mut reader)
+        .await
+        .context("Failed to parse header")?;
+    let params = StrfParams {
+        freq: first_header.freq,
+        bw: first_header.bw,
+        nchan: first_header.nchan,
+    };
+
+    let data_block_size = first_header.nchan * 4;
+    let n_blocks = file_size / (data_block_size + HEADER_SIZE);
+    let mut spectra = Vec::with_capacity(n_blocks);
+
+    let mut power = vec![0f32; first_header.nchan];
+    for v in power.iter_mut() {
+        *v = reader.read_f32_le().await?;
+    }
+    spectra.push(RawStrfSpectrum {
+        time: first_header.start_time,
+        power_linear: power,
+    });
+
+    while spectra.len() < n_blocks {
+        let header = parse_header(&mut reader).await?;
+        ensure!(
+            params.freq == header.freq && params.bw == header.bw && params.nchan == header.nchan,
+            "Inconsistent spectrogram parameters detected"
+        );
+        let mut power = vec![0f32; header.nchan];
+        for v in power.iter_mut() {
+            *v = reader.read_f32_le().await?;
+        }
+        spectra.push(RawStrfSpectrum {
+            time: header.start_time,
+            power_linear: power,
+        });
+    }
+
+    Ok((spectra, params))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,7 +260,7 @@ impl Spectrogram {
                 (spectrogram.start_time - prev.end_time())
                     .num_milliseconds()
                     .abs()
-                    < 500,
+                    < 10,
                 "Non-contiguous spectrograms during concatenation (expected {}, got {})",
                 prev.end_time(),
                 spectrogram.start_time
@@ -231,6 +332,67 @@ impl Spectrogram {
 }
 
 async fn load_file(path: &Path) -> Result<Spectrogram> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("rstrf") => load_rstrf_file(path).await,
+        _ => load_strf_file(path).await,
+    }
+}
+
+async fn load_rstrf_file(path: &Path) -> Result<Spectrogram> {
+    let file = tokio::fs::File::open(path).await?;
+    let mut reader = tokio::io::BufReader::new(file);
+
+    let mut magic = [0u8; 8];
+    reader
+        .read_exact(&mut magic)
+        .await
+        .context("Failed to read magic bytes")?;
+    ensure!(&magic == RSTRF_MAGIC, "Not an RSTRF file (bad magic bytes)");
+
+    let start_time_ms = reader.read_i64_le().await?;
+    let freq = reader.read_f64_le().await? as f32;
+    let bw = reader.read_f64_le().await? as f32;
+    let slice_length = reader.read_f64_le().await? as f32;
+    let nchan = reader.read_u32_le().await? as usize;
+    let nslices = reader.read_u32_le().await? as usize;
+    // reserved
+    let mut _reserved = [0u8; 16];
+    reader.read_exact(&mut _reserved).await?;
+
+    let start_time = DateTime::from_timestamp_millis(start_time_ms)
+        .ok_or_else(|| anyhow!("Invalid start timestamp: {}", start_time_ms))?;
+
+    let mut data_db = vec![0f32; nslices * nchan];
+    for v in data_db.iter_mut() {
+        *v = reader.read_f32_le().await?;
+    }
+
+    let data = ArcArray2::from_shape_vec((nslices, nchan), data_db)?;
+    let min = data
+        .iter()
+        .cloned()
+        .filter(|&v| v > FILL_DB)
+        .fold(f32::INFINITY, f32::min);
+    let max = data
+        .iter()
+        .cloned()
+        .filter(|&v| v > FILL_DB)
+        .fold(f32::NEG_INFINITY, f32::max);
+
+    Ok(Spectrogram {
+        id: Uuid::new_v4(),
+        start_time,
+        nchan,
+        nslices,
+        freq,
+        bw,
+        slice_length,
+        power_bounds: (min, max),
+        data: data.into(),
+    })
+}
+
+async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
     let file = tokio::fs::File::open(path).await?;
     let file_size = file.metadata().await?.len() as usize;
     let mut reader = tokio::io::BufReader::new(file);
@@ -466,5 +628,30 @@ mod tests {
     fn set_data_accepts_correct_shape() {
         let mut spec = make_spec(test_start(), 5, 1024, 1.0);
         assert!(spec.set_data(ArcArray2::zeros((5, 1024))).is_ok());
+    }
+
+    #[tokio::test]
+    async fn save_load_rstrf_roundtrip() {
+        let start = test_start();
+        let spec = make_spec(start, 10, 64, 1.5);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.rstrf");
+
+        save(&spec, &path).await.unwrap();
+        let loaded = load(&[path]).await.unwrap();
+
+        assert_eq!(loaded.nslices, spec.nslices);
+        assert_eq!(loaded.nchan, spec.nchan);
+        assert_eq!(loaded.start_time, spec.start_time);
+        assert!((loaded.freq - spec.freq).abs() < 1.0);
+        assert!((loaded.bw - spec.bw).abs() < 1.0);
+        assert!((loaded.slice_length - spec.slice_length).abs() < 1e-4);
+
+        let orig = spec.data();
+        let got = loaded.data();
+        for (&a, &b) in orig.iter().zip(got.iter()) {
+            assert!((a - b).abs() < 1e-4, "dB mismatch: {} vs {}", a, b);
+        }
     }
 }
