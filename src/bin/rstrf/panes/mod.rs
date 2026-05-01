@@ -313,3 +313,61 @@ pub fn to_tree(state: &PaneGridState, layout: &pane_grid::Node) -> Option<PaneTr
     };
     Some(node)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::panes::{rfplot::RFPlot, sat_manager::SatManager};
+
+    #[test]
+    fn leftmost_leaf_of_leaf_is_itself() {
+        let tree = PaneTree::Leaf(Pane::RFPlot(Box::new(RFPlot::new())));
+        assert!(matches!(tree.leftmost_leaf(), Pane::RFPlot(_)));
+    }
+
+    #[test]
+    fn leftmost_leaf_of_split_is_left_child() {
+        let tree = PaneTree::Split {
+            axis: SplitAxis::Vertical,
+            ratio: 0.7,
+            a: Box::new(PaneTree::Leaf(Pane::RFPlot(Box::new(RFPlot::new())))),
+            b: Box::new(PaneTree::Leaf(Pane::SatManager(
+                Box::new(SatManager::new()),
+            ))),
+        };
+        assert!(matches!(tree.leftmost_leaf(), Pane::RFPlot(_)));
+    }
+
+    #[test]
+    fn leftmost_leaf_of_nested_split_descends_into_a() {
+        let tree = PaneTree::Split {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.5,
+            a: Box::new(PaneTree::Split {
+                axis: SplitAxis::Vertical,
+                ratio: 0.5,
+                a: Box::new(PaneTree::Leaf(Pane::SatManager(
+                    Box::new(SatManager::new()),
+                ))),
+                b: Box::new(PaneTree::Leaf(Pane::RFPlot(Box::new(RFPlot::new())))),
+            }),
+            b: Box::new(PaneTree::Leaf(Pane::RFPlot(Box::new(RFPlot::new())))),
+        };
+        assert!(matches!(tree.leftmost_leaf(), Pane::SatManager(_)));
+    }
+
+    #[test]
+    fn panetree_serializes_round_trip() {
+        let tree = PaneTree::Split {
+            axis: SplitAxis::Vertical,
+            ratio: 0.7,
+            a: Box::new(PaneTree::Leaf(Pane::RFPlot(Box::new(RFPlot::new())))),
+            b: Box::new(PaneTree::Leaf(Pane::SatManager(
+                Box::new(SatManager::new()),
+            ))),
+        };
+        let json = serde_json::to_string(&tree).unwrap();
+        let tree2: PaneTree = serde_json::from_str(&json).unwrap();
+        assert!(tree == tree2);
+    }
+}

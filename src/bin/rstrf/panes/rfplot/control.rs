@@ -348,3 +348,95 @@ impl Default for Controls {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstrf::coord::plot_area;
+
+    #[test]
+    fn default_size_is_full_view() {
+        let c = Controls::default();
+        assert!((c.size().0.width - 1.0).abs() < 1e-6);
+        assert!((c.size().0.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn default_bounds_covers_unit_square() {
+        let c = Controls::default();
+        let b = c.bounds();
+        assert!((b.0.x - 0.0).abs() < 1e-6);
+        assert!((b.0.y - 0.0).abs() < 1e-6);
+        assert!((b.0.width - 1.0).abs() < 1e-6);
+        assert!((b.0.height - 1.0).abs() < 1e-6);
+    }
+
+    fn update(c: &mut Controls, msg: Message) {
+        let _ = c.update(msg);
+    }
+
+    #[test]
+    fn update_zoom_x_changes_width() {
+        let mut c = Controls::default();
+        update(&mut c, Message::UpdateZoomX(2.0));
+        // 1 / 2^2 = 0.25
+        assert!((c.size().0.width - 0.25).abs() < 1e-6);
+        assert!((c.size().0.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reset_view_restores_full_view() {
+        let mut c = Controls::default();
+        update(&mut c, Message::UpdateZoomX(5.0));
+        update(&mut c, Message::UpdateZoomY(3.0));
+        update(&mut c, Message::ResetView);
+        assert!((c.size().0.width - 1.0).abs() < 1e-6);
+        assert!((c.size().0.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pan_large_delta_snaps_back_in_bounds() {
+        let mut c = Controls::default();
+        update(&mut c, Message::PanningDelta(plot_area::Vector::new(10.0, 0.0)));
+        let b = c.bounds();
+        assert!(b.0.x >= -1e-5, "x={}", b.0.x);
+        assert!(b.0.x + b.0.width <= 1.0 + 1e-5, "right edge={}", b.0.x + b.0.width);
+    }
+
+    #[test]
+    fn set_power_bounds_initializes_range() {
+        let mut c = Controls::default();
+        c.set_power_bounds((-50.0, -10.0));
+        assert_eq!(c.power_range(), (-50.0, -10.0));
+    }
+
+    #[test]
+    fn set_power_bounds_clamps_existing_range() {
+        let mut c = Controls::default();
+        c.set_power_bounds((-50.0, -10.0));
+        c.set_power_bounds((-30.0, -20.0));
+        let (lo, hi) = c.power_range();
+        assert!(lo >= -30.0 && lo <= -20.0, "lo={}", lo);
+        assert!(hi >= -30.0 && hi <= -20.0, "hi={}", hi);
+    }
+
+    #[test]
+    fn update_min_power_cannot_exceed_max() {
+        let mut c = Controls::default();
+        c.set_power_bounds((-50.0, -10.0));
+        update(&mut c, Message::UpdateMaxPower(-20.0));
+        update(&mut c, Message::UpdateMinPower(-10.0));
+        let (lo, hi) = c.power_range();
+        assert!(lo <= hi, "lo={} > hi={}", lo, hi);
+    }
+
+    #[test]
+    fn toggle_controls_flips_visibility() {
+        let mut c = Controls::default();
+        assert!(c.show_controls);
+        update(&mut c, Message::ToggleControls);
+        assert!(!c.show_controls);
+        update(&mut c, Message::ToggleControls);
+        assert!(c.show_controls);
+    }
+}

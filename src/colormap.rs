@@ -41,3 +41,42 @@ impl Colormap {
 }
 
 pub type ColormapBuffer = [[f32; 4]; 256];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn all_colormaps_have_256_entries() {
+        for cm in Colormap::iter() {
+            assert_eq!(cm.buffer().len(), 256, "{:?} has wrong number of entries", cm);
+        }
+    }
+
+    #[test]
+    fn all_colormap_values_are_in_unit_range() {
+        for cm in Colormap::iter() {
+            for (i, entry) in cm.buffer().iter().enumerate() {
+                for (c, &channel) in entry.iter().enumerate() {
+                    assert!(
+                        channel >= 0.0 && channel <= 1.0,
+                        "{:?}[{}][{}] = {} out of [0, 1]",
+                        cm,
+                        i,
+                        c,
+                        channel
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn colormaps_are_not_all_zeros() {
+        for cm in Colormap::iter() {
+            let has_nonzero = cm.buffer().iter().any(|e| e.iter().any(|&v| v > 0.0));
+            assert!(has_nonzero, "{:?} is all zeros", cm);
+        }
+    }
+}

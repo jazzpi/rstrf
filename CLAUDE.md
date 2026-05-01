@@ -9,11 +9,12 @@ cargo build --release
 cargo run --release [-- <WORKSPACE_FILE>]
 cargo run --bin rsmedfilt -- --help
 cargo clippy
+cargo test
 ```
 
 System dependencies (Ubuntu): `build-essential libssl-dev pkg-config fontconfig libfontconfig1-dev libopenblas-dev`
 
-A Nix flake is provided for reproducible builds. There is no test suite.
+A Nix flake is provided for reproducible builds.
 
 ## Architecture
 

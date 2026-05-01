@@ -304,3 +304,108 @@ impl DataAbsoluteToDataNormalized {
         Self(DataNormalizedToDataAbsolute::new(bounds).0.inverse())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen_size(w: f32, h: f32) -> screen::Size {
+        screen::Size::new(w, h)
+    }
+
+    fn norm_bounds(x: f32, y: f32, w: f32, h: f32) -> data_normalized::Rectangle {
+        data_normalized::Rectangle::new(data_normalized::Point::new(x, y), data_normalized::Size::new(w, h))
+    }
+
+    fn abs_bounds(x: f32, y: f32, w: f32, h: f32) -> data_absolute::Rectangle {
+        data_absolute::Rectangle::new(data_absolute::Point::new(x, y), data_absolute::Size::new(w, h))
+    }
+
+    #[test]
+    fn screen_to_plot_area_maps_center() {
+        let tf = ScreenToPlotArea::new(&screen_size(100.0, 100.0));
+        let center = screen::Point::new(50.0, 50.0);
+        let result = center * tf;
+        assert!((result.0.x - 0.5).abs() < 1e-5, "x={}", result.0.x);
+        assert!((result.0.y - 0.5).abs() < 1e-5, "y={}", result.0.y);
+    }
+
+    #[test]
+    fn screen_to_plot_area_maps_top_left_to_origin() {
+        let tf = ScreenToPlotArea::new(&screen_size(100.0, 100.0));
+        let top_left = screen::Point::new(0.0, 0.0);
+        let result = top_left * tf;
+        assert!((result.0.x - 0.0).abs() < 1e-5);
+        assert!((result.0.y - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn plot_area_to_screen_is_inverse_of_screen_to_plot_area() {
+        let size = screen_size(800.0, 600.0);
+        let forward = ScreenToPlotArea::new(&size);
+        let backward = PlotAreaToScreen::new(&size);
+        let p = screen::Point::new(200.0, 300.0);
+        let roundtrip = (p * forward) * backward;
+        assert!((roundtrip.0.x - p.0.x).abs() < 1e-3, "x={}", roundtrip.0.x);
+        assert!((roundtrip.0.y - p.0.y).abs() < 1e-3, "y={}", roundtrip.0.y);
+    }
+
+    #[test]
+    fn data_normalized_to_absolute_applies_scale_and_translation() {
+        let bounds = abs_bounds(100.0, 200.0, 50.0, 80.0);
+        let tf = DataNormalizedToDataAbsolute::new(&bounds);
+        let p = data_normalized::Point::new(0.0, 0.0);
+        let result = p * tf;
+        assert!((result.0.x - 100.0).abs() < 1e-4, "x={}", result.0.x);
+        assert!((result.0.y - 200.0).abs() < 1e-4, "y={}", result.0.y);
+
+        let p2 = data_normalized::Point::new(1.0, 1.0);
+        let result2 = p2 * tf;
+        assert!((result2.0.x - 150.0).abs() < 1e-4, "x={}", result2.0.x);
+        assert!((result2.0.y - 280.0).abs() < 1e-4, "y={}", result2.0.y);
+    }
+
+    #[test]
+    fn screen_to_data_absolute_round_trips() {
+        let size = screen_size(800.0, 600.0);
+        let nb = norm_bounds(0.0, 0.0, 1.0, 1.0);
+        let ab = abs_bounds(400e6, -50e3, 100e3, 100e3);
+        let forward = ScreenToDataAbsolute::new(&size, &nb, &ab);
+        let backward = DataAbsoluteToScreen::new(&size, &nb, &ab);
+        let p = screen::Point::new(400.0, 300.0);
+        let data_pt = p * forward;
+        let roundtrip = data_pt * backward;
+        assert!((roundtrip.0.x - p.0.x).abs() < 0.01, "x={}", roundtrip.0.x);
+        assert!((roundtrip.0.y - p.0.y).abs() < 0.01, "y={}", roundtrip.0.y);
+    }
+
+    #[test]
+    fn point_vector_arithmetic() {
+        let p = screen::Point::new(1.0, 2.0);
+        let v = screen::Vector::new(3.0, 4.0);
+        let sum = p + v;
+        assert_eq!(sum.0.x, 4.0);
+        assert_eq!(sum.0.y, 6.0);
+
+        let diff = p - v;
+        assert_eq!(diff.0.x, -2.0);
+        assert_eq!(diff.0.y, -2.0);
+    }
+
+    #[test]
+    fn vector_scalar_multiply() {
+        let v = screen::Vector::new(2.0, 3.0);
+        let scaled = v * 2.0;
+        assert_eq!(scaled.0.x, 4.0);
+        assert_eq!(scaled.0.y, 6.0);
+    }
+
+    #[test]
+    fn point_subtract_gives_vector() {
+        let a = screen::Point::new(5.0, 7.0);
+        let b = screen::Point::new(2.0, 3.0);
+        let v = a - b;
+        assert_eq!(v.0.x, 3.0);
+        assert_eq!(v.0.y, 4.0);
+    }
+}

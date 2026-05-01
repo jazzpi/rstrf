@@ -98,3 +98,37 @@ impl Debug for Config {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_round_trips() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let config2: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, config2);
+    }
+
+    #[test]
+    fn debug_masks_password_but_shows_username() {
+        let config = Config {
+            version: "0.1.0".to_string(),
+            space_track_creds: Some(("user@example.com".to_string(), "s3cr3t_password".to_string())),
+            site: None,
+            theme: BuiltinTheme::Dark,
+        };
+        let debug = format!("{:?}", config);
+        assert!(!debug.contains("s3cr3t_password"), "password leaked in debug output");
+        assert!(debug.contains("user@example.com"), "username missing from debug output");
+        assert!(debug.contains("********"), "masking indicator missing");
+    }
+
+    #[test]
+    fn debug_with_no_creds_does_not_panic() {
+        let config = Config::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("Config"));
+    }
+}

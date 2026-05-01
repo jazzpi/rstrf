@@ -120,3 +120,51 @@ impl WorkspaceShared {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_serializes_round_trip() {
+        let ws = Workspace::default();
+        let json = serde_json::to_string(&ws).unwrap();
+        let ws2: Workspace = serde_json::from_str(&json).unwrap();
+        assert!(ws == ws2);
+    }
+
+    #[test]
+    fn frequencies_changed_stores_map() {
+        let mut ws = Workspace::default();
+        let mut freqs = HashMap::new();
+        freqs.insert(25544u64, 437.525e6);
+        freqs.insert(5u64, 108.03e6);
+        let _task = ws.update(Message::FrequenciesChanged(freqs.clone()));
+        assert_eq!(ws.shared.frequencies.get(&25544), Some(&437.525e6));
+        assert_eq!(ws.shared.frequencies.get(&5), Some(&108.03e6));
+    }
+
+    #[test]
+    fn satellite_changed_out_of_bounds_does_not_panic() {
+        let mut ws = Workspace::default();
+        // Empty satellites list — index 999 doesn't exist, should log error and not panic
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let sat = Satellite::from_tle(Some("V1".to_string()), line1, line2, &HashMap::new()).unwrap();
+        let _task = ws.update(Message::SatelliteChanged(999, Box::new((sat, true))));
+        assert!(ws.shared.satellites.is_empty());
+    }
+
+    #[test]
+    fn active_satellites_filters_by_active_flag() {
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let sat = Satellite::from_tle(Some("V1".to_string()), line1, line2, &HashMap::new()).unwrap();
+        let mut ws = Workspace::default();
+        let _task = ws.update(Message::SatellitesChanged(vec![
+            (sat.clone(), true),
+            (sat.clone(), false),
+        ]));
+        assert_eq!(ws.shared.active_satellites().len(), 1);
+    }
+}

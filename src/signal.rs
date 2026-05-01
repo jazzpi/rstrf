@@ -94,3 +94,37 @@ fn find_signals_ft(data: ArrayView1<f32>, sigma_threshold: f32) -> anyhow::Resul
         Ok(Vec::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::arr1;
+
+    #[test]
+    fn flat_data_yields_no_signal() {
+        // All bins at 0 dB → std_dev = 0 → sigma = NaN → no signal
+        let data = arr1(&[0.0f32; 10]);
+        let result = find_signals_ft(data.view(), 5.0).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn strong_peak_is_detected_at_correct_index() {
+        // 9 bins at 0 dB, 1 bin at 30 dB → sigma = ∞ → signal detected
+        let mut data = vec![0.0f32; 10];
+        data[5] = 30.0;
+        let data = arr1(&data);
+        let result = find_signals_ft(data.view(), 5.0).unwrap();
+        assert_eq!(result, vec![5]);
+    }
+
+    #[test]
+    fn threshold_filters_weak_peaks() {
+        // Use data with real variance where max is only slightly above mean
+        // Values in dB → linear: vary around 1.0 with small spread
+        let data = arr1(&[0.0f32, 0.5, -0.3, 0.2, -0.1, 0.4, -0.2, 0.3, 0.1, 0.6]);
+        // With high threshold (20 sigma), this moderate peak should not be detected
+        let result = find_signals_ft(data.view(), 20.0).unwrap();
+        assert!(result.is_empty());
+    }
+}

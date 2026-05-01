@@ -360,3 +360,111 @@ async fn parse_data<R: tokio::io::AsyncRead + Unpin>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use ndarray::s;
+
+    fn test_start() -> DateTime<Utc> {
+        NaiveDate::from_ymd_opt(2024, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+    }
+
+    fn make_spec(start: DateTime<Utc>, nslices: usize, nchan: usize, data: f32) -> Spectrogram {
+        let header = Header {
+            start_time: start,
+            freq: 437e6,
+            bw: 100e3,
+            length: 1.0,
+            nchan,
+        };
+        let raw_data = vec![data; nslices * nchan];
+        Spectrogram::new(&header, raw_data).unwrap()
+    }
+
+    #[test]
+    fn length_equals_nslices_times_slice_length() {
+        let spec = make_spec(test_start(), 10, 1024, 1.0);
+        assert_eq!(spec.length().num_seconds(), 10);
+    }
+
+    #[test]
+    fn end_time_is_start_plus_length() {
+        let start = test_start();
+        let spec = make_spec(start, 5, 1024, 1.0);
+        assert_eq!((spec.end_time() - start).num_seconds(), 5);
+    }
+
+    #[test]
+    fn bounds_origin_and_size_match_params() {
+        let spec = make_spec(test_start(), 10, 1024, 1.0);
+        let b = spec.bounds();
+        assert!((b.0.x - 0.0).abs() < 1e-3);
+        assert!((b.0.y - (-50e3)).abs() < 1e-3);
+        assert!((b.0.width - 10.0).abs() < 1e-3);
+        assert!((b.0.height - 100e3).abs() < 1e-3);
+    }
+
+    #[test]
+    fn concatenate_empty_errors() {
+        assert!(Spectrogram::concatenate(&[]).is_err());
+    }
+
+    #[test]
+    fn concatenate_single_preserves_metadata() {
+        let start = test_start();
+        let spec = make_spec(start, 10, 1024, 1.0);
+        let result = Spectrogram::concatenate(&[spec]).unwrap();
+        assert_eq!(result.nslices, 10);
+        assert_eq!(result.start_time, start);
+        assert_eq!(result.nchan, 1024);
+    }
+
+    #[test]
+    fn concatenate_two_sums_slices() {
+        let start = test_start();
+        let s1 = make_spec(start, 10, 1024, 1.0);
+        let s2 = make_spec(s1.end_time(), 5, 1024, 2.0);
+        let result = Spectrogram::concatenate(&[s1, s2]).unwrap();
+        assert_eq!(result.nslices, 15);
+
+        let data = result.data();
+        let db1 = 10.0 * (1.0f32 + 1e-12).log10();
+        let db2 = 10.0 * (2.0f32 + 1e-12).log10();
+        assert!(
+            data.slice(s![..10, ..])
+                .iter()
+                .all(|&v| (v - db1).abs() < 1e-3)
+        );
+        assert!(
+            data.slice(s![10.., ..])
+                .iter()
+                .all(|&v| (v - db2).abs() < 1e-3)
+        );
+    }
+
+    #[test]
+    fn concatenate_mismatched_nchan_errors() {
+        let start = test_start();
+        let s1 = make_spec(start, 5, 1024, 1.0);
+        let s2 = make_spec(s1.end_time(), 5, 512, 1.0);
+        assert!(Spectrogram::concatenate(&[s1, s2]).is_err());
+    }
+
+    #[test]
+    fn set_data_rejects_wrong_shape() {
+        let mut spec = make_spec(test_start(), 5, 1024, 1.0);
+        assert!(spec.set_data(ArcArray2::zeros((3, 1024))).is_err());
+    }
+
+    #[test]
+    fn set_data_accepts_correct_shape() {
+        let mut spec = make_spec(test_start(), 5, 1024, 1.0);
+        assert!(spec.set_data(ArcArray2::zeros((5, 1024))).is_ok());
+    }
+}

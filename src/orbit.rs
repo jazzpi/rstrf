@@ -326,3 +326,117 @@ impl Predictions {
         self.frequencies.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDate, Utc};
+    use std::f64::consts::PI;
+
+    fn j2000() -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2000, 1, 1)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn gmst_deriv_is_near_sidereal_rate() {
+        let rate = gmst_deriv_days(&j2000());
+        let expected = 360.98564736629_f64.to_radians();
+        assert!(
+            (rate - expected).abs() < 1e-6,
+            "rate={}, expected={}",
+            rate,
+            expected
+        );
+    }
+
+    #[test]
+    fn gmst_is_finite() {
+        let gmst = GMST::from(&j2000());
+        assert!(gmst.0.is_finite(), "GMST = {}", gmst.0);
+    }
+
+    #[test]
+    fn gmst_j2000_approx_4895_rad() {
+        // Published GMST at J2000.0 ≈ 280.46° ≈ 4.895 rad
+        let gmst = GMST::from(&j2000());
+        assert!(
+            (gmst.0 - 4.895).abs() < 0.1,
+            "GMST = {} rad, expected ~4.895",
+            gmst.0
+        );
+    }
+
+    #[test]
+    fn equatorial_site_z_is_zero() {
+        let site = Site {
+            latitude: 0.0,
+            longitude: 0.0,
+            altitude: 0.0,
+        };
+        let pred = site.at_time(&j2000());
+        assert!(pred.position[2].abs() < 1e-6, "z={}", pred.position[2]);
+        assert!(pred.velocity[2].abs() < 1e-6, "vz={}", pred.velocity[2]);
+    }
+
+    #[test]
+    fn equatorial_site_radius_near_earth_radius() {
+        let site = Site {
+            latitude: 0.0,
+            longitude: 0.0,
+            altitude: 0.0,
+        };
+        let pred = site.at_time(&j2000());
+        let r = pred.position.iter().map(|x| x * x).sum::<f64>().sqrt();
+        assert!((r - RADIUS_EARTH).abs() < 50.0, "r={}", r);
+    }
+
+    #[test]
+    fn polar_site_xy_near_zero() {
+        let site = Site {
+            latitude: PI / 2.0,
+            longitude: 0.0,
+            altitude: 0.0,
+        };
+        let pred = site.at_time(&j2000());
+        assert!(pred.position[0].abs() < 1e-6, "x={}", pred.position[0]);
+        assert!(pred.position[1].abs() < 1e-6, "y={}", pred.position[1]);
+        assert!(pred.velocity[0].abs() < 1e-6, "vx={}", pred.velocity[0]);
+        assert!(pred.velocity[1].abs() < 1e-6, "vy={}", pred.velocity[1]);
+    }
+
+    #[test]
+    fn predict_satellites_empty_input_gives_empty_output() {
+        let predictions = predict_satellites(&[], Utc::now(), 10.0, &Site::default(), false);
+        assert_eq!(predictions.n_satellites(), 0);
+    }
+
+    #[test]
+    fn satellite_from_valid_tle() {
+        // VANGUARD 1 - classic sgp4 test TLE from Vallado 2006
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let sat = Satellite::from_tle(
+            Some("VANGUARD 1".to_string()),
+            line1,
+            line2,
+            &HashMap::new(),
+        )
+        .expect("TLE should parse successfully");
+        assert_eq!(sat.norad_id(), 5);
+        assert_eq!(sat.tx_freq, 0.0);
+    }
+
+    #[test]
+    fn satellite_from_tle_with_frequency() {
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let mut freqs = HashMap::new();
+        freqs.insert(5u64, 108.03e6);
+        let sat =
+            Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
+        assert_eq!(sat.tx_freq, 108.03e6);
+    }
+}
