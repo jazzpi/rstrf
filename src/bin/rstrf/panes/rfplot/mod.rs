@@ -4,22 +4,13 @@ use iced::{
     Element, Length, Padding, Size, Task, keyboard,
     widget::{self, button, container},
 };
-use iced_aw::{menu_bar, menu_items};
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
-use rstrf::{
-    coord::plot_area,
-    menu::{sublevel, submenu, toplevel, view_menu},
-    spectrogram::Spectrogram,
-};
+use rstrf::{coord::plot_area, spectrogram::Spectrogram};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    app::AppShared,
-    panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget, rfplot::control::Controls},
-    workspace::{Event, WorkspaceShared},
-};
+use crate::{app::AppShared, panes::rfplot::control::Controls};
 
 mod control;
 pub mod overlay;
@@ -60,7 +51,7 @@ pub enum DragState {
     Panning(plot_area::Point),
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default, Clone)]
 struct SharedState {
     pub controls: Controls,
     pub spectrogram_files: Vec<PathBuf>,
@@ -70,7 +61,7 @@ struct SharedState {
     pub plot_area_margin: f32,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct RFPlot {
     shared: SharedState,
     overlay: overlay::Overlay,
@@ -91,24 +82,19 @@ impl RFPlot {
         }
     }
 
-    pub fn init(&mut self, workspace: &WorkspaceShared, app: &AppShared) -> Task<Message> {
+    pub fn init(&mut self, app: &AppShared) -> Task<Message> {
         if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
                 Message::LoadSpectrogram(self.shared.spectrogram_files.clone()),
-                workspace,
                 app,
             )
         }
     }
 
-    pub fn update(
-        &mut self,
-        message: Message,
-        workspace: &WorkspaceShared,
-        app: &AppShared,
-    ) -> Task<Message> {
+    pub fn update(&mut self, message: Message, app: &AppShared) -> Task<Message> {
+        let workspace = &app.workspace_shared;
         match message {
             Message::Control(message) => self.shared.controls.update(message).map(Message::Control),
             Message::Overlay(message) => self
@@ -159,45 +145,28 @@ impl RFPlot {
         }
     }
 
-    pub fn workspace_event(
-        &mut self,
-        _event: Event,
-        workspace: &WorkspaceShared,
-        app: &AppShared,
-    ) -> Task<Message> {
-        // Trigger a prediction cache check
-        self.overlay
-            .update(overlay::Message::RefreshCache, &self.shared, workspace, app)
-            .map(Message::Overlay)
+    pub fn title(&self) -> String {
+        format!(
+            "RFPlot: {}",
+            self.shared
+                .spectrogram
+                .as_ref()
+                .map(|s| s.start_time.to_string())
+                .unwrap_or("No spectrogram".to_string())
+        )
     }
-}
 
-impl PaneWidget for RFPlot {
-    fn view(
-        &self,
-        _size: Size,
-        _workspace: &WorkspaceShared,
-        _config: &AppShared,
-    ) -> Element<'_, PaneMessage> {
-        // The plot is implemented as a stack of two layers: the spectrogram itself (see
-        // `shader.rs`) and the overlay (see `overlay.rs`).
-
+    pub fn view(&self, _size: Size, _app: &AppShared) -> Element<'_, Message> {
         if self.shared.spectrogram.is_none() {
             return container(
                 button("Open Spectrogram")
                     .style(button::primary)
-                    .on_press(Message::PickSpectrogram.into()),
+                    .on_press(Message::PickSpectrogram),
             )
             .center(Length::Fill)
             .into();
         }
 
-        let mb = view_menu(menu_bar!((
-            toplevel("File", Some(Message::Nop)),
-            submenu(menu_items!(
-                (sublevel("Load spectrogram(s)", Some(Message::PickSpectrogram))),
-            ))
-        )));
         let controls = self.shared.controls.view(&self.shared).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
@@ -217,33 +186,13 @@ impl PaneWidget for RFPlot {
             .height(Length::Fill)
             .into();
 
-        let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay,].into();
+        let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay].into();
 
-        let contents: Element<'_, Message> = widget::column![controls, plot_area]
+        widget::column![controls, plot_area]
             .padding(8)
             .spacing(4)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into();
-        let result: Element<'_, Message> = widget::column![mb, contents]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
-        result.map(PaneMessage::from)
-    }
-
-    fn title(&self) -> String {
-        format!(
-            "Plot: {}",
-            self.shared
-                .spectrogram
-                .as_ref()
-                .map(|s| s.start_time.to_string())
-                .unwrap_or("Loading...".to_string())
-        )
-    }
-
-    fn to_tree(&self) -> PaneTree {
-        PaneTree::Leaf(Pane::RFPlot(Box::new(self.clone())))
+            .into()
     }
 }
