@@ -269,9 +269,7 @@ pub fn predict_satellites(
     site: &Site,
     visible_only: bool,
 ) -> Predictions {
-    let times = ndarray::Array1::linspace(
-        0.0, length_s, 1000, // TODO: number of points
-    );
+    let times = ndarray::Array1::linspace(0.0, length_s, length_s.round() as usize);
     // TODO: Parallelize predictions?
     let (frequencies, zenith_angles) = satellites
         .iter()
