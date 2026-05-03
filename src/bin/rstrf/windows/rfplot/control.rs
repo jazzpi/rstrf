@@ -169,6 +169,12 @@ impl Controls {
                 msg: rfplot::overlay::Message::ToggleCrosshair.into(),
                 style: widget::button::primary,
             },
+            ToolbarButton::Icon {
+                icon: Icon::Delete,
+                tooltip: "Clear signals & track points",
+                msg: rfplot::overlay::Message::ClearAll.into(),
+                style: widget::button::primary,
+            },
             ToolbarButton::Submenu {
                 toplevel: Box::new(ToolbarButton::Icon {
                     icon: Icon::Colormap(shared.controls.colormap),

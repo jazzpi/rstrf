@@ -36,6 +36,7 @@ pub enum Icon {
     Download,
     Grid,
     Crosshair,
+    Delete,
     Colormap(Colormap),
 }
 
@@ -76,6 +77,7 @@ impl From<Icon> for svg::Handle {
                 )
             }
             Icon::Crosshair => include_bytes!("../../../../resources/icons/toggle-crosshair.svg"),
+            Icon::Delete => include_bytes!("../../../../resources/icons/bytesize--trash.svg"),
             Icon::Colormap(colormap) => match colormap {
                 Colormap::Magma => include_bytes!("../../../../resources/icons/cmap-magma.svg"),
                 Colormap::Inferno => include_bytes!("../../../../resources/icons/cmap-inferno.svg"),

@@ -54,6 +54,7 @@ fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey
 pub enum Message {
     AddTrackPoint(data_absolute::Point),
     AddSignal(data_absolute::Point),
+    ClearAll,
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
@@ -538,6 +539,11 @@ impl Overlay {
             Message::AddSignal(pos) => {
                 log::debug!("Manually adding signal at position: {:?}", pos);
                 self.signals.push(pos);
+                Task::none()
+            }
+            Message::ClearAll => {
+                self.track_points.clear();
+                self.signals.clear();
                 Task::none()
             }
             Message::FindSignals => {
