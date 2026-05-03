@@ -1,11 +1,21 @@
 use serde::{Deserialize, Serialize};
-use strum::{EnumIter, IntoStaticStr};
+use strum::{Display, EnumIter, IntoStaticStr, VariantArray};
 
 mod data;
 pub use data::{CIVIDIS, INFERNO, MAGMA, MAKO, PLASMA, ROCKET, TURBO, VIRIDIS};
 
 #[derive(
-    Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, EnumIter, IntoStaticStr,
+    Debug,
+    Default,
+    Display,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    EnumIter,
+    IntoStaticStr,
+    VariantArray,
 )]
 pub enum Colormap {
     #[default]
@@ -50,7 +60,12 @@ mod tests {
     #[test]
     fn all_colormaps_have_256_entries() {
         for cm in Colormap::iter() {
-            assert_eq!(cm.buffer().len(), 256, "{:?} has wrong number of entries", cm);
+            assert_eq!(
+                cm.buffer().len(),
+                256,
+                "{:?} has wrong number of entries",
+                cm
+            );
         }
     }
 

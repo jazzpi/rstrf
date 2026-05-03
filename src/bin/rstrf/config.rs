@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use iced::Theme;
-use rstrf::orbit::Site;
+use rstrf::{colormap::Colormap, orbit::Site};
 use serde::{Deserialize, Serialize};
 use strum::Display;
 
@@ -71,6 +71,7 @@ pub struct Config {
     pub space_track_creds: Option<(String, String)>,
     pub site: Option<Site>,
     pub theme: BuiltinTheme,
+    pub default_colormap: Colormap,
 }
 
 impl Default for Config {
@@ -80,6 +81,7 @@ impl Default for Config {
             space_track_creds: None,
             site: None,
             theme: BuiltinTheme::default(),
+            default_colormap: Colormap::Cividis,
         }
     }
 }
@@ -115,13 +117,23 @@ mod tests {
     fn debug_masks_password_but_shows_username() {
         let config = Config {
             version: "0.1.0".to_string(),
-            space_track_creds: Some(("user@example.com".to_string(), "s3cr3t_password".to_string())),
+            space_track_creds: Some((
+                "user@example.com".to_string(),
+                "s3cr3t_password".to_string(),
+            )),
             site: None,
             theme: BuiltinTheme::Dark,
+            default_colormap: Colormap::Cividis,
         };
         let debug = format!("{:?}", config);
-        assert!(!debug.contains("s3cr3t_password"), "password leaked in debug output");
-        assert!(debug.contains("user@example.com"), "username missing from debug output");
+        assert!(
+            !debug.contains("s3cr3t_password"),
+            "password leaked in debug output"
+        );
+        assert!(
+            debug.contains("user@example.com"),
+            "username missing from debug output"
+        );
         assert!(debug.contains("********"), "masking indicator missing");
     }
 

@@ -15,6 +15,7 @@ use crate::{
     widgets::form::number_input,
     windows::{WindowEffect, WindowOut},
 };
+use rstrf::colormap::Colormap;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -27,6 +28,7 @@ pub enum Message {
     SiteLongitude(f64),
     SiteAltitude(f64),
     ThemeSelected(BuiltinTheme),
+    ColormapSelected(Colormap),
     Submit,
 }
 
@@ -208,12 +210,20 @@ impl Window {
     fn view_appearance(&self) -> Element<'_, Message> {
         Self::view_group(
             "Appearance",
-            column![Self::dropdown_field(
-                "Theme",
-                Some(self.working_copy.theme),
-                BuiltinTheme::VARIANTS,
-                Message::ThemeSelected
-            )],
+            column![
+                Self::dropdown_field(
+                    "Theme",
+                    Some(self.working_copy.theme),
+                    BuiltinTheme::VARIANTS,
+                    Message::ThemeSelected
+                ),
+                Self::dropdown_field(
+                    "Default Colormap",
+                    Some(self.working_copy.default_colormap),
+                    Colormap::VARIANTS,
+                    Message::ColormapSelected
+                ),
+            ],
         )
     }
 }
@@ -324,6 +334,10 @@ impl super::Window<Message> for Window {
             }
             Message::ThemeSelected(theme) => {
                 self.working_copy.theme = theme;
+                Task::none()
+            }
+            Message::ColormapSelected(colormap) => {
+                self.working_copy.default_colormap = colormap;
                 Task::none()
             }
             Message::Submit => Task::done(WindowOut::Effect(WindowEffect::ToApp(

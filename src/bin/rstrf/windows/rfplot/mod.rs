@@ -142,14 +142,23 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
 
 impl Window<Message> for RFPlot {
     fn init(&mut self, app: &AppShared) -> Task<WindowOut<Message>> {
-        if self.shared.spectrogram_files.is_empty() {
+        let cmap_task = self
+            .shared
+            .controls
+            .update(control::Message::UpdateColormap(
+                app.config.default_colormap,
+            ))
+            .map(Message::Control)
+            .map(WindowOut::Msg);
+        let spec_task = if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
                 Message::LoadSpectrogram(self.shared.spectrogram_files.clone()),
                 app,
             )
-        }
+        };
+        Task::batch(vec![cmap_task, spec_task])
     }
 
     fn menu_bar(&self) -> Vec<MenuItem<WindowOut<Message>>> {
