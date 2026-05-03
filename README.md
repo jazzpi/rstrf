@@ -90,28 +90,67 @@ cargo run --release
 
 ## Usage
 
-The rSTRF workspace is composed of panes that you can split and rearrange:
+### Spectrogram preparation
 
-![Pane grid demo](./docs/panegrid.gif)
+rSTRF does not (currently) include a way to record/generate spectrograms. For
+this, please use STRF's `rffft`. If you generate the spectrogram from IQ files,
+no further preparation is needed.
 
-There are currently two types of panes:
+However, if you use `rffft` in live recording mode, you will almost certainly
+need to resample the data so that rSTRF can work with it. For this, rSTRF comes
+with the `rsbinfmt` CLI tool. For example, if you record with the default
+settings, you can use this command to resample/convert one hour of STRF data
+into rSTRF format:
 
-- *RFPlot* for viewing waterfalls/doppler shift traces
-- *Satellite Manager* for managing your TLEs
+```sh
+cargo run --release --bin rsbinfmt \
+  /path/to/rffft_data/2026-02-19T00\:00\:01_*{00..59}.bin \
+  /path/to/spec.rstrf
+```
 
-The default workspace has one of each. In *RFPlot*, you can load spectrograms
-generated with `rffft`. If it is split into multiple `.bin` files, you will need
-to select all of them.
+For more usage information, see `cargo run --release --bin rsbinfmt -- -h`.
 
-In the satellite manager, you can load TLEs from `.txt` or `.tle` files (2-line
-and 3-line format should work). You then need to set frequencies for the
-satellites, either through the text input or by loading the `frequencies.txt`
-file from your STRF folder.
+### Plotting
 
-If you enter your [`space-track.org`](https://space-track.org) credentials in
-the preferences menu, you can also fetch updates through the Space-Track API.
-Make sure to [respect the API Use
-Guidlines](https://www.space-track.org/documentation#/api).
+Use the `plot` subcommand. For example:
+
+```sh
+cargo run --release -- plot /path/to/spec.rstrf \
+  -c /path/to/bulk.tle \
+  -F /path/to/frequencies.txt \
+  --zmin -38 \
+  -C 4801
+```
+
+For more usage information, see `cargo run --release -- plot -h`.
+
+Using the mouse, you can
+
+- scroll to zoom (use `Ctrl`/`Shift`+scroll to zoom vertically/horizontally)
+- click+drag to pan
+
+There is a toolbar above the plot. Additionally, you can use the following
+hotkeys:
+
+- `r` -> Reset view
+- `p` -> Toggle predictions
+- `z` -> Zoom to rectangle
+- `d` -> Delete trackpoints/signals in rectangle
+- `ESC` -> Cancel rectangle action
+- `s` -> Add trackpoint
+- `f` -> Find signals around trackpoints ([see below](#signal-export))
+- `D` -> Manually mark a signal ([see below](#signal-export))
+
+### Signal export
+
+`f`/`D` work a little differently from STRF's `rfplot`. Pressing the keys by
+themselves does not generate any `out.dat`/`mark.dat` files. Instead, once you
+have found/marked all the signals (and potentially cleaned them up using `d`),
+press the *Save* button in the toolbar. This will write all signals into an
+`out.dat` file in the current directory.
+
+Currently, the sigma field in the `out.dat` file is set to 5 for all signals.
+The site ID field can be controlled using the `-C` CLI argument.
 
 ## Troubleshooting
 
