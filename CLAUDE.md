@@ -35,38 +35,33 @@ rSTRF is a GPU-accelerated satellite radio waterfall spectrogram viewer — a Ru
 
 ```
 AppModel
-  └── windows: HashMap<window::Id, Box<dyn Window>>
-        ├── workspace::Window
-        │     └── Workspace
-        │           └── PaneGridState (= pane_grid::State<AnyPane>)
-        │                 ├── RFPlot pane (panes/rfplot/)
-        │                 │     ├── SharedState (Controls, Spectrogram)
-        │                 │     ├── Overlay (overlay.rs) — axes, satellite curves, crosshair
-        │                 │     └── shader::Program (shader.rs + shader.wgsl) — wgpu GPU render
-        │                 ├── SatManager pane — TLE loading, frequency editing, Space-Track sync
-        │                 └── Dummy pane — bootstrapping placeholder
-        └── preferences::Window — Config editing (theme, site coords, credentials)
+  ├── shared_state: AppShared — satellites, frequencies, config, Space-Track client
+  └── windows: HashMap<window::Id, AnyWindow>
+        ├── RFPlot window (windows/rfplot/)
+        │     ├── Controls, Spectrogram
+        │     ├── Overlay (overlay.rs) — axes, satellite curves, crosshair
+        │     └── shader::Program (shader.rs + shader.wgsl) — wgpu GPU render
+        ├── SatManager window (windows/sat_manager.rs) — TLE loading, frequency editing, Space-Track sync
+        └── preferences::Window (windows/preferences.rs) — Config editing (theme, site coords, credentials)
 ```
 
-**Message routing:** `app::Message` → `windows::Message` → `PaneMessage { id, message: panes::Message }` → pane-specific. `panes::Message` has variants `RFPlot(rfplot::Message)`, `SatManager(sat_manager::Message)`, `ToWorkspace(workspace::Message)`, `ToApp(Box<app::Message>)`, and `ReplacePane(Pane)`.
+**Message routing:** `app::Message` → `windows::Message` → window-specific. `windows::Message` has variants `RFPlot(rfplot::Message)`, `SatManager(sat_manager::Message)`, `Preferences(preferences::Message)`, and `ToApp(Box<app::Message>)`.
 
-**Pane dispatch via `AnyPane`:** `PaneGridState` holds `AnyPane`, a concrete enum over all pane types (`RFPlot`, `SatManager`, `Dummy`). Update logic (`init`, `update`, `workspace_event`) is dispatched through `AnyPane`, not through the `PaneWidget` trait — this lets each pane use its own message type internally. The single lift from a pane-local message type to `panes::Message` happens in `AnyPane::update`, not inside each pane. `PaneWidget` is only for rendering/serialization (`view`, `title`, `to_tree`).
+**Window dispatch via `AnyWindow`:** Windows are stored as a concrete enum (`AnyWindow`) rather than trait objects. Each window uses its own message type internally; the lift to `windows::Message` is centralized via `From<WindowOut<M>>` impls. `AppShared` is passed into `update` and `view` so windows can read shared state without messaging.
 
-**Pane effect escaping:** When a pane needs to send a message outside its own type (e.g., SatManager triggering a workspace event), it returns `PaneOut::Effect(PaneEffect::ToWorkspace(...))` instead of `PaneOut::Msg(...)`. `AnyPane::update` maps these to the appropriate `panes::Message` variant.
+**Window effect escaping:** When a window needs to emit something outside its own message type, it returns `WindowOut::Effect(WindowEffect::ToApp(...))` instead of `WindowOut::Msg(...)`. The `From<WindowOut<M>> for windows::Message` impls map these to `Message::ToApp`.
 
 **RFPlot rendering is a two-layer stack:**
 1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers with offscreen culling; colormap lookup in fragment shader (`shader.wgsl`)
 2. `ChartWidget` (plotters-iced2) — draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout
 
-**Workspace persistence:** `PaneTree` (Split/Leaf enum) is serialized to JSON. Reconstruction from `PaneTree` to `pane_grid::State` is done iteratively (see comment in `panes/mod.rs` — `from_configuration` is insufficient).
-
 ## Key Patterns
 
-**`AnyPane` over `Box<dyn Pane>` (`panes/mod.rs`):** Panes are stored as a concrete enum (`AnyPane`) rather than trait objects. This lets each pane define its own message type without boxing or lifting internally — the lift to `panes::Message` is centralized in `AnyPane::update`. The `PaneWidget` trait exists only for the rendering/serialization surface (`view`, `title`, `to_tree`).
+**`AnyWindow` over `Box<dyn Window>` (`windows/mod.rs`):** Windows are stored as a concrete enum (`AnyWindow`) rather than trait objects. This lets each window define its own message type without boxing or lifting internally — the lift to `windows::Message` is done via `From<WindowOut<M>>` impls, not inside each window.
 
 **Coordinate type safety (`coord.rs`):** The `duplicate` macro generates newtyped point types (`screen::Point`, `plot_area::Point`, `data_normalized::Point`, `data_absolute::Point`) and typed transform structs for all 12 pairwise combinations. Coordinate conversion is `point * transform`. This makes coordinate space errors compile errors.
 
-**Serde for persistence:** `Workspace`, `Config`, `RFPlot`, `SatManager`, `Controls`, `Overlay`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
+**Serde for persistence:** `Config`, `RFPlot`, `SatManager`, `Controls`, `Overlay`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
 
 **Async I/O:** All file loading and Space-Track API calls use `Task::future(async { ... })`. CPU-intensive work uses `tokio::task::spawn_blocking`.
 
