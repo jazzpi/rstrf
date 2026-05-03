@@ -2,10 +2,8 @@
 
 mod app;
 mod config;
-mod panes;
 mod widgets;
 mod windows;
-mod workspace;
 
 use clap::Parser;
 use std::path::PathBuf;

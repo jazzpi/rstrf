@@ -13,6 +13,7 @@ use crate::{
     app::AppShared,
     config::{BuiltinTheme, Config},
     widgets::form::number_input,
+    windows::{WindowEffect, WindowOut},
 };
 
 #[derive(Debug, Clone)]
@@ -217,12 +218,12 @@ impl Window {
     }
 }
 
-impl super::Window for Window {
+impl super::Window<Message> for Window {
     fn title(&self) -> String {
         "Preferences".into()
     }
 
-    fn view<'a>(&'a self, _: &'a crate::app::AppShared) -> Element<'a, super::Message> {
+    fn view<'a>(&'a self, _: &'a crate::app::AppShared) -> Element<'a, WindowOut<Message>> {
         let result: Element<Message> = column![
             self.view_spacetrack(),
             self.view_site(),
@@ -235,102 +236,99 @@ impl super::Window for Window {
         .spacing(10)
         .padding(10)
         .into();
-        result.map(super::Message::Preferences)
+        result.map(WindowOut::Msg)
     }
 
     fn update(
         &mut self,
-        message: super::Message,
+        message: Message,
         _app: &crate::app::AppShared,
-    ) -> Task<super::Message> {
+    ) -> Task<WindowOut<Message>> {
         match message {
-            super::Message::Preferences(message) => match message {
-                Message::SpacetrackUpdateUsername(name) => {
-                    self.working_copy.space_track_creds = Some((
-                        name,
-                        self.working_copy
-                            .space_track_creds
-                            .as_ref()
-                            .map(|(_, pass)| pass.clone())
-                            .unwrap_or_default(),
-                    ));
-                    self.spacetrack_verified = None;
-                    Task::none()
-                }
-                Message::SpacetrackUpdatePassword(pass) => {
-                    self.working_copy.space_track_creds = Some((
-                        self.working_copy
-                            .space_track_creds
-                            .as_ref()
-                            .map(|(user, _)| user.clone())
-                            .unwrap_or_default(),
-                        pass,
-                    ));
-                    self.spacetrack_verified = None;
-                    Task::none()
-                }
-                Message::SpacetrackVerify => {
-                    let Some((user, pass)) = self.working_copy.space_track_creds.clone() else {
-                        log::error!("No credentials provided");
-                        return Task::none();
+            Message::SpacetrackUpdateUsername(name) => {
+                self.working_copy.space_track_creds = Some((
+                    name,
+                    self.working_copy
+                        .space_track_creds
+                        .as_ref()
+                        .map(|(_, pass)| pass.clone())
+                        .unwrap_or_default(),
+                ));
+                self.spacetrack_verified = None;
+                Task::none()
+            }
+            Message::SpacetrackUpdatePassword(pass) => {
+                self.working_copy.space_track_creds = Some((
+                    self.working_copy
+                        .space_track_creds
+                        .as_ref()
+                        .map(|(user, _)| user.clone())
+                        .unwrap_or_default(),
+                    pass,
+                ));
+                self.spacetrack_verified = None;
+                Task::none()
+            }
+            Message::SpacetrackVerify => {
+                let Some((user, pass)) = self.working_copy.space_track_creds.clone() else {
+                    log::error!("No credentials provided");
+                    return Task::none();
+                };
+                log::debug!("Verifying SpaceTrack credentials for user '{}'", user);
+                self.spacetrack_verifying = true;
+                let mut space_track = SpaceTrack::new(space_track::Credentials {
+                    identity: user,
+                    password: pass,
+                });
+                Task::future(async move {
+                    let verified = match space_track
+                        .boxscore(space_track::Config {
+                            limit: Some(1),
+                            ..space_track::Config::new()
+                        })
+                        .await
+                    {
+                        Ok(b) => {
+                            log::debug!("got boxscore: {:?}", b);
+                            true
+                        }
+                        Err(err) => {
+                            log::error!("Failed to verify SpaceTrack credentials: {:?}", err);
+                            false
+                        }
                     };
-                    log::debug!("Verifying SpaceTrack credentials for user '{}'", user);
-                    self.spacetrack_verifying = true;
-                    let mut space_track = SpaceTrack::new(space_track::Credentials {
-                        identity: user,
-                        password: pass,
-                    });
-                    Task::future(async move {
-                        let verified = match space_track
-                            .boxscore(space_track::Config {
-                                limit: Some(1),
-                                ..space_track::Config::new()
-                            })
-                            .await
-                        {
-                            Ok(b) => {
-                                log::debug!("got boxscore: {:?}", b);
-                                true
-                            }
-                            Err(err) => {
-                                log::error!("Failed to verify SpaceTrack credentials: {:?}", err);
-                                false
-                            }
-                        };
-                        Message::SpacetrackVerified(verified).into()
-                    })
-                }
-                Message::SpacetrackVerified(verified) => {
-                    self.spacetrack_verifying = false;
-                    self.spacetrack_verified = Some(verified);
-                    Task::none()
-                }
-                Message::SpacetrackLogout => {
-                    self.working_copy.space_track_creds = None;
-                    self.spacetrack_verified = None;
-                    Task::none()
-                }
-                Message::SiteLatitude(lat) => {
-                    self.working_copy.site.get_or_insert_default().latitude = lat.to_radians();
-                    Task::none()
-                }
-                Message::SiteLongitude(lon) => {
-                    self.working_copy.site.get_or_insert_default().longitude = lon.to_radians();
-                    Task::none()
-                }
-                Message::SiteAltitude(alt) => {
-                    self.working_copy.site.get_or_insert_default().altitude = alt;
-                    Task::none()
-                }
-                Message::ThemeSelected(theme) => {
-                    self.working_copy.theme = theme;
-                    Task::none()
-                }
-                Message::Submit => Task::done(super::Message::ToApp(Box::new(
-                    crate::app::Message::UpdateConfig(self.working_copy.clone()),
-                ))),
-            },
-            _ => Task::none(),
+                    Message::SpacetrackVerified(verified).into()
+                })
+            }
+            Message::SpacetrackVerified(verified) => {
+                self.spacetrack_verifying = false;
+                self.spacetrack_verified = Some(verified);
+                Task::none()
+            }
+            Message::SpacetrackLogout => {
+                self.working_copy.space_track_creds = None;
+                self.spacetrack_verified = None;
+                Task::none()
+            }
+            Message::SiteLatitude(lat) => {
+                self.working_copy.site.get_or_insert_default().latitude = lat.to_radians();
+                Task::none()
+            }
+            Message::SiteLongitude(lon) => {
+                self.working_copy.site.get_or_insert_default().longitude = lon.to_radians();
+                Task::none()
+            }
+            Message::SiteAltitude(alt) => {
+                self.working_copy.site.get_or_insert_default().altitude = alt;
+                Task::none()
+            }
+            Message::ThemeSelected(theme) => {
+                self.working_copy.theme = theme;
+                Task::none()
+            }
+            Message::Submit => Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                crate::app::Message::UpdateConfig(self.working_copy.clone()),
+            ))),
         }
     }
 }

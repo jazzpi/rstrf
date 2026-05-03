@@ -2,13 +2,17 @@
 
 use crate::Args;
 use crate::config::Config;
-use crate::windows::{self, Window};
+use crate::windows::rfplot::RFPlot;
+use crate::windows::sat_manager::SatManager;
+use crate::windows::{self, AnyWindow};
 use anyhow::Context;
-use iced::widget::space;
+use iced::widget::{self, space};
 use iced::window::Settings;
 use iced::window::settings::PlatformSpecific;
 use iced::{Daemon, window};
 use iced::{Element, Program, Subscription, Task, Theme};
+use rstrf::menu::{MenuItem, view_menu};
+use rstrf::orbit::Satellite;
 use space_track::SpaceTrack;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -24,6 +28,17 @@ pub struct AppShared {
     pub space_track: Option<Arc<Mutex<SpaceTrack>>>,
     /// Configuration data that persists between application runs.
     pub config: Config,
+    pub satellites: Vec<(Satellite, bool)>,
+    pub frequencies: HashMap<u64, f64>,
+}
+
+impl AppShared {
+    pub fn active_satellites(&self) -> Vec<Satellite> {
+        self.satellites
+            .iter()
+            .filter_map(|(sat, active)| active.then(|| sat.clone()))
+            .collect()
+    }
 }
 
 /// The application model stores app-specific state used to describe its interface and
@@ -31,26 +46,34 @@ pub struct AppShared {
 pub struct AppModel {
     config_path: PathBuf,
     shared_state: AppShared,
-    windows: HashMap<window::Id, Box<dyn Window>>,
+    windows: HashMap<window::Id, AnyWindow>,
 }
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
 pub enum Message {
+    Nop,
     UpdateConfig(Config),
-    OpenWorkspace(Option<PathBuf>),
-    WindowOpenedWorkspace(window::Id, Option<PathBuf>),
+    // TODO: how will the app restore an rfplot with a given spectrogram/controls?
+    OpenRFPlot,
+    WindowOpenedRFPlot(window::Id),
+    OpenSatManager,
+    WindowOpenedSatManager(window::Id),
     OpenPreferences,
     WindowOpenedPreferences(window::Id),
     WindowClosed(window::Id),
     #[allow(clippy::enum_variant_names)]
     WindowMessage(window::Id, windows::Message),
     Event(AppEvent),
+    SatellitesChanged(Vec<(Satellite, bool)>),
+    SatelliteChanged(usize, Box<(Satellite, bool)>),
+    FrequenciesChanged(HashMap<u64, f64>),
 }
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     ConfigUpdated,
+    SatellitesChanged,
 }
 
 impl AppModel {
@@ -93,7 +116,11 @@ impl AppModel {
             }
         };
         tasks.push(Task::done(Message::UpdateConfig(config)));
-        tasks.push(Task::done(Message::OpenWorkspace(flags.workspace.clone())));
+        // FIXME: restore windows
+        // if let Some(workspace_path) = flags.workspace {
+        //     tasks.push(Message::LoadWorkspace(workspace_path).into());
+        // }
+        tasks.push(Task::done(Message::OpenRFPlot));
 
         let app = AppModel {
             config_path,
@@ -106,11 +133,43 @@ impl AppModel {
 
     fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         match self.windows.get(&window_id) {
-            Some(window) => window
-                .view(&self.shared_state)
-                .map(move |msg| Message::WindowMessage(window_id, msg)),
+            Some(window) => {
+                let mut menu = Self::workspace_menu();
+                menu.extend(
+                    window
+                        .menu_bar()
+                        .into_iter()
+                        .map(|item| item.map_msg(|msg| Message::WindowMessage(window_id, msg))),
+                );
+                let mb = view_menu(menu);
+                let content = window
+                    .view(&self.shared_state)
+                    .map(move |msg| Message::WindowMessage(window_id, msg));
+                widget::column![mb, content].into()
+            }
             None => space().into(),
         }
+    }
+
+    fn workspace_menu() -> Vec<MenuItem<Message>> {
+        vec![MenuItem::Submenu {
+            label: "Workspace".to_string(),
+            msg: Some(Message::Nop),
+            items: vec![
+                MenuItem::Button {
+                    label: "Open new RFPlot window".to_string(),
+                    msg: Some(Message::OpenRFPlot),
+                },
+                MenuItem::Button {
+                    label: "Open new SatManager window".to_string(),
+                    msg: Some(Message::OpenSatManager),
+                },
+                MenuItem::Button {
+                    label: "Open Preferences".to_string(),
+                    msg: Some(Message::OpenPreferences),
+                },
+            ],
+        }]
     }
 
     /// Register subscriptions for this application.
@@ -120,13 +179,7 @@ impl AppModel {
     /// stopped and started conditionally based on application state, or persist
     /// indefinitely.
     fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = vec![window::close_events().map(Message::WindowClosed)];
-        subscriptions.extend(self.windows.iter().map(|(id, window)| {
-            window
-                .subscription()
-                .with(*id)
-                .map(|(id, msg)| Message::WindowMessage(id, msg))
-        }));
+        let subscriptions = vec![window::close_events().map(Message::WindowClosed)];
         Subscription::batch(subscriptions)
     }
 
@@ -136,20 +189,27 @@ impl AppModel {
     /// on the application's async runtime.
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Nop => Task::none(),
             Message::UpdateConfig(config) => self.update_config(config),
-            Message::OpenWorkspace(path) => {
-                Self::open_window().map(move |id| Message::WindowOpenedWorkspace(id, path.clone()))
+            Message::OpenRFPlot => Self::open_window().map(Message::WindowOpenedRFPlot),
+            Message::WindowOpenedRFPlot(id) => {
+                self.windows
+                    .insert(id, AnyWindow::RFPlot(Box::new(RFPlot::new())));
+                Task::none()
             }
-            Message::WindowOpenedWorkspace(id, path_buf) => {
-                let (window, task) = windows::workspace::Window::init(path_buf);
-                self.windows.insert(id, Box::new(window));
-                task.map(move |msg| Message::WindowMessage(id, msg))
+            Message::OpenSatManager => Self::open_window().map(Message::WindowOpenedSatManager),
+            Message::WindowOpenedSatManager(id) => {
+                self.windows
+                    .insert(id, AnyWindow::SatManager(Box::new(SatManager::new())));
+                Task::none()
             }
             Message::OpenPreferences => Self::open_window().map(Message::WindowOpenedPreferences),
             Message::WindowOpenedPreferences(id) => {
                 self.windows.insert(
                     id,
-                    Box::new(windows::preferences::Window::new(&self.shared_state)),
+                    AnyWindow::Preferences(Box::new(windows::preferences::Window::new(
+                        &self.shared_state,
+                    ))),
                 );
                 Task::none()
             }
@@ -185,6 +245,30 @@ impl AppModel {
                         .map(move |msg| Message::WindowMessage(id, msg))
                 });
                 Task::batch(tasks)
+            }
+            Message::SatellitesChanged(sats) => {
+                self.shared_state.satellites = sats;
+                Task::done(Message::Event(AppEvent::SatellitesChanged))
+            }
+            Message::SatelliteChanged(idx, data) => {
+                log::debug!("SatelliteChanged({}, {:?})", idx, data);
+                match self.shared_state.satellites.get_mut(idx) {
+                    Some(sat) => *sat = *data,
+                    None => log::error!("Got SatelliteChanged for non-existent index {}", idx),
+                };
+                Task::done(Message::Event(AppEvent::SatellitesChanged))
+            }
+            Message::FrequenciesChanged(freqs) => {
+                self.shared_state
+                    .satellites
+                    .iter_mut()
+                    .for_each(|(sat, _)| {
+                        if let Some(freq) = freqs.get(&sat.norad_id()) {
+                            sat.tx_freq = *freq;
+                        }
+                    });
+                self.shared_state.frequencies = freqs;
+                Task::done(Message::Event(AppEvent::SatellitesChanged))
             }
         }
     }

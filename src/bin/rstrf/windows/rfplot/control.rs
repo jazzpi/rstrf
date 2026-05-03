@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
 use crate::{
-    panes::rfplot,
     widgets::{Icon, ToolbarButton, toolbar},
+    windows::rfplot,
 };
 
 const ZOOM_MIN: f32 = 0.0;
@@ -397,10 +397,17 @@ mod tests {
     #[test]
     fn pan_large_delta_snaps_back_in_bounds() {
         let mut c = Controls::default();
-        update(&mut c, Message::PanningDelta(plot_area::Vector::new(10.0, 0.0)));
+        update(
+            &mut c,
+            Message::PanningDelta(plot_area::Vector::new(10.0, 0.0)),
+        );
         let b = c.bounds();
         assert!(b.0.x >= -1e-5, "x={}", b.0.x);
-        assert!(b.0.x + b.0.width <= 1.0 + 1e-5, "right edge={}", b.0.x + b.0.width);
+        assert!(
+            b.0.x + b.0.width <= 1.0 + 1e-5,
+            "right edge={}",
+            b.0.x + b.0.width
+        );
     }
 
     #[test]

@@ -1,16 +1,16 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use iced::{
-    Element, Font, Length, Size, Task,
+    Element, Font, Length, Task,
     alignment::Horizontal,
     font,
     widget::{
         Column, Grid, button, checkbox, column, container, grid::Sizing, scrollable, table, text,
     },
 };
-use iced_aw::{card, menu_bar, menu_items};
+use iced_aw::card;
 use rstrf::{
-    menu::{sublevel, submenu, toplevel, view_menu},
+    menu::MenuItem,
     orbit::Satellite,
     util::{pick_file, spacetrack_to_sgp4},
 };
@@ -22,9 +22,8 @@ use tokio::sync::Mutex;
 
 use crate::{
     app::{self, AppShared},
-    panes::{Message as PaneMessage, Pane, PaneEffect, PaneOut, PaneTree, PaneWidget},
     widgets::{Icon, ToolbarButton, form::number_input, toolbar},
-    workspace::{self, Message as WorkspaceMessage, WorkspaceShared},
+    windows::{Window, WindowEffect, WindowOut},
 };
 
 #[derive(Debug, Clone)]
@@ -139,7 +138,7 @@ impl SatManager {
         space_track: Option<Arc<Mutex<SpaceTrack>>>,
         mut satellites: Vec<(Satellite, bool)>,
         active_only: bool,
-    ) -> Task<PaneOut<Message>> {
+    ) -> Task<WindowOut<Message>> {
         let Some(space_track) = space_track else {
             return Task::none();
         };
@@ -182,8 +181,8 @@ impl SatManager {
                     };
                     satellites[*idx].0.elements = elements;
                 }
-                Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
-                    WorkspaceMessage::SatellitesChanged(satellites.clone()),
+                Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::SatellitesChanged(satellites.clone()),
                 )))
             },
             Err(err) => {
@@ -192,146 +191,37 @@ impl SatManager {
             }
         })
     }
-
-    pub fn update(
-        &mut self,
-        message: Message,
-        workspace: &workspace::WorkspaceShared,
-        app: &AppShared,
-    ) -> Task<PaneOut<Message>> {
-        match message {
-            Message::Nop => Task::none(),
-            Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
-                .and_then(|p| Task::done(PaneOut::Msg(Message::DoLoadTLEs(p)))),
-            Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
-                .and_then(|p| Task::done(PaneOut::Msg(Message::DoLoadFrequencies(p)))),
-            Message::DoLoadTLEs(path) => {
-                let frequencies = workspace.frequencies.clone();
-                Task::future(async move {
-                    let satellites: anyhow::Result<_> =
-                        rstrf::orbit::load_tles(&path, frequencies).await;
-                    satellites.map_err(|e| format!("{e:?}"))
-                })
-                .then(|result| match result {
-                    Ok(sats) => {
-                        log::info!("Loaded {} satellites", sats.len());
-                        Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
-                            WorkspaceMessage::SatellitesChanged(
-                                sats.into_iter().map(|sat| (sat, true)).collect(),
-                            ),
-                        )))
-                    }
-                    Err(err) => {
-                        log::error!("Failed to load satellites: {}", err);
-                        Task::none()
-                    }
-                })
-            }
-            Message::DoLoadFrequencies(path) => Task::future(async move {
-                rstrf::orbit::load_frequencies(&path)
-                    .await
-                    .map_err(|e| format!("{e:?}"))
-            })
-            .then(|result| match result {
-                Ok(freqs) => {
-                    log::info!("Loaded frequencies for {} satellites", freqs.len());
-                    Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
-                        WorkspaceMessage::FrequenciesChanged(freqs),
-                    )))
-                }
-                Err(err) => {
-                    log::error!("Failed to load frequencies: {}", err);
-                    Task::none()
-                }
-            }),
-            Message::SatelliteToggled(idx, active) => match workspace.satellites.get(idx) {
-                Some((sat, _)) => Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
-                    WorkspaceMessage::SatelliteChanged(idx, Box::new((sat.clone(), active))),
-                ))),
-                None => {
-                    log::error!("Got SatelliteToggle for non-existend index {}", idx);
-                    Task::none()
-                }
-            },
-            Message::ToggleAllSatellites => {
-                self.show_all = !self.show_all;
-                Task::done(PaneOut::Effect(PaneEffect::ToWorkspace(
-                    WorkspaceMessage::SatellitesChanged(
-                        workspace
-                            .satellites
-                            .iter()
-                            .map(|(sat, _)| (sat.clone(), self.show_all))
-                            .collect(),
-                    ),
-                )))
-            }
-            Message::SatelliteEdited(id, sat) => {
-                self.sat_buffer.insert(id, *sat);
-                Task::none()
-            }
-            Message::SatelliteEditCommited(idx) => {
-                match (self.sat_buffer.remove(&idx), workspace.satellites.get(idx)) {
-                    (Some(buf_data), Some(old_data)) => Task::done(PaneOut::Effect(
-                        PaneEffect::ToWorkspace(WorkspaceMessage::SatelliteChanged(
-                            idx,
-                            Box::new((buf_data, old_data.1)),
-                        )),
-                    )),
-                    _ => Task::none(),
-                }
-            }
-            Message::ToggleColumnControls => {
-                self.show_column_controls = !self.show_column_controls;
-                Task::none()
-            }
-            Message::ToggleColumn(column, visible) => {
-                self.columns.insert(column, visible);
-                Task::none()
-            }
-            Message::SpaceTrackToggle => {
-                self.show_spacetrack = !self.show_spacetrack;
-                Task::none()
-            }
-            Message::SpaceTrackUpdateAll => Self::spacetrack_update(
-                app.space_track.clone(),
-                workspace.satellites.clone(),
-                false,
-            ),
-            Message::SpaceTrackUpdateVisible => {
-                Self::spacetrack_update(app.space_track.clone(), workspace.satellites.clone(), true)
-            }
-        }
-    }
 }
 
-impl PaneWidget for SatManager {
-    fn view(
-        &self,
-        _size: Size,
-        workspace: &WorkspaceShared,
-        app_state: &AppShared,
-    ) -> Element<'_, PaneMessage> {
-        let mb = view_menu(menu_bar!((
-            toplevel("File", Some(Message::Nop.into())),
-            submenu(menu_items!(
-                (sublevel("Load TLEs", Some(Message::LoadTLEs.into()))),
-                (sublevel("Load frequencies", Some(Message::LoadFrequencies.into()))),
-            ))
-        )));
-        let onboarding = if workspace.satellites.is_empty() {
-            let head: Element<'_, PaneMessage> = text("TIP").into();
-            let content: Element<'_, PaneMessage> = column![
+impl Window<Message> for SatManager {
+    fn menu_bar(&self) -> Vec<MenuItem<WindowOut<Message>>> {
+        vec![MenuItem::Submenu {
+            label: "File".to_string(),
+            msg: Some(Message::Nop.into()),
+            items: vec![
+                MenuItem::Button {
+                    label: "Load TLEs".to_string(),
+                    msg: Some(Message::LoadTLEs.into()),
+                },
+                MenuItem::Button {
+                    label: "Load frequencies".to_string(),
+                    msg: Some(Message::LoadFrequencies.into()),
+                },
+            ],
+        }]
+    }
+
+    fn view(&self, app: &AppShared) -> Element<'_, WindowOut<Message>> {
+        let onboarding = if app.satellites.is_empty() {
+            let head: Element<'_, WindowOut<Message>> = text("TIP").into();
+            let content: Element<'_, WindowOut<Message>> = column![
                 text("You don't have any satellites loaded yet. Try loading some TLEs from the File menu or the button below."),
                 button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
             Some(card(head, content).style(iced_aw::style::card::info))
-        } else if workspace
-            .satellites
-            .iter()
-            .all(|(sat, _)| sat.tx_freq == 0.0)
-        {
-            let head: Element<'_, PaneMessage> = text("TIP").into();
-            let content: Element<'_, PaneMessage> = column![
+        } else if app.satellites.iter().all(|(sat, _)| sat.tx_freq == 0.0) {
+            let head: Element<'_, WindowOut<Message>> = text("TIP").into();
+            let content: Element<'_, WindowOut<Message>> = column![
                 text("You don't have any transmit frequencies set for the satellites. Try editing the frequency fields, or loading an STRF frequencies.txt file from the File menu or the button below."),
                 button(text("Load Frequencies")).style(button::primary).width(200.0).on_press(Message::LoadFrequencies.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
@@ -345,7 +235,7 @@ impl PaneWidget for SatManager {
                     table::column(
                         text(col.header()),
                         move |(idx, (sat, active)): (usize, (Satellite, bool))| {
-                            col.view(idx, &sat, active).map(PaneMessage::from)
+                            col.view(idx, &sat, active).map(WindowOut::from)
                         },
                     )
                 })
@@ -353,8 +243,7 @@ impl PaneWidget for SatManager {
         });
         let table = table(
             columns,
-            workspace
-                .satellites
+            app.satellites
                 .iter()
                 .enumerate()
                 .map(|(id, (sat, active))| {
@@ -362,7 +251,7 @@ impl PaneWidget for SatManager {
                     (id, (sat.clone(), *active))
                 }),
         );
-        let table: Element<'_, PaneMessage> = scrollable(table)
+        let table: Element<'_, WindowOut<Message>> = scrollable(table)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
@@ -427,7 +316,7 @@ impl PaneWidget for SatManager {
             );
         }
         if self.show_spacetrack {
-            let space_track: Element<'_, PaneMessage> = match app_state.space_track {
+            let space_track: Element<'_, WindowOut<Message>> = match app.space_track {
                 Some(_) => container(
                     column![
                         button("Update all satellites from Space-Track")
@@ -448,7 +337,7 @@ impl PaneWidget for SatManager {
                     card(
                         "Missing Credentials", column![
                             text("To fetch orbital elements from Space-Track, please set your credentials in the Preferences window."),
-                            button("Open Preferences").style(button::primary).on_press(PaneMessage::ToApp(Box::new(app::Message::OpenPreferences)))
+                            button("Open Preferences").style(button::primary).on_press(WindowOut::Effect(WindowEffect::ToApp(app::Message::OpenPreferences)))
                         ]
                         .spacing(10)
                         .width(Length::Fill)
@@ -463,14 +352,111 @@ impl PaneWidget for SatManager {
             .width(Length::Fill)
             .style(container::bordered_box);
         content = content.push(controls).push(table);
-        column![mb, content].into()
+        content.into()
     }
 
     fn title(&self) -> String {
         "Satellites".into()
     }
 
-    fn to_tree(&self) -> PaneTree {
-        PaneTree::Leaf(Pane::SatManager(Box::new(self.clone())))
+    fn update(&mut self, message: Message, app: &AppShared) -> Task<WindowOut<Message>> {
+        match message {
+            Message::Nop => Task::none(),
+            Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
+                .and_then(|p| Task::done(WindowOut::Msg(Message::DoLoadTLEs(p)))),
+            Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
+                .and_then(|p| Task::done(WindowOut::Msg(Message::DoLoadFrequencies(p)))),
+            Message::DoLoadTLEs(path) => {
+                let frequencies = app.frequencies.clone();
+                Task::future(async move {
+                    let satellites: anyhow::Result<_> =
+                        rstrf::orbit::load_tles(&path, frequencies).await;
+                    satellites.map_err(|e| format!("{e:?}"))
+                })
+                .then(|result| match result {
+                    Ok(sats) => {
+                        log::info!("Loaded {} satellites", sats.len());
+                        Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                            app::Message::SatellitesChanged(
+                                sats.into_iter().map(|sat| (sat, true)).collect(),
+                            ),
+                        )))
+                    }
+                    Err(err) => {
+                        log::error!("Failed to load satellites: {}", err);
+                        Task::none()
+                    }
+                })
+            }
+            Message::DoLoadFrequencies(path) => Task::future(async move {
+                rstrf::orbit::load_frequencies(&path)
+                    .await
+                    .map_err(|e| format!("{e:?}"))
+            })
+            .then(|result| match result {
+                Ok(freqs) => {
+                    log::info!("Loaded frequencies for {} satellites", freqs.len());
+                    Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                        app::Message::FrequenciesChanged(freqs),
+                    )))
+                }
+                Err(err) => {
+                    log::error!("Failed to load frequencies: {}", err);
+                    Task::none()
+                }
+            }),
+            Message::SatelliteToggled(idx, active) => match app.satellites.get(idx) {
+                Some((sat, _)) => Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::SatelliteChanged(idx, Box::new((sat.clone(), active))),
+                ))),
+                None => {
+                    log::error!("Got SatelliteToggle for non-existend index {}", idx);
+                    Task::none()
+                }
+            },
+            Message::ToggleAllSatellites => {
+                self.show_all = !self.show_all;
+                Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::SatellitesChanged(
+                        app.satellites
+                            .iter()
+                            .map(|(sat, _)| (sat.clone(), self.show_all))
+                            .collect(),
+                    ),
+                )))
+            }
+            Message::SatelliteEdited(id, sat) => {
+                self.sat_buffer.insert(id, *sat);
+                Task::none()
+            }
+            Message::SatelliteEditCommited(idx) => {
+                match (self.sat_buffer.remove(&idx), app.satellites.get(idx)) {
+                    (Some(buf_data), Some(old_data)) => {
+                        Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                            app::Message::SatelliteChanged(idx, Box::new((buf_data, old_data.1))),
+                        )))
+                    }
+                    _ => Task::none(),
+                }
+            }
+            Message::ToggleColumnControls => {
+                self.show_column_controls = !self.show_column_controls;
+                Task::none()
+            }
+            Message::ToggleColumn(column, visible) => {
+                self.columns.insert(column, visible);
+                Task::none()
+            }
+            Message::SpaceTrackToggle => {
+                self.show_spacetrack = !self.show_spacetrack;
+                Task::none()
+            }
+            Message::SpaceTrackUpdateAll => {
+                Self::spacetrack_update(app.space_track.clone(), app.satellites.clone(), false)
+            }
+            Message::SpaceTrackUpdateVisible => {
+                Self::spacetrack_update(app.space_track.clone(), app.satellites.clone(), true)
+            }
+        }
     }
 }

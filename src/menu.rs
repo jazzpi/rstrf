@@ -56,7 +56,7 @@ fn base_button<'a, Message: Clone>(
 }
 
 fn menu_button<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: String,
     msg: Option<Message>,
     width: Option<Length>,
     height: Option<Length>,
@@ -72,7 +72,7 @@ fn menu_button<'a, Message: Clone + 'a>(
 }
 
 pub fn toplevel<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: String,
     msg: Option<Message>,
 ) -> Element<'a, Message> {
     menu_button(label, msg, Some(Length::Shrink), Some(Length::Shrink))
@@ -81,7 +81,7 @@ pub fn toplevel<'a, Message: Clone + 'a>(
 }
 
 pub fn sublevel<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: String,
     msg: Option<Message>,
 ) -> Element<'a, Message> {
     menu_button(label, msg, Some(Length::Fill), Some(Length::Shrink))
@@ -90,7 +90,7 @@ pub fn sublevel<'a, Message: Clone + 'a>(
 }
 
 pub fn checkbox<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: String,
     msg: Option<Message>,
     is_checked: bool,
 ) -> Element<'a, Message> {
@@ -135,9 +135,17 @@ pub fn checkbox<'a, Message: Clone + 'a>(
         .into()
 }
 
-pub fn view_menu<'a, Message: 'a>(
-    bar: MenuBar<'a, Message, Theme, Renderer>,
-) -> Element<'a, Message> {
+pub fn view_menu<'a, Message: 'a + Clone>(menu: Vec<MenuItem<Message>>) -> Element<'a, Message> {
+    let items = menu
+        .into_iter()
+        .map(|item| match item {
+            MenuItem::Submenu { label, msg, items } => {
+                Item::with_menu(toplevel(label, msg), MenuItem::as_submenu(items))
+            }
+            _ => item.into_item(),
+        })
+        .collect();
+    let bar = MenuBar::new(items);
     // MenuBar seems to ignore the .width(Length::Fill) call
     container(
         bar.draw_path(DrawPath::FakeHovering)
@@ -162,8 +170,72 @@ pub fn view_menu<'a, Message: 'a>(
     .into()
 }
 
-pub fn submenu<'a, Message: Clone + 'a>(
+pub fn view_submenu<'a, Message: Clone + 'a>(
     items: Vec<Item<'a, Message, Theme, Renderer>>,
 ) -> Menu<'a, Message, Theme, Renderer> {
     Menu::new(items).width(180.0).offset(6.0).spacing(5.0)
+}
+
+#[derive(Debug, Clone)]
+pub enum MenuItem<Message: Clone> {
+    Button {
+        label: String,
+        msg: Option<Message>,
+    },
+    Checkbox {
+        label: String,
+        msg: Option<Message>,
+        is_checked: bool,
+    },
+    Submenu {
+        label: String,
+        msg: Option<Message>,
+        items: Vec<MenuItem<Message>>,
+    },
+}
+
+impl<'a, Message: Clone + 'a> MenuItem<Message> {
+    pub fn map_msg<T: Clone, F: Fn(Message) -> T + Clone>(self, f: F) -> MenuItem<T> {
+        match self {
+            MenuItem::Button { label, msg } => MenuItem::Button {
+                label,
+                msg: msg.map(f),
+            },
+            MenuItem::Checkbox {
+                label,
+                msg,
+                is_checked,
+            } => MenuItem::Checkbox {
+                label,
+                msg: msg.map(f),
+                is_checked,
+            },
+            MenuItem::Submenu { label, msg, items } => MenuItem::Submenu {
+                label,
+                msg: msg.map(&f),
+                items: items
+                    .into_iter()
+                    .map(|item| item.map_msg(f.clone()))
+                    .collect(),
+            },
+        }
+    }
+
+    pub fn into_item(self) -> Item<'a, Message, Theme, Renderer> {
+        match self {
+            MenuItem::Button { label, msg } => Item::new(sublevel(label, msg)),
+            MenuItem::Checkbox {
+                label,
+                msg,
+                is_checked,
+            } => Item::new(checkbox(label, msg, is_checked)),
+            MenuItem::Submenu { label, msg, items } => {
+                Item::with_menu(sublevel(label, msg), Self::as_submenu(items))
+            }
+        }
+    }
+
+    pub fn as_submenu(items: Vec<MenuItem<Message>>) -> Menu<'a, Message, Theme, Renderer> {
+        view_submenu(items.into_iter().map(MenuItem::into_item).collect())
+    }
 }

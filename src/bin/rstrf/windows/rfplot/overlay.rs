@@ -19,7 +19,7 @@ use rstrf::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{app::AppShared, workspace::WorkspaceShared};
+use crate::app::AppShared;
 use rstrf::async_cache::AsyncCache;
 
 use super::{DragState, MouseInteraction, RFPlot, SharedState, control};
@@ -35,14 +35,10 @@ pub(crate) struct PredictionKey {
     site: Site,
 }
 
-fn prediction_key(
-    shared: &SharedState,
-    workspace: &WorkspaceShared,
-    app: &AppShared,
-) -> Option<PredictionKey> {
+fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey> {
     let spectrogram = shared.spectrogram.as_ref()?;
     let site = app.config.site.as_ref()?.clone();
-    let satellites = workspace.active_satellites();
+    let satellites = app.active_satellites();
     if satellites.is_empty() {
         return None;
     }
@@ -470,13 +466,8 @@ impl Overlay {
     /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
     /// recomputation. Called at the top of every `update()` so any incoming message acts as a
     /// trigger.
-    fn check_cache(
-        &mut self,
-        shared: &SharedState,
-        workspace: &WorkspaceShared,
-        app: &AppShared,
-    ) -> Task<Message> {
-        let Some(key) = prediction_key(shared, workspace, app) else {
+    fn check_cache(&mut self, shared: &SharedState, app: &AppShared) -> Task<Message> {
+        let Some(key) = prediction_key(shared, app) else {
             self.prediction_cache.reset();
             return Task::none();
         };
@@ -509,10 +500,9 @@ impl Overlay {
         &mut self,
         message: Message,
         shared: &SharedState,
-        workspace: &WorkspaceShared,
         app: &AppShared,
     ) -> Task<Message> {
-        let cache_task = self.check_cache(shared, workspace, app);
+        let cache_task = self.check_cache(shared, app);
 
         let msg_task = match message {
             Message::AddTrackPoint(pos) => {
