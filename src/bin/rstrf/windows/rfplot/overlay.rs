@@ -69,6 +69,7 @@ pub enum Message {
     ToggleCrosshair,
     DeleteInRect(data_absolute::Rectangle),
     UpdateRectPreview(Option<plot_area::Point>),
+    SaveSignals,
 }
 
 fn clamp_line_to_plot(
@@ -739,6 +740,27 @@ impl Overlay {
             }
             Message::UpdateRectPreview(corner2) => {
                 self.rect_preview = corner2;
+                Task::none()
+            }
+            Message::SaveSignals => {
+                let Some(spectrogram) = &shared.spectrogram else {
+                    log::warn!("No spectrogram loaded, cannot save signals");
+                    return cache_task;
+                };
+                let start_mjd = spectrogram.start_time.timestamp_millis() as f64 / 86_400_000.0
+                    + 40587.0;
+                let center_freq = spectrogram.freq as f64;
+                let site_id = app.site_id;
+                let mut output = String::new();
+                for sig in &self.signals {
+                    let mjd = start_mjd + sig.0.x as f64 / 86400.0;
+                    let freq = center_freq + sig.0.y as f64;
+                    output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));
+                }
+                match std::fs::write("out.dat", &output) {
+                    Ok(()) => log::info!("Wrote {} signals to out.dat", self.signals.len()),
+                    Err(e) => log::error!("Failed to write out.dat: {e}"),
+                }
                 Task::none()
             }
         };

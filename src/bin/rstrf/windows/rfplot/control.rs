@@ -176,6 +176,12 @@ impl Controls {
                 msg: rfplot::overlay::Message::ClearAll.into(),
                 style: widget::button::primary,
             },
+            ToolbarButton::Icon {
+                icon: Icon::Save,
+                tooltip: "Save signals to out.dat",
+                msg: rfplot::overlay::Message::SaveSignals.into(),
+                style: widget::button::primary,
+            },
             ToolbarButton::Submenu {
                 toplevel: Box::new(ToolbarButton::Icon {
                     icon: Icon::Colormap(shared.controls.colormap),

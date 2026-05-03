@@ -52,6 +52,9 @@ pub struct PlotArgs {
     /// Maximum power (dB)
     #[arg(long, allow_hyphen_values = true)]
     pub zmax: Option<f32>,
+    /// Site ID written to out.dat (replaces the trailing 0)
+    #[arg(short = 'C', long, value_name = "SITE_ID", default_value_t = 0)]
+    pub site_id: i32,
 }
 
 fn main() -> iced::Result {

@@ -18,3 +18,6 @@ debian/*
 
 # `nix build` output
 result
+
+# Output files
+*.dat

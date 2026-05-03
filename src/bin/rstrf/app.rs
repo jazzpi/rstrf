@@ -30,6 +30,8 @@ pub struct AppShared {
     pub config: Config,
     pub satellites: Vec<(Satellite, bool)>,
     pub frequencies: HashMap<u64, f64>,
+    /// Site ID written to out.dat when saving signals (set from --site-id/-C CLI arg).
+    pub site_id: i32,
 }
 
 impl AppShared {
@@ -239,6 +241,7 @@ impl AppModel {
                 Self::open_window().map(move |id| Message::WindowOpenedRFPlotWith(id, args.clone()))
             }
             Message::WindowOpenedRFPlotWith(id, args) => {
+                self.shared_state.site_id = args.site_id;
                 let view = InitialView {
                     fmin: args.fmin,
                     fmax: args.fmax,
