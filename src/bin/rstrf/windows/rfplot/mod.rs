@@ -65,11 +65,25 @@ struct SharedState {
     pub plot_area_margin: f32,
 }
 
+/// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
+#[derive(Clone, PartialEq)]
+pub struct InitialView {
+    pub fmin: Option<f64>,
+    pub fmax: Option<f64>,
+    /// Unix timestamps (seconds)
+    pub tmin: Option<f64>,
+    pub tmax: Option<f64>,
+    pub zmin: Option<f32>,
+    pub zmax: Option<f32>,
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub struct RFPlot {
     shared: SharedState,
     overlay: overlay::Overlay,
     id: Uuid,
+    #[serde(skip)]
+    initial_view: Option<Box<InitialView>>,
 }
 
 impl RFPlot {
@@ -83,7 +97,15 @@ impl RFPlot {
             shared,
             overlay: overlay::Overlay::default(),
             id,
+            initial_view: None,
         }
+    }
+
+    pub fn with_initial_view(files: Vec<PathBuf>, view: InitialView) -> Self {
+        let mut rfplot = Self::new();
+        rfplot.shared.spectrogram_files = files;
+        rfplot.initial_view = Some(Box::new(view));
+        rfplot
     }
 
     // TODO
@@ -94,6 +116,28 @@ impl RFPlot {
             .map(Message::Overlay)
             .map(WindowOut::Msg)
     }
+}
+
+fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialView) {
+    let spec_bounds = spec.bounds();
+    let length_secs = spec_bounds.0.width as f64;
+    let bw = spec_bounds.0.height as f64;
+    let center_freq = spec.freq as f64;
+
+    let t_min = iv.tmin.unwrap_or(0.0) as f32;
+    let t_max = iv.tmax.unwrap_or(length_secs) as f32;
+    let f_min = iv.fmin.map(|f| f - center_freq).unwrap_or(-bw / 2.0) as f32;
+    let f_max = iv.fmax.map(|f| f - center_freq).unwrap_or(bw / 2.0) as f32;
+
+    if t_max > t_min && f_max > f_min {
+        use rstrf::coord::data_absolute;
+        let view_rect = data_absolute::Rectangle::new(
+            data_absolute::Point::new(t_min, f_min),
+            data_absolute::Size::new(t_max - t_min, f_max - f_min),
+        );
+        controls.set_view_from_rect(&view_rect, &spec_bounds);
+    }
+    controls.set_power_range(iv.zmin, iv.zmax);
 }
 
 impl Window<Message> for RFPlot {
@@ -178,6 +222,9 @@ impl Window<Message> for RFPlot {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
                     self.shared.controls.set_power_bounds(spec.power_bounds);
+                    if let Some(iv) = self.initial_view.take() {
+                        apply_initial_view(&mut self.shared.controls, &spec, &iv);
+                    }
                     self.shared.spectrogram = Some(spec);
                     self.shared.spectrogram_files = paths;
                     self.overlay

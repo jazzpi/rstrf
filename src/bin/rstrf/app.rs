@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::Args;
 use crate::config::Config;
-use crate::windows::rfplot::RFPlot;
+use crate::windows::rfplot::{InitialView, RFPlot};
 use crate::windows::sat_manager::SatManager;
 use crate::windows::{self, AnyWindow};
+use crate::{CliArgs, Command, PlotArgs};
 use anyhow::Context;
 use iced::widget::{self, space};
 use iced::window::Settings;
@@ -65,6 +65,12 @@ pub enum Message {
     #[allow(clippy::enum_variant_names)]
     WindowMessage(window::Id, windows::Message),
     Event(AppEvent),
+    OpenRFPlotWith(Box<PlotArgs>),
+    WindowOpenedRFPlotWith(window::Id, Box<PlotArgs>),
+    CatalogLoaded {
+        satellites: Vec<(Satellite, bool)>,
+        frequencies: HashMap<u64, f64>,
+    },
     SatellitesChanged(Vec<(Satellite, bool)>),
     SatelliteChanged(usize, Box<(Satellite, bool)>),
     FrequenciesChanged(HashMap<u64, f64>),
@@ -77,15 +83,14 @@ pub enum AppEvent {
 }
 
 impl AppModel {
-    pub fn create(args: Args) -> Daemon<impl Program<Message = Message, Theme = Theme>> {
+    pub fn create(args: CliArgs) -> Daemon<impl Program<Message = Message, Theme = Theme>> {
         iced::daemon(move || Self::init(args.clone()), Self::update, Self::view)
             .subscription(Self::subscription)
             .theme(Self::theme)
             .title(Self::title)
     }
 
-    /// Initializes the application with any given flags and startup commands.
-    fn init(flags: Args) -> (Self, Task<Message>) {
+    fn init(flags: CliArgs) -> (Self, Task<Message>) {
         let mut tasks: Vec<Task<Message>> = Vec::new();
 
         let config_path = match dirs::config_dir() {
@@ -116,11 +121,44 @@ impl AppModel {
             }
         };
         tasks.push(Task::done(Message::UpdateConfig(config)));
-        // FIXME: restore windows
-        // if let Some(workspace_path) = flags.workspace {
-        //     tasks.push(Message::LoadWorkspace(workspace_path).into());
-        // }
-        tasks.push(Task::done(Message::OpenRFPlot));
+
+        match flags.command {
+            Some(Command::Plot(plot_args)) => {
+                if plot_args.catalog.is_some() || plot_args.freqs.is_some() {
+                    let catalog = plot_args.catalog.clone();
+                    let freqs_path = plot_args.freqs.clone();
+                    tasks.push(Task::future(async move {
+                        let freqs = if let Some(p) = freqs_path {
+                            match rstrf::orbit::load_frequencies(&p).await {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    log::error!("Failed to load frequencies: {e:?}");
+                                    HashMap::new()
+                                }
+                            }
+                        } else {
+                            HashMap::new()
+                        };
+                        let satellites = if let Some(p) = catalog {
+                            match rstrf::orbit::load_tles(&p, freqs.clone()).await {
+                                Ok(sats) => sats.into_iter().map(|s| (s, true)).collect(),
+                                Err(e) => {
+                                    log::error!("Failed to load catalog: {e:?}");
+                                    Vec::new()
+                                }
+                            }
+                        } else {
+                            Vec::new()
+                        };
+                        Message::CatalogLoaded { satellites, frequencies: freqs }
+                    }));
+                }
+                tasks.push(Task::done(Message::OpenRFPlotWith(Box::new(plot_args))));
+            }
+            None => {
+                tasks.push(Task::done(Message::OpenRFPlot));
+            }
+        }
 
         let app = AppModel {
             config_path,
@@ -197,6 +235,27 @@ impl AppModel {
                     .insert(id, AnyWindow::RFPlot(Box::new(RFPlot::new())));
                 Task::none()
             }
+            Message::OpenRFPlotWith(args) => {
+                Self::open_window().map(move |id| Message::WindowOpenedRFPlotWith(id, args.clone()))
+            }
+            Message::WindowOpenedRFPlotWith(id, args) => {
+                let view = InitialView {
+                    fmin: args.fmin,
+                    fmax: args.fmax,
+                    tmin: args.tmin,
+                    tmax: args.tmax,
+                    zmin: args.zmin,
+                    zmax: args.zmax,
+                };
+                let rfplot = RFPlot::with_initial_view(args.spectrograms, view);
+                self.windows.insert(id, AnyWindow::RFPlot(Box::new(rfplot)));
+                let task = self.windows.get_mut(&id).unwrap().init(&self.shared_state);
+                task.map(move |msg| Message::WindowMessage(id, msg))
+            }
+            Message::CatalogLoaded { satellites, frequencies } => Task::batch([
+                Task::done(Message::SatellitesChanged(satellites)),
+                Task::done(Message::FrequenciesChanged(frequencies)),
+            ]),
             Message::OpenSatManager => Self::open_window().map(Message::WindowOpenedSatManager),
             Message::WindowOpenedSatManager(id) => {
                 self.windows

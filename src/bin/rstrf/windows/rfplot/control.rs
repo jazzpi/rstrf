@@ -6,7 +6,10 @@ use iced::{
 };
 use rstrf::{
     colormap::Colormap,
-    coord::{DataNormalizedToDataAbsolute, PlotAreaToDataNormalized, data_normalized, plot_area},
+    coord::{
+        DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataNormalized,
+        data_absolute, data_normalized, plot_area,
+    },
 };
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -310,6 +313,35 @@ impl Controls {
         }
         self.snap_to_bounds();
         Task::none()
+    }
+
+    /// Set the view to show `rect`, clamping zoom to the allowed range.
+    pub fn set_view_from_rect(
+        &mut self,
+        rect: &data_absolute::Rectangle,
+        spec_bounds: &data_absolute::Rectangle,
+    ) {
+        let to_norm = DataAbsoluteToDataNormalized::new(spec_bounds);
+        let origin = data_absolute::Point::new(rect.0.x, rect.0.y) * to_norm;
+        let end =
+            data_absolute::Point::new(rect.0.x + rect.0.width, rect.0.y + rect.0.height) * to_norm;
+        let width = (end.0.x - origin.0.x).max(1e-6);
+        let height = (end.0.y - origin.0.y).max(1e-6);
+        self.log_scale.x = (1.0_f32 / width).log2().clamp(ZOOM_MIN, ZOOM_MAX);
+        self.log_scale.y = (1.0_f32 / height).log2().clamp(ZOOM_MIN, ZOOM_MAX);
+        self.center =
+            data_normalized::Point::new(origin.0.x + width / 2.0, origin.0.y + height / 2.0);
+        self.snap_to_bounds();
+    }
+
+    /// Override the displayed power range. Clamps to current power_bounds.
+    pub fn set_power_range(&mut self, zmin: Option<f32>, zmax: Option<f32>) {
+        if let Some(z) = zmin {
+            self.power_range.0 = z.clamp(self.power_bounds.0, self.power_bounds.1);
+        }
+        if let Some(z) = zmax {
+            self.power_range.1 = z.clamp(self.power_bounds.0, self.power_bounds.1);
+        }
     }
 
     /// Ensure that the current view bounds are within [0, 1] in both axes.
