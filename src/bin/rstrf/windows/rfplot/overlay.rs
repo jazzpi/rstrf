@@ -53,6 +53,7 @@ fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey
 #[derive(Debug, Clone)]
 pub enum Message {
     AddTrackPoint(data_absolute::Point),
+    AddSignal(data_absolute::Point),
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
@@ -411,7 +412,7 @@ impl Overlay {
 
     fn handle_keyboard(
         &self,
-        _state: &mut MouseInteraction,
+        state: &mut MouseInteraction,
         event: &keyboard::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
@@ -455,6 +456,24 @@ impl Overlay {
                 ),
                 None => (Status::Ignored, None),
             },
+            keyboard::Key::Character("d") if state.modifiers.shift() => {
+                match &shared.spectrogram {
+                    Some(spectrogram) => (
+                        Status::Captured,
+                        Some(
+                            Message::AddSignal(
+                                pos * ScreenToDataAbsolute::new(
+                                    &screen::Size(bounds.size()),
+                                    &shared.controls.bounds(),
+                                    &spectrogram.bounds(),
+                                ),
+                            )
+                            .into(),
+                        ),
+                    ),
+                    None => (Status::Ignored, None),
+                }
+            }
             keyboard::Key::Character("f") => (Status::Captured, Some(Message::FindSignals.into())),
             keyboard::Key::Character("p") => {
                 (Status::Captured, Some(Message::TogglePredictions.into()))
@@ -514,6 +533,11 @@ impl Overlay {
                     Ok(idx) => self.track_points[idx] = pos,
                     Err(idx) => self.track_points.insert(idx, pos),
                 }
+                Task::none()
+            }
+            Message::AddSignal(pos) => {
+                log::debug!("Manually adding signal at position: {:?}", pos);
+                self.signals.push(pos);
                 Task::none()
             }
             Message::FindSignals => {
