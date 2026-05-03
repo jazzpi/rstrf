@@ -44,15 +44,26 @@ impl From<overlay::Message> for Message {
 
 #[derive(Default)]
 pub struct MouseInteraction {
-    pub drag: DragState,
+    pub mouse: MouseState,
     pub modifiers: keyboard::Modifiers,
 }
 
-#[derive(Default, Clone, Copy)]
-pub enum DragState {
+#[derive(Clone, Copy, Debug)]
+pub enum RectAction {
+    Delete,
+    Zoom,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+pub enum MouseState {
     #[default]
     Idle,
     Panning(plot_area::Point),
+    DrawingRect {
+        action: RectAction,
+        corner1: plot_area::Point,
+        corner2: plot_area::Point,
+    },
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Default, Clone)]
@@ -135,7 +146,7 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
             data_absolute::Point::new(t_min, f_min),
             data_absolute::Size::new(t_max - t_min, f_max - f_min),
         );
-        controls.set_view_from_rect(&view_rect, &spec_bounds);
+        controls.set_view_from_rect_da(&view_rect, &spec_bounds);
     }
     controls.set_power_range(iv.zmin, iv.zmax);
 }

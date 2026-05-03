@@ -55,6 +55,7 @@ pub enum Message {
     ZoomDeltaX(plot_area::Point, f32),
     ZoomDeltaY(plot_area::Point, f32),
     ResetView,
+    ZoomToRect(data_normalized::Rectangle),
     UpdateMinPower(f32),
     UpdateMaxPower(f32),
     UpdateSignalSigma(f32),
@@ -302,6 +303,9 @@ impl Controls {
                 self.log_scale = Vec2::new(ZOOM_MIN, ZOOM_MIN);
                 self.center = data_normalized::Point::new(0.5, 0.5);
             }
+            Message::ZoomToRect(rect) => {
+                self.set_view_from_rect_dn(&rect);
+            }
             Message::UpdateMinPower(min_power) => {
                 self.power_range.0 = min_power.min(self.power_range.1);
             }
@@ -322,21 +326,22 @@ impl Controls {
     }
 
     /// Set the view to show `rect`, clamping zoom to the allowed range.
-    pub fn set_view_from_rect(
+    pub fn set_view_from_rect_da(
         &mut self,
         rect: &data_absolute::Rectangle,
         spec_bounds: &data_absolute::Rectangle,
     ) {
         let to_norm = DataAbsoluteToDataNormalized::new(spec_bounds);
-        let origin = data_absolute::Point::new(rect.0.x, rect.0.y) * to_norm;
-        let end =
-            data_absolute::Point::new(rect.0.x + rect.0.width, rect.0.y + rect.0.height) * to_norm;
-        let width = (end.0.x - origin.0.x).max(1e-6);
-        let height = (end.0.y - origin.0.y).max(1e-6);
+        let norm_rect = *rect * to_norm;
+        self.set_view_from_rect_dn(&norm_rect);
+    }
+
+    pub fn set_view_from_rect_dn(&mut self, rect: &data_normalized::Rectangle) {
+        let width = rect.0.width.max(1e-6);
+        let height = rect.0.height.max(1e-6);
         self.log_scale.x = (1.0_f32 / width).log2().clamp(ZOOM_MIN, ZOOM_MAX);
         self.log_scale.y = (1.0_f32 / height).log2().clamp(ZOOM_MIN, ZOOM_MAX);
-        self.center =
-            data_normalized::Point::new(origin.0.x + width / 2.0, origin.0.y + height / 2.0);
+        self.center = data_normalized::Point::new(rect.0.x + width / 2.0, rect.0.y + height / 2.0);
         self.snap_to_bounds();
     }
 
