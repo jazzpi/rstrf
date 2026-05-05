@@ -20,12 +20,13 @@ A Nix flake is provided for reproducible builds.
 
 rSTRF is a GPU-accelerated satellite radio waterfall spectrogram viewer — a Rust rewrite of the `strf` toolkit's `rfplot`. It displays power-vs-frequency-vs-time spectrograms, overlays Doppler-shifted satellite tracks, and detects signals.
 
-**Two binaries:**
+**Three binaries:**
 - `src/bin/rstrf/` — the GUI application
+- `src/bin/rsbinfmt.rs` — CLI pre-converter: strf `.bin` → `.rstrf`; thin wrapper around `spectrogram::resample_strf` (useful for faster subsequent loads; not required)
 - `src/bin/rsmedfilt.rs` — CLI median-filter preprocessor for `.bin` files
 
 **Library crate** (`src/lib.rs` re-exports):
-- `spectrogram.rs` — async load/save of STRF `.bin` files, dB conversion, multi-file concatenation
+- `spectrogram.rs` — async load/save of STRF `.bin` and `.rstrf` files; `resample_strf` resamples raw spectra onto a uniform time grid (median gap → slice length, gaps filled with `FILL_DB`); `load` routes `.bin` files through a combined resample pass and `.rstrf` files through direct decode, then concatenates
 - `orbit.rs` — TLE parsing, SGP4 propagation, Doppler prediction, GMST-based site coordinates
 - `signal.rs` — `FitTrace` signal detection (frequency peaks above sigma threshold)
 - `coord.rs` — type-stated coordinate transforms using `glam::Mat4` + `duplicate` macro (see below)

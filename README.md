@@ -93,14 +93,19 @@ cargo run --release
 ### Spectrogram preparation
 
 rSTRF does not (currently) include a way to record/generate spectrograms. For
-this, please use STRF's `rffft`. If you generate the spectrogram from IQ files,
-no further preparation is needed.
+this, please use STRF's `rffft`.
 
-However, if you use `rffft` in live recording mode, you will almost certainly
-need to resample the data so that rSTRF can work with it. For this, rSTRF comes
-with the `rsbinfmt` CLI tool. For example, if you record with the default
-settings, you can use this command to resample/convert one hour of STRF data
-into rSTRF format:
+rSTRF does not use `rffft`'s data format directly. It first resamples the
+spectrogram data to a constant rate. If you generate the `.bin` files from an IQ
+recording, this does not change anything. However, if you record `.bin` files
+live, the spectrogram is not recorded at a constant rate. So there it does make
+a difference.
+
+You can pre-convert the `.bin` files to rSTRF's format (`.rstrf`) with the
+`rsbinfmt` tool. This will make loading it into rSTRF a bit faster.
+
+For example, the following command will convert an hour's worth of `.bin` files
+(recorded with the default `rffft` settings for `-t`/`-n`) into `.rstrf` format:
 
 ```sh
 cargo run --release --bin rsbinfmt \
@@ -112,10 +117,22 @@ For more usage information, see `cargo run --release --bin rsbinfmt -- -h`.
 
 ### Plotting
 
-Use the `plot` subcommand. For example:
+Use the `plot` subcommand. You can pass `.rstrf` or `.bin` files (or a mix):
 
 ```sh
 cargo run --release -- plot /path/to/spec.rstrf \
+  -c /path/to/bulk.tle \
+  -F /path/to/frequencies.txt \
+  --zmin -38 \
+  -C 4801
+```
+
+Unlike STRF's `rfplot`, you need to pass all the `.bin` files instead of just
+the beginning of the file name (before the index):
+
+```sh
+cargo run --release -- plot \
+  /path/to/rffft_data/2026-02-19T00\:00\:01_*{00..59}.bin
   -c /path/to/bulk.tle \
   -F /path/to/frequencies.txt \
   --zmin -38 \
