@@ -97,6 +97,7 @@
             rustup
             rustPlatform.bindgenHook
             pkg-config
+            (python3.withPackages (ps: with ps; [ numpy ]))
           ];
           inherit buildInputs;
           RUSTC_VERSION = "stable";
