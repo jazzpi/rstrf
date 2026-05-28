@@ -29,7 +29,7 @@ pub struct AppShared {
     /// Configuration data that persists between application runs.
     pub config: Config,
     pub satellites: Vec<(Satellite, bool)>,
-    pub frequencies: HashMap<u64, f64>,
+    pub frequencies: HashMap<u64, Vec<f64>>,
     /// Site ID written to out.dat when saving signals (set from --site-id/-C CLI arg).
     pub site_id: i32,
 }
@@ -71,11 +71,11 @@ pub enum Message {
     WindowOpenedRFPlotWith(window::Id, Box<PlotArgs>),
     CatalogLoaded {
         satellites: Vec<(Satellite, bool)>,
-        frequencies: HashMap<u64, f64>,
+        frequencies: HashMap<u64, Vec<f64>>,
     },
     SatellitesChanged(Vec<(Satellite, bool)>),
     SatelliteChanged(usize, Box<(Satellite, bool)>),
-    FrequenciesChanged(HashMap<u64, f64>),
+    FrequenciesChanged(HashMap<u64, Vec<f64>>),
 }
 
 #[derive(Debug, Clone)]
@@ -152,7 +152,10 @@ impl AppModel {
                         } else {
                             Vec::new()
                         };
-                        Message::CatalogLoaded { satellites, frequencies: freqs }
+                        Message::CatalogLoaded {
+                            satellites,
+                            frequencies: freqs,
+                        }
                     }));
                 }
                 tasks.push(Task::done(Message::OpenRFPlotWith(Box::new(plot_args))));
@@ -255,7 +258,10 @@ impl AppModel {
                 let task = self.windows.get_mut(&id).unwrap().init(&self.shared_state);
                 task.map(move |msg| Message::WindowMessage(id, msg))
             }
-            Message::CatalogLoaded { satellites, frequencies } => Task::batch([
+            Message::CatalogLoaded {
+                satellites,
+                frequencies,
+            } => Task::batch([
                 Task::done(Message::SatellitesChanged(satellites)),
                 Task::done(Message::FrequenciesChanged(frequencies)),
             ]),
@@ -326,7 +332,7 @@ impl AppModel {
                     .iter_mut()
                     .for_each(|(sat, _)| {
                         if let Some(freq) = freqs.get(&sat.norad_id()) {
-                            sat.tx_freq = *freq;
+                            sat.transmitters = freq.clone();
                         }
                     });
                 self.shared_state.frequencies = freqs;

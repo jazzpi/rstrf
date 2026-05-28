@@ -11,7 +11,7 @@ use tokio::io::AsyncBufReadExt;
 use super::util::minmax;
 
 /// Loads frequencies from a strf-style frequencies.txt file
-pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashMap<u64, f64>> {
+pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashMap<u64, Vec<f64>>> {
     let file = tokio::fs::File::open(path).await?;
     let reader = tokio::io::BufReader::new(file);
     let mut freqs = HashMap::new();
@@ -33,7 +33,10 @@ pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashM
         let freq: f64 = parts[1]
             .parse()
             .with_context(|| format!("Failed to parse frequency from {}", parts[1]))?;
-        freqs.insert(norad_id, freq * 1e6);
+        freqs
+            .entry(norad_id)
+            .or_insert_with(Vec::new)
+            .push(freq * 1e6);
     }
     Ok(freqs)
 }
@@ -43,7 +46,7 @@ pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashM
 /// Parses 2LE, and 3LE with an optional initial 0 in the title line.
 pub async fn load_tles(
     path: &std::path::PathBuf,
-    tx_freqs: HashMap<u64, f64>,
+    tx_freqs: HashMap<u64, Vec<f64>>,
 ) -> anyhow::Result<Vec<Satellite>> {
     enum ParseState {
         AwaitLine1OrTitle,
@@ -102,7 +105,7 @@ pub struct Satellite {
     pub elements: sgp4::Elements,
     #[serde(skip)]
     pub constants: sgp4::Constants,
-    pub tx_freq: f64,
+    pub transmitters: Vec<f64>,
 }
 
 impl<'de> Deserialize<'de> for Satellite {
@@ -113,7 +116,7 @@ impl<'de> Deserialize<'de> for Satellite {
         #[derive(Deserialize)]
         struct SatelliteHelper {
             elements: sgp4::Elements,
-            tx_freq: f64,
+            transmitters: Vec<f64>,
         }
         let helper = SatelliteHelper::deserialize(deserializer)?;
         let constants =
@@ -121,14 +124,14 @@ impl<'de> Deserialize<'de> for Satellite {
         Ok(Satellite {
             elements: helper.elements,
             constants,
-            tx_freq: helper.tx_freq,
+            transmitters: helper.transmitters,
         })
     }
 }
 
 impl PartialEq for Satellite {
     fn eq(&self, other: &Self) -> bool {
-        self.tx_freq == other.tx_freq && self.elements == other.elements
+        self.transmitters == other.transmitters && self.elements == other.elements
     }
 }
 
@@ -137,17 +140,20 @@ impl Satellite {
         title: Option<String>,
         line1: &str,
         line2: &str,
-        tx_freqs: &HashMap<u64, f64>,
+        tx_freqs: &HashMap<u64, Vec<f64>>,
     ) -> anyhow::Result<Self> {
         let elements = sgp4::Elements::from_tle(title, line1.as_bytes(), line2.as_bytes())
             .context("Failed to parse TLE")?;
         let constants =
             sgp4::Constants::from_elements(&elements).context("Failed to derive SGP4 constants")?;
-        let tx_freq = tx_freqs.get(&elements.norad_id).copied().unwrap_or(0.0);
+        let transmitters = tx_freqs
+            .get(&elements.norad_id)
+            .cloned()
+            .unwrap_or_default();
         Ok(Satellite {
             elements,
             constants,
-            tx_freq,
+            transmitters,
         })
     }
     pub fn predict(&self, time: &NaiveDateTime) -> anyhow::Result<sgp4::Prediction> {
@@ -161,14 +167,22 @@ impl Satellite {
         start: DateTime<Utc>,
         times: ArrayView1<f64>,
         site: &Site,
-    ) -> (Array1<f64>, Array1<f64>) {
-        let mut frequencies = Array1::zeros(times.len());
-        let mut angles = Array1::zeros(times.len());
+    ) -> (Vec<Array1<f64>>, Array1<f64>) {
+        if self.transmitters.is_empty() {
+            log::warn!(
+                "Predicting pass for {} which has no transmitters",
+                self.norad_id()
+            );
+        }
+
+        let n = times.len();
+        let mut range_rates = Array1::zeros(n);
+        let mut angles = Array1::zeros(n);
         let mut warned = false;
         Zip::from(&times)
-            .and(&mut frequencies)
+            .and(&mut range_rates)
             .and(&mut angles)
-            .for_each(|&t, freq, angle| {
+            .for_each(|&t, rr, angle| {
                 let t = (start + chrono::Duration::milliseconds((t * 1000.0).round() as i64))
                     .naive_utc();
                 let prediction = match self.predict(&t) {
@@ -183,7 +197,7 @@ impl Satellite {
                             );
                             warned = true;
                         }
-                        *freq = f64::NAN;
+                        *rr = f64::NAN;
                         *angle = f64::NAN;
                         return;
                     }
@@ -193,10 +207,14 @@ impl Satellite {
                 let delta_pos = arr1(&prediction.position) - &site_pos;
                 let delta_vel = arr1(&prediction.velocity) - arr1(&site_prediction.velocity);
                 let range = delta_pos.norm();
-                let range_rate = delta_pos.dot(&delta_vel) / range;
-                *freq = (1.0 - range_rate / SPEED_OF_LIGHT) * self.tx_freq;
+                *rr = delta_pos.dot(&delta_vel) / range;
                 *angle = (delta_pos.dot(&site_pos) / (range * RADIUS_EARTH)).acos();
             });
+        let frequencies = self
+            .transmitters
+            .iter()
+            .map(|&tx_freq| range_rates.mapv(|rr| (1.0 - rr / SPEED_OF_LIGHT) * tx_freq))
+            .collect();
         (frequencies, angles)
     }
 
@@ -273,13 +291,14 @@ pub fn predict_satellites(
     // TODO: Parallelize predictions?
     let (frequencies, zenith_angles) = satellites
         .iter()
+        .filter(|sat| !(visible_only && sat.transmitters.is_empty()))
         .filter_map(|sat| {
             let id = sat.norad_id();
-            let (freq, za) = sat.predict_pass(start_time, times.view(), site);
+            let (freqs, za) = sat.predict_pass(start_time, times.view(), site);
             if visible_only && za.iter().all(|&angle| angle > std::f64::consts::FRAC_PI_2) {
                 None
             } else {
-                Some(((id, freq), (id, za)))
+                Some(((id, freqs), (id, za)))
             }
         })
         .unzip();
@@ -293,7 +312,7 @@ pub fn predict_satellites(
 #[derive(Clone)]
 pub struct Predictions {
     pub times: Array1<f64>,
-    frequencies: HashMap<u64, Array1<f64>>,
+    frequencies: HashMap<u64, Vec<Array1<f64>>>,
     zenith_angles: HashMap<u64, Array1<f64>>,
 }
 
@@ -308,15 +327,29 @@ impl std::fmt::Debug for Predictions {
 }
 
 pub struct SatPrediction<'a> {
-    pub frequency: ndarray::ArrayView1<'a, f64>,
+    pub frequencies: Vec<ndarray::ArrayView1<'a, f64>>,
     pub zenith_angle: ndarray::ArrayView1<'a, f64>,
 }
 
 impl Predictions {
     pub fn for_id(&self, id: u64) -> Option<SatPrediction<'_>> {
         Some(SatPrediction {
-            frequency: self.frequencies.get(&id)?.view(),
+            frequencies: self
+                .frequencies
+                .get(&id)?
+                .iter()
+                .map(|a| a.view())
+                .collect(),
             zenith_angle: self.zenith_angles.get(&id)?.view(),
+        })
+    }
+
+    pub fn iter_satellites(
+        &self,
+    ) -> impl Iterator<Item = (u64, Vec<Array1<f64>>, Array1<f64>)> + '_ {
+        self.frequencies.iter().filter_map(|(&id, freqs)| {
+            let za = self.zenith_angles.get(&id)?;
+            Some((id, freqs.clone(), za.clone()))
         })
     }
 
@@ -424,7 +457,7 @@ mod tests {
         )
         .expect("TLE should parse successfully");
         assert_eq!(sat.norad_id(), 5);
-        assert_eq!(sat.tx_freq, 0.0);
+        assert!(sat.transmitters.is_empty());
     }
 
     #[test]
@@ -432,9 +465,9 @@ mod tests {
         let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
         let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
         let mut freqs = HashMap::new();
-        freqs.insert(5u64, 108.03e6);
+        freqs.insert(5u64, vec![108.03e6, 109.025e6]);
         let sat =
             Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
-        assert_eq!(sat.tx_freq, 108.03e6);
+        assert_eq!(sat.transmitters, vec![108.03e6, 109.025e6]);
     }
 }

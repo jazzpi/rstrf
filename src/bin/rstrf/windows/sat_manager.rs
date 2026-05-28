@@ -2,10 +2,11 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use iced::{
     Element, Font, Length, Task,
-    alignment::Horizontal,
+    alignment::{Horizontal, Vertical},
     font,
     widget::{
-        Column, Grid, button, checkbox, column, container, grid::Sizing, scrollable, table, text,
+        Column, Grid, Row, button, checkbox, column, container, grid::Sizing, scrollable, table,
+        text,
     },
 };
 use iced_aw::card;
@@ -37,6 +38,8 @@ pub enum Message {
     ToggleAllSatellites,
     SatelliteEdited(usize, Box<Satellite>),
     SatelliteEditCommited(usize),
+    TransmitterAdded(usize),
+    TransmitterRemoved(usize, usize),
     ToggleColumnControls,
     ToggleColumn(TableColumn, bool),
     SpaceTrackToggle,
@@ -79,17 +82,45 @@ impl TableColumn {
             .into(),
             TableColumn::Frequency => {
                 let sat = sat.clone();
-                number_input("...", sat.tx_freq / 1e6, 3, move |freq| {
-                    let sat = sat.clone();
-                    let sat = Satellite {
-                        tx_freq: freq * 1e6,
-                        ..sat.clone()
-                    };
-                    Message::SatelliteEdited(idx, Box::new(sat))
-                })
-                .on_submit(Message::SatelliteEditCommited(idx))
-                .width(Length::Fixed(100.0))
-                .into()
+                let mut rows: Vec<Element<'static, Message>> = sat
+                    .transmitters
+                    .iter()
+                    .enumerate()
+                    .map(|(tx_idx, &freq)| {
+                        let sat2 = sat.clone();
+                        Row::new()
+                            .push(
+                                number_input("", freq / 1e6, 3, move |new_freq| {
+                                    let mut transmitters = sat2.transmitters.clone();
+                                    transmitters[tx_idx] = new_freq * 1e6;
+                                    Message::SatelliteEdited(
+                                        idx,
+                                        Box::new(Satellite {
+                                            transmitters,
+                                            ..sat2.clone()
+                                        }),
+                                    )
+                                })
+                                .on_submit(Message::SatelliteEditCommited(idx))
+                                .width(Length::Fixed(90.0)),
+                            )
+                            .push(
+                                button(text("×"))
+                                    .style(button::danger)
+                                    .on_press(Message::TransmitterRemoved(idx, tx_idx)),
+                            )
+                            .spacing(2)
+                            .align_y(Vertical::Center)
+                            .into()
+                    })
+                    .collect();
+                rows.push(
+                    button(text("+"))
+                        .style(button::secondary)
+                        .on_press(Message::TransmitterAdded(idx))
+                        .into(),
+                );
+                Column::with_children(rows).spacing(2).into()
             }
             TableColumn::Show => checkbox(active)
                 .on_toggle(move |new_state| Message::SatelliteToggled(idx, new_state))
@@ -219,7 +250,7 @@ impl Window<Message> for SatManager {
                 button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
             Some(card(head, content).style(iced_aw::style::card::info))
-        } else if app.satellites.iter().all(|(sat, _)| sat.tx_freq == 0.0) {
+        } else if app.satellites.iter().all(|(sat, _)| sat.transmitters.is_empty()) {
             let head: Element<'_, WindowOut<Message>> = text("TIP").into();
             let content: Element<'_, WindowOut<Message>> = column![
                 text("You don't have any transmit frequencies set for the satellites. Try editing the frequency fields, or loading an STRF frequencies.txt file from the File menu or the button below."),
@@ -438,6 +469,28 @@ impl Window<Message> for SatManager {
                     }
                     _ => Task::none(),
                 }
+            }
+            Message::TransmitterAdded(idx) => {
+                let Some((sat, active)) = app.satellites.get(idx) else {
+                    return Task::none();
+                };
+                let mut sat = self.sat_buffer.remove(&idx).unwrap_or_else(|| sat.clone());
+                sat.transmitters.push(0.0);
+                Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::SatelliteChanged(idx, Box::new((sat, *active))),
+                )))
+            }
+            Message::TransmitterRemoved(idx, tx_idx) => {
+                let Some((sat, active)) = app.satellites.get(idx) else {
+                    return Task::none();
+                };
+                let mut sat = self.sat_buffer.remove(&idx).unwrap_or_else(|| sat.clone());
+                if tx_idx < sat.transmitters.len() {
+                    sat.transmitters.remove(tx_idx);
+                }
+                Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::SatelliteChanged(idx, Box::new((sat, *active))),
+                )))
             }
             Message::ToggleColumnControls => {
                 self.show_column_controls = !self.show_column_controls;

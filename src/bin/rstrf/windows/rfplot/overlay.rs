@@ -13,7 +13,7 @@ use rstrf::{
         DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
         ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
-    orbit::{self, SatPrediction, Satellite, Site},
+    orbit::{self, Satellite, Site},
     signal,
     util::clip_line,
 };
@@ -151,52 +151,53 @@ impl Overlay {
             .map_err(|e| format!("Failed to draw mesh: {:?}", e))?;
 
         if self.show_predictions
-            && let Some((key, predictions)) = self.prediction_cache.get_stored()
+            && let Some((_, predictions)) = self.prediction_cache.get_stored()
         {
             let time = &predictions.times;
-            for sat in &key.satellites {
-                let id = sat.norad_id();
+            for prediction in predictions.iter_satellites() {
+                let (id, frequencies, za) = prediction;
                 log::trace!("Plotting satellite {}", id);
-                let Some(SatPrediction {
-                    frequency: freq,
-                    zenith_angle: za,
-                }) = &predictions.for_id(id)
-                else {
-                    continue;
-                };
-                let first_visible =
-                    izip!(time.iter(), freq.iter(), za.iter()).position(|(&t, &f, &za)| {
-                        x.contains(&(t as f32))
-                            && y.contains(&(f as f32 - spectrogram.freq))
-                            && za < std::f64::consts::FRAC_PI_2
-                    });
-                let Some(first_visible) = first_visible else {
-                    continue;
-                };
+                // First, check only x and za to find possibly visible time frames
+                let visible_x = izip!(time.iter(), za.iter())
+                    .map(|(&t, &za)| x.contains(&(t as f32)) && za < std::f64::consts::FRAC_PI_2)
+                    .collect_vec();
+                for freq in frequencies {
+                    let first_visible =
+                        izip!(visible_x.iter(), freq.iter()).position(|(&visible, &f)| {
+                            visible && y.contains(&(f as f32 - spectrogram.freq))
+                        });
+                    let Some(first_visible) = first_visible else {
+                        continue;
+                    };
 
-                chart
-                    .draw_series(LineSeries::new(
-                        izip!(time.iter(), freq.iter(), za.iter()).filter_map(|(&t, &f, &za)| {
-                            if za < std::f64::consts::FRAC_PI_2 {
-                                Some((t as f32, (f as f32 - spectrogram.freq)))
-                            } else {
-                                None
-                            }
-                        }),
-                        &GREEN,
-                    ))
-                    .map_err(|e| format!("Could not draw line for satellite {}: {:?}", id, e))?
-                    .label(format!("{:06}", id));
+                    chart
+                        .draw_series(LineSeries::new(
+                            izip!(time.iter(), freq.iter(), za.iter()).filter_map(
+                                |(&t, &f, &za)| {
+                                    if za < std::f64::consts::FRAC_PI_2 {
+                                        Some((t as f32, (f as f32 - spectrogram.freq)))
+                                    } else {
+                                        None
+                                    }
+                                },
+                            ),
+                            &GREEN,
+                        ))
+                        .map_err(|e| format!("Could not draw line for satellite {}: {:?}", id, e))?
+                        .label(format!("{:06}", id));
 
-                let first_time = (time[first_visible] as f32).max(x.start);
-                let first_freq = freq[first_visible] as f32 - spectrogram.freq;
-                chart
-                    .draw_series(vec![Text::new(
-                        format!("{:06}", id),
-                        (first_time, first_freq),
-                        ("sans-serif", 12).into_font().color(&GREEN),
-                    )])
-                    .map_err(|e| format!("Could not draw label for satellite {}: {:?}", id, e))?;
+                    let first_time = (time[first_visible] as f32).max(x.start);
+                    let first_freq = freq[first_visible] as f32 - spectrogram.freq;
+                    chart
+                        .draw_series(vec![Text::new(
+                            format!("{:06}", id),
+                            (first_time, first_freq),
+                            ("sans-serif", 12).into_font().color(&GREEN),
+                        )])
+                        .map_err(|e| {
+                            format!("Could not draw label for satellite {}: {:?}", id, e)
+                        })?;
+                }
             }
         }
 
@@ -747,8 +748,8 @@ impl Overlay {
                     log::warn!("No spectrogram loaded, cannot save signals");
                     return cache_task;
                 };
-                let start_mjd = spectrogram.start_time.timestamp_millis() as f64 / 86_400_000.0
-                    + 40587.0;
+                let start_mjd =
+                    spectrogram.start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
                 let site_id = app.site_id;
                 let mut output = String::new();
