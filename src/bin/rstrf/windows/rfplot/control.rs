@@ -165,6 +165,12 @@ impl Controls {
                 style: widget::button::primary,
             },
             ToolbarButton::Icon {
+                icon: Icon::ToggleAbsolute,
+                tooltip: "Toggle absolute/relative axes",
+                msg: rfplot::overlay::Message::ToggleAbsoluteAxes.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::Icon {
                 icon: Icon::Crosshair,
                 tooltip: "Toggle crosshair",
                 msg: rfplot::overlay::Message::ToggleCrosshair.into(),

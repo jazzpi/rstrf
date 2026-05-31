@@ -100,7 +100,7 @@ pub struct RFPlot {
 impl RFPlot {
     pub fn new() -> Self {
         let shared = SharedState {
-            plot_area_margin: 50.0,
+            plot_area_margin: 75.0,
             ..Default::default()
         };
         let id = Uuid::new_v4();

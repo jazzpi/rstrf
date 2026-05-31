@@ -76,6 +76,7 @@ pub enum Message {
     TogglePredictions,
     ToggleGrid,
     ToggleCrosshair,
+    ToggleAbsoluteAxes,
     DeleteInRect(data_absolute::Rectangle),
     UpdateRectPreview(Option<plot_area::Point>),
     SaveSignals,
@@ -99,6 +100,7 @@ pub(super) struct Overlay {
     show_predictions: bool,
     show_grid: bool,
     show_crosshair: bool,
+    absolute_axes: bool,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
     #[serde(skip)]
@@ -113,9 +115,10 @@ impl Default for Overlay {
             prediction_cache: AsyncCache::default(),
             show_predictions: true,
             show_grid: Default::default(),
+            show_crosshair: Default::default(),
+            absolute_axes: true,
             track_points: Default::default(),
             signals: Default::default(),
-            show_crosshair: Default::default(),
             crosshair: Default::default(),
             rect_preview: Default::default(),
         }
@@ -148,9 +151,27 @@ impl Overlay {
             .axis_style(WHITE)
             .label_style(&WHITE)
             .bold_line_style(WHITE.mix(0.4))
-            .y_label_formatter(&|v| format!("{:.1}", v / 1000.0))
-            .x_desc("Time [s]")
-            .y_desc("Frequency offset [kHz]");
+            .x_desc("Time [s]");
+
+        let plot_center_freq = bounds.0.y + bounds.0.height / 2.0;
+        let x_formatter = |v: &f32| {
+            let t = spectrogram.start_time + Duration::seconds(*v as i64);
+            format!("{}", t.format("%H:%M"))
+        };
+        let y_formatter = |v: &f32| format!("{:.1}", (v - plot_center_freq) / 1000.0);
+        if self.absolute_axes {
+            frame = frame
+                .x_label_formatter(&x_formatter)
+                .y_label_formatter(&y_formatter)
+                .y_desc(format!(
+                    "Frequency - {:.1} [kHz]",
+                    (spectrogram.freq + plot_center_freq) / 1000.0
+                ));
+        } else {
+            frame = frame
+                .y_label_formatter(&|v| format!("{:.1}", v / 1000.0))
+                .y_desc("Frequency offset [kHz]");
+        }
         if !self.show_grid {
             frame = frame.disable_mesh();
         }
@@ -734,6 +755,10 @@ impl Overlay {
                 self.show_crosshair = !self.show_crosshair;
                 Task::none()
             }
+            Message::ToggleAbsoluteAxes => {
+                self.absolute_axes = !self.absolute_axes;
+                Task::none()
+            }
             Message::DeleteInRect(rect) => {
                 self.rect_preview = None;
                 self.track_points.retain(|p| !rect.contains(*p));
@@ -778,6 +803,7 @@ impl PartialEq for Overlay {
             && self.signals == other.signals
             && self.crosshair == other.crosshair
             && self.rect_preview == other.rect_preview
+            && self.absolute_axes == other.absolute_axes
     }
 }
 

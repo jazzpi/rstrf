@@ -36,6 +36,7 @@ pub enum Icon {
     Download,
     Grid,
     Crosshair,
+    ToggleAbsolute,
     Delete,
     Save,
     Colormap(Colormap),
@@ -78,6 +79,9 @@ impl From<Icon> for svg::Handle {
                 )
             }
             Icon::Crosshair => include_bytes!("../../../../resources/icons/toggle-crosshair.svg"),
+            Icon::ToggleAbsolute => {
+                include_bytes!("../../../../resources/icons/toggle-absolute.svg")
+            }
             Icon::Delete => include_bytes!("../../../../resources/icons/bytesize--trash.svg"),
             Icon::Save => {
                 include_bytes!("../../../../resources/icons/material-symbols--save-rounded.svg")
