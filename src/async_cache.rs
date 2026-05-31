@@ -34,8 +34,8 @@ impl<K: PartialEq, V> AsyncCache<K, V> {
         K: Clone,
         F: FnOnce(K) -> Task<M>,
     {
-        let fresh = self.computing.as_ref().map_or(false, |(k, _)| k == &key)
-            || self.stored.as_ref().map_or(false, |(k, _)| k == &key);
+        let fresh = self.computing.as_ref().is_some_and(|(k, _)| k == &key)
+            || self.stored.as_ref().is_some_and(|(k, _)| k == &key);
         if fresh {
             return Task::none();
         }
@@ -53,7 +53,7 @@ impl<K: PartialEq, V> AsyncCache<K, V> {
     /// Stores the result of a completed computation. Ignores results from aborted computations
     /// (i.e. the key must match what is currently in-flight).
     pub fn store(&mut self, key: K, value: V) {
-        let is_current = self.computing.as_ref().map_or(false, |(k, _)| k == &key);
+        let is_current = self.computing.as_ref().is_some_and(|(k, _)| k == &key);
         if is_current {
             self.computing = None;
             self.stored = Some((key, value));
