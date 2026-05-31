@@ -81,7 +81,7 @@ impl Default for Config {
             space_track_creds: None,
             site: None,
             theme: BuiltinTheme::default(),
-            default_colormap: Colormap::Cividis,
+            default_colormap: Colormap::Viridis,
         }
     }
 }
