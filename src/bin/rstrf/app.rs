@@ -41,6 +41,13 @@ impl AppShared {
             .filter_map(|(sat, active)| active.then(|| sat.clone()))
             .collect()
     }
+
+    pub fn active_satellite_ids(&self) -> Vec<u64> {
+        self.satellites
+            .iter()
+            .filter_map(|(sat, active)| active.then(|| sat.norad_id()))
+            .collect()
+    }
 }
 
 /// The application model stores app-specific state used to describe its interface and

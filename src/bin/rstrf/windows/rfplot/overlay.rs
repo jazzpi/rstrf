@@ -13,7 +13,7 @@ use rstrf::{
         DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
         ScreenToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
-    orbit::{self, Satellite, Site},
+    orbit::{self, Site},
     signal,
     util::clip_line,
 };
@@ -24,12 +24,21 @@ use rstrf::async_cache::AsyncCache;
 
 use super::{MouseInteraction, MouseState, RFPlot, RectAction, SharedState, control};
 
-/// All inputs that determine the satellite pass predictions. Keyed by value so the cache can detect
-/// any change — to satellites, spectrogram time window, or observer site — without an explicit
-/// invalidation call.
+/// All inputs that determine the satellite pass predictions.
+///
+/// To avoid having to explicitly keep track of when the predictions are stale, we use this as the
+/// key for an `AsyncCache`, and check the cached predictions against the current key on every
+/// `update()` call.
+///
+/// This involves creating a copy of the key & comparing it, so we don't want the key to be too big.
+/// Thus, we don't include the full `Satellite` structs and instead just include the satellite IDs.
+/// That breaks the automatic staleness detection if the satellites are changed (e.g. new TLEs
+/// loaded or transmitters modified), and these cases need to be handled manually (via
+/// `Message::RefreshCache`). This is a bit annoying, but keeping the full satellite data in the key
+/// comes with a severe performance penalty for large catalogs.
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct PredictionKey {
-    satellites: Vec<Satellite>,
+    satellites: Vec<u64>,
     start_time: DateTime<Utc>,
     length: Duration,
     site: Site,
@@ -38,7 +47,7 @@ pub(crate) struct PredictionKey {
 fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey> {
     let spectrogram = shared.spectrogram.as_ref()?;
     let site = app.config.site.as_ref()?.clone();
-    let satellites = app.active_satellites();
+    let satellites = app.active_satellite_ids();
     if satellites.is_empty() {
         return None;
     }
@@ -59,8 +68,7 @@ pub enum Message {
     FoundSignals(Vec<data_absolute::Point>),
     UpdateCrosshair(Option<plot_area::Point>),
     SpectrogramUpdated,
-    /// Trigger a prediction cache check without any other side effects. Send this when workspace
-    /// state (satellites, site) changes but the spectrogram is unchanged.
+    /// Force a prediction cache check without any other side effects.
     RefreshCache,
     PredictionsReady(PredictionKey, orbit::Predictions),
     PredictionFailed,
@@ -600,11 +608,12 @@ impl Overlay {
         };
         self.prediction_cache.request(key, |key| {
             let length_s = key.length.num_milliseconds() as f64 / 1000.0;
+            let satellites = app.active_satellites();
             Task::future(async move {
                 let key_for_msg = key.clone();
                 let result = tokio::task::spawn_blocking(move || {
                     orbit::predict_satellites(
-                        &key.satellites,
+                        &satellites,
                         key.start_time,
                         length_s,
                         &key.site,
@@ -629,8 +638,6 @@ impl Overlay {
         shared: &SharedState,
         app: &AppShared,
     ) -> Task<Message> {
-        let cache_task = self.check_cache(shared, app);
-
         let msg_task = match message {
             Message::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
@@ -659,7 +666,7 @@ impl Overlay {
                 } else {
                     let Some(spectrogram) = &shared.spectrogram else {
                         log::error!("No spectrogram loaded, cannot find signals");
-                        return cache_task;
+                        return Task::none();
                     };
                     let spectrogram = spectrogram.clone();
                     let track_points = self.track_points.clone();
@@ -711,7 +718,10 @@ impl Overlay {
                 self.crosshair = None;
                 Task::none()
             }
-            Message::RefreshCache => Task::none(),
+            Message::RefreshCache => {
+                self.prediction_cache.reset();
+                Task::none()
+            }
             Message::PredictionsReady(key, predictions) => {
                 log::debug!("Using {} satellite predictions", predictions.n_satellites());
                 self.prediction_cache.store(key, predictions);
@@ -746,7 +756,7 @@ impl Overlay {
             Message::SaveSignals => {
                 let Some(spectrogram) = &shared.spectrogram else {
                     log::warn!("No spectrogram loaded, cannot save signals");
-                    return cache_task;
+                    return Task::none();
                 };
                 let start_mjd =
                     spectrogram.start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
@@ -766,6 +776,7 @@ impl Overlay {
             }
         };
 
+        let cache_task = self.check_cache(shared, app);
         Task::batch([cache_task, msg_task])
     }
 }
