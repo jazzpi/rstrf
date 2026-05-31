@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use copy_range::CopyRange;
 use iced::{Rectangle, Task, event::Status, keyboard, mouse, widget::canvas};
 use itertools::{Itertools, izip};
+use ndarray::s;
 use plotters::prelude::*;
 use plotters_iced2::Chart;
 use rstrf::{
@@ -163,48 +164,44 @@ impl Overlay {
         {
             let time = &predictions.times;
             for prediction in predictions.iter_satellites() {
-                let (id, frequencies, za) = prediction;
-                log::trace!("Plotting satellite {}", id);
-                // First, check only x and za to find possibly visible time frames
-                let visible_x = izip!(time.iter(), za.iter())
-                    .map(|(&t, &za)| x.contains(&(t as f32)) && za < std::f64::consts::FRAC_PI_2)
-                    .collect_vec();
-                for freq in frequencies {
-                    let first_visible =
-                        izip!(visible_x.iter(), freq.iter()).position(|(&visible, &f)| {
-                            visible && y.contains(&(f as f32 - spectrogram.freq))
-                        });
-                    let Some(first_visible) = first_visible else {
-                        continue;
-                    };
+                let (id, passes) = prediction;
+                log::trace!("Plotting {} passes for satellite {}", passes.len(), id);
+                for pass in passes {
+                    let time = time.slice(s![pass.time_range.clone()]);
+                    // First, check only x to find possibly visible time frames
+                    let visible_x = time.iter().map(|&t| x.contains(&(t as f32))).collect_vec();
+                    for freq in pass.frequencies.iter() {
+                        let first_visible =
+                            izip!(visible_x.iter(), freq.iter()).position(|(&visible, &f)| {
+                                visible && y.contains(&(f as f32 - spectrogram.freq))
+                            });
+                        let Some(first_visible) = first_visible else {
+                            continue;
+                        };
 
-                    chart
-                        .draw_series(LineSeries::new(
-                            izip!(time.iter(), freq.iter(), za.iter()).filter_map(
-                                |(&t, &f, &za)| {
-                                    if za < std::f64::consts::FRAC_PI_2 {
-                                        Some((t as f32, (f as f32 - spectrogram.freq)))
-                                    } else {
-                                        None
-                                    }
-                                },
-                            ),
-                            &GREEN,
-                        ))
-                        .map_err(|e| format!("Could not draw line for satellite {}: {:?}", id, e))?
-                        .label(format!("{:06}", id));
+                        chart
+                            .draw_series(LineSeries::new(
+                                izip!(time.iter(), freq.iter())
+                                    .map(|(&t, &f)| (t as f32, (f as f32 - spectrogram.freq))),
+                                &GREEN,
+                            ))
+                            .map_err(|e| {
+                                format!("Could not draw line for satellite {}: {:?}", id, e)
+                            })?
+                            .label(format!("{:06}", id));
 
-                    let first_time = (time[first_visible] as f32).max(x.start);
-                    let first_freq = freq[first_visible] as f32 - spectrogram.freq;
-                    chart
-                        .draw_series(vec![Text::new(
-                            format!("{:06}", id),
-                            (first_time, first_freq),
-                            ("sans-serif", 12).into_font().color(&GREEN),
-                        )])
-                        .map_err(|e| {
-                            format!("Could not draw label for satellite {}: {:?}", id, e)
-                        })?;
+                        let first_time = (time[first_visible] as f32).max(x.start);
+                        let first_freq = freq[first_visible] as f32 - spectrogram.freq;
+                        chart
+                            .draw_series(vec![Text::new(
+                                format!("{:06}", id),
+                                (first_time, first_freq),
+                                ("sans-serif", 12).into_font().color(&GREEN),
+                            )])
+                            .map_err(|e| {
+                                format!("Could not draw label for satellite {}: {:?}", id, e)
+                            })?;
+                    }
                 }
             }
         }
@@ -612,13 +609,7 @@ impl Overlay {
             Task::future(async move {
                 let key_for_msg = key.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    orbit::predict_satellites(
-                        &satellites,
-                        key.start_time,
-                        length_s,
-                        &key.site,
-                        true,
-                    )
+                    orbit::predict_satellites(&satellites, key.start_time, length_s, &key.site)
                 })
                 .await;
                 match result {

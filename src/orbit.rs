@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use ndarray::{Array1, ArrayView1, Zip, arr1};
+use ndarray::{Array1, ArrayView1, Zip, arr1, s};
 use ndarray_linalg::Norm;
 use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
 use tokio::io::AsyncBufReadExt;
+
+use crate::util::pred_ranges;
 
 use super::util::minmax;
 
@@ -162,12 +164,12 @@ impl Satellite {
         Ok(prediction)
     }
 
-    pub fn predict_pass(
+    pub fn predict_passes(
         &self,
         start: DateTime<Utc>,
         times: ArrayView1<f64>,
         site: &Site,
-    ) -> (Vec<Array1<f64>>, Array1<f64>) {
+    ) -> Vec<PassPrediction> {
         if self.transmitters.is_empty() {
             log::warn!(
                 "Predicting pass for {} which has no transmitters",
@@ -179,6 +181,7 @@ impl Satellite {
         let mut range_rates = Array1::zeros(n);
         let mut angles = Array1::zeros(n);
         let mut warned = false;
+        let below_horizon = |angle: f64| angle.is_nan() || angle > std::f64::consts::FRAC_PI_2;
         Zip::from(&times)
             .and(&mut range_rates)
             .and(&mut angles)
@@ -205,22 +208,47 @@ impl Satellite {
                 let site_prediction = site.at_time(&t);
                 let site_pos = arr1(&site_prediction.position);
                 let delta_pos = arr1(&prediction.position) - &site_pos;
-                let delta_vel = arr1(&prediction.velocity) - arr1(&site_prediction.velocity);
                 let range = delta_pos.norm();
-                *rr = delta_pos.dot(&delta_vel) / range;
                 *angle = (delta_pos.dot(&site_pos) / (range * RADIUS_EARTH)).acos();
+                if below_horizon(*angle) {
+                    return;
+                }
+
+                let delta_vel = arr1(&prediction.velocity) - arr1(&site_prediction.velocity);
+                *rr = delta_pos.dot(&delta_vel) / range;
             });
-        let frequencies = self
-            .transmitters
+        let passes = pred_ranges(&angles, |a| !below_horizon(a));
+        passes
             .iter()
-            .map(|&tx_freq| range_rates.mapv(|rr| (1.0 - rr / SPEED_OF_LIGHT) * tx_freq))
-            .collect();
-        (frequencies, angles)
+            .map(|time_range| PassPrediction {
+                time_range: time_range.clone(),
+                frequencies: self
+                    .transmitters
+                    .iter()
+                    .map(|&tx_freq| {
+                        range_rates
+                            .slice(s![time_range.clone()])
+                            .mapv(|rr| (1.0 - rr / SPEED_OF_LIGHT) * tx_freq)
+                    })
+                    .collect(),
+                za: angles.slice(s![time_range.clone()]).to_owned(),
+            })
+            .collect()
     }
 
     pub fn norad_id(&self) -> u64 {
         self.elements.norad_id
     }
+}
+
+#[derive(Clone)]
+pub struct PassPrediction {
+    /// Indices into the `times` array for the start and end of the pass
+    pub time_range: std::ops::Range<usize>,
+    /// Frequencies for each transmitter during the pass, indexed by transmitter
+    pub frequencies: Vec<Array1<f64>>,
+    /// Zenith angle in radians
+    pub za: Array1<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -285,76 +313,49 @@ pub fn predict_satellites(
     start_time: DateTime<Utc>,
     length_s: f64,
     site: &Site,
-    visible_only: bool,
 ) -> Predictions {
     let times = ndarray::Array1::linspace(0.0, length_s, length_s.round() as usize);
     // TODO: Parallelize predictions?
-    let (frequencies, zenith_angles) = satellites
+    let passes = satellites
         .iter()
-        .filter(|sat| !(visible_only && sat.transmitters.is_empty()))
-        .filter_map(|sat| {
+        .filter(|sat| !sat.transmitters.is_empty())
+        .map(|sat| {
             let id = sat.norad_id();
-            let (freqs, za) = sat.predict_pass(start_time, times.view(), site);
-            if visible_only && za.iter().all(|&angle| angle > std::f64::consts::FRAC_PI_2) {
-                None
-            } else {
-                Some(((id, freqs), (id, za)))
-            }
+            let passes = sat.predict_passes(start_time, times.view(), site);
+            (id, passes)
         })
-        .unzip();
-    Predictions {
-        times,
-        frequencies,
-        zenith_angles,
-    }
+        .collect();
+    Predictions { times, passes }
 }
 
 #[derive(Clone)]
 pub struct Predictions {
     pub times: Array1<f64>,
-    frequencies: HashMap<u64, Vec<Array1<f64>>>,
-    zenith_angles: HashMap<u64, Array1<f64>>,
+    passes: HashMap<u64, Vec<PassPrediction>>,
 }
 
 impl std::fmt::Debug for Predictions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Predictions")
             .field("times", &minmax(&self.times))
-            .field("frequencies", &self.frequencies.len())
-            .field("zenith_angles", &self.zenith_angles.len())
+            .field("passes", &self.passes.len())
             .finish()
     }
 }
 
-pub struct SatPrediction<'a> {
-    pub frequencies: Vec<ndarray::ArrayView1<'a, f64>>,
-    pub zenith_angle: ndarray::ArrayView1<'a, f64>,
-}
-
 impl Predictions {
-    pub fn for_id(&self, id: u64) -> Option<SatPrediction<'_>> {
-        Some(SatPrediction {
-            frequencies: self
-                .frequencies
-                .get(&id)?
-                .iter()
-                .map(|a| a.view())
-                .collect(),
-            zenith_angle: self.zenith_angles.get(&id)?.view(),
-        })
+    pub fn for_id(&self, id: u64) -> &[PassPrediction] {
+        self.passes.get(&id).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub fn iter_satellites(
-        &self,
-    ) -> impl Iterator<Item = (u64, Vec<Array1<f64>>, Array1<f64>)> + '_ {
-        self.frequencies.iter().filter_map(|(&id, freqs)| {
-            let za = self.zenith_angles.get(&id)?;
-            Some((id, freqs.clone(), za.clone()))
-        })
+    pub fn iter_satellites(&self) -> impl Iterator<Item = (u64, &[PassPrediction])> + '_ {
+        self.passes
+            .iter()
+            .map(|(&id, passes)| (id, passes.as_slice()))
     }
 
     pub fn n_satellites(&self) -> usize {
-        self.frequencies.len()
+        self.passes.len()
     }
 }
 
@@ -440,8 +441,98 @@ mod tests {
 
     #[test]
     fn predict_satellites_empty_input_gives_empty_output() {
-        let predictions = predict_satellites(&[], Utc::now(), 10.0, &Site::default(), false);
+        let predictions = predict_satellites(&[], Utc::now(), 10.0, &Site::default());
         assert_eq!(predictions.n_satellites(), 0);
+    }
+
+    #[test]
+    fn predict_satellites_without_transmitters_filtered() {
+        // Satellite with no transmitters must be excluded from Predictions
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let sat = Satellite::from_tle(
+            Some("VANGUARD 1".to_string()),
+            line1,
+            line2,
+            &HashMap::new(),
+        )
+        .unwrap();
+        let predictions = predict_satellites(&[sat], Utc::now(), 10.0, &Site::default());
+        assert_eq!(predictions.n_satellites(), 0);
+    }
+
+    #[test]
+    fn predictions_for_id_unknown_returns_empty_slice() {
+        let predictions = predict_satellites(&[], Utc::now(), 10.0, &Site::default());
+        assert!(predictions.for_id(99999).is_empty());
+    }
+
+    #[test]
+    fn pass_prediction_lengths_are_consistent() {
+        // Each PassPrediction's za and frequency arrays must match time_range length
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let mut freqs = HashMap::new();
+        freqs.insert(5u64, vec![108.03e6, 109.025e6]);
+        let sat =
+            Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
+        // Use a 2-hour window to have a good chance of at least one pass
+        let predictions = predict_satellites(&[sat], Utc::now(), 7200.0, &Site::default());
+        assert_eq!(predictions.n_satellites(), 1);
+        for pass in predictions.for_id(5) {
+            let pass_len = pass.time_range.len();
+            assert_eq!(pass.za.len(), pass_len, "za length mismatch");
+            assert_eq!(pass.frequencies.len(), 2, "expected 2 frequency arrays");
+            for freq_arr in &pass.frequencies {
+                assert_eq!(freq_arr.len(), pass_len, "frequency array length mismatch");
+            }
+        }
+    }
+
+    #[test]
+    fn iss_over_equator_24h_yields_multiple_passes() {
+        // ISS TLE from Wikipedia (epoch 2008-09-20)
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        let mut freqs = HashMap::new();
+        freqs.insert(25544u64, vec![437.525e6]);
+        let sat =
+            Satellite::from_tle(Some("ISS (ZARYA)".to_string()), line1, line2, &freqs).unwrap();
+        // Equatorial site so we get a couple of passes in a day
+        let site = Site {
+            latitude: 0.0,
+            longitude: 0.0,
+            altitude: 0.0,
+        };
+        // Use the TLE epoch as start so SGP4 is in its valid range
+        use chrono::TimeZone;
+        let start = Utc.with_ymd_and_hms(2008, 9, 20, 12, 25, 40).unwrap();
+        let predictions = predict_satellites(&[sat], start, 86400.0, &site);
+        let passes = predictions.for_id(25544);
+        assert!(passes.len() >= 3);
+        // Passes must not overlap and must be strictly ordered
+        for w in passes.windows(2) {
+            assert!(
+                w[0].time_range.end <= w[1].time_range.start,
+                "passes overlap: {:?} and {:?}",
+                w[0].time_range,
+                w[1].time_range
+            );
+        }
+    }
+
+    #[test]
+    fn iter_satellites_matches_for_id() {
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let mut freqs = HashMap::new();
+        freqs.insert(5u64, vec![108.03e6]);
+        let sat =
+            Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
+        let predictions = predict_satellites(&[sat], Utc::now(), 7200.0, &Site::default());
+        for (id, passes) in predictions.iter_satellites() {
+            assert_eq!(passes.len(), predictions.for_id(id).len());
+        }
     }
 
     #[test]

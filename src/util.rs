@@ -76,11 +76,84 @@ pub fn spacetrack_to_sgp4(sat: &GeneralPerturbation) -> Option<Elements> {
     serde_json::from_str(&serde_json::to_string(sat).ok()?).ok()
 }
 
+pub fn pred_ranges<F>(arr: &Array1<f64>, pred: F) -> Vec<std::ops::Range<usize>>
+where
+    F: Fn(f64) -> bool,
+{
+    let mut ranges = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, &val) in arr.iter().enumerate() {
+        if !pred(val) {
+            if let Some(s) = start.take() {
+                ranges.push(s..i);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        ranges.push(s..arr.len());
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use iced::{Point as IcedPoint, Rectangle, Size};
     use ndarray::arr1;
+
+    #[test]
+    fn pred_ranges_empty_array_returns_empty() {
+        let arr: ndarray::Array1<f64> = arr1(&[]);
+        assert!(pred_ranges(&arr, |v| v > 0.0).is_empty());
+    }
+
+    #[test]
+    fn pred_ranges_all_false_returns_empty() {
+        let arr = arr1(&[-1.0f64, -2.0, -3.0]);
+        assert!(pred_ranges(&arr, |v| v > 0.0).is_empty());
+    }
+
+    #[test]
+    fn pred_ranges_all_true_returns_full_range() {
+        let arr = arr1(&[1.0f64, 2.0, 3.0]);
+        assert_eq!(pred_ranges(&arr, |v| v > 0.0), vec![0..3]);
+    }
+
+    #[test]
+    fn pred_ranges_single_block_in_middle() {
+        let arr = arr1(&[-1.0f64, 1.0, 2.0, -1.0]);
+        assert_eq!(pred_ranges(&arr, |v| v > 0.0), vec![1..3]);
+    }
+
+    #[test]
+    fn pred_ranges_multiple_blocks() {
+        let arr = arr1(&[-1.0f64, 1.0, -1.0, 2.0, 3.0, -1.0]);
+        assert_eq!(pred_ranges(&arr, |v| v > 0.0), vec![1..2, 3..5]);
+    }
+
+    #[test]
+    fn pred_ranges_block_at_start() {
+        let arr = arr1(&[1.0f64, 2.0, -1.0, -1.0]);
+        assert_eq!(pred_ranges(&arr, |v| v > 0.0), vec![0..2]);
+    }
+
+    #[test]
+    fn pred_ranges_block_at_end() {
+        let arr = arr1(&[-1.0f64, -1.0, 1.0, 2.0]);
+        assert_eq!(pred_ranges(&arr, |v| v > 0.0), vec![2..4]);
+    }
+
+    #[test]
+    fn pred_ranges_nan_splits_block() {
+        // NaN must not match — this mirrors the below_horizon predicate in orbit.rs
+        let arr = arr1(&[1.0f64, f64::NAN, 1.0]);
+        assert_eq!(
+            pred_ranges(&arr, |v| !v.is_nan() && v > 0.0),
+            vec![0..1, 2..3]
+        );
+    }
 
     #[test]
     fn minmax_empty_returns_nan() {
