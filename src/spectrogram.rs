@@ -9,6 +9,7 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
 use ndarray::{ArcArray2, ArrayView2, Axis};
+use rayon::prelude::*;
 use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
@@ -77,11 +78,15 @@ async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
     let mut timestamps = Vec::with_capacity(spectra.len());
     let mut lengths = Vec::with_capacity(spectra.len());
     for spec in spectra {
-        data.extend(
-            spec.power_linear
-                .iter()
-                .map(|v| 10.0 * (v + 1e-12f32).log10()),
-        );
+        let power_linear = spec.power_linear;
+        let data_db = tokio::task::spawn_blocking(move || {
+            power_linear
+                .par_iter()
+                .map(|&v| 10.0 * (v + 1e-12f32).log10())
+                .collect::<Vec<f32>>()
+        })
+        .await?;
+        data.extend(data_db);
         timestamps.push(spec.time);
         lengths.push(spec.length_s);
     }
