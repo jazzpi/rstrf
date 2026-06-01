@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
-use futures_util::future::try_join_all;
+use futures_util::{StreamExt, TryStreamExt};
 use ndarray::{ArcArray2, ArrayView2};
 use rayon::prelude::*;
 use regex::Regex;
@@ -50,20 +50,19 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
 
     log::debug!("Loading {} spectrogram files", paths.len());
 
-    let mut spectrograms = try_join_all(paths.iter().map(|path| async {
-        let spec = if path.extension().and_then(|e| e.to_str()) == Some("rstrf") {
-            load_rstrf_file(path)
-                .await
-                .context(format!("Failed to load file {}", path.display()))
-        } else {
-            load_strf_file(path)
-                .await
-                .context(format!("Failed to load file {}", path.display()))
-        };
-        log::debug!("Loaded {}", path.display());
-        spec
-    }))
-    .await?;
+    let mut spectrograms: Vec<_> = futures_util::stream::iter(paths.iter().cloned())
+        .map(|path| async move {
+            let spec = if path.extension().and_then(|e| e.to_str()) == Some("rstrf") {
+                load_rstrf_file(&path).await
+            } else {
+                load_strf_file(&path).await
+            };
+            log::debug!("Loaded {}", path.display());
+            spec.context(format!("Failed to load file {:?}", path))
+        })
+        .buffer_unordered(8)
+        .try_collect()
+        .await?;
 
     log::debug!("Joining {} spectrograms", spectrograms.len());
     spectrograms.sort_by_key(|s| s.start_time());
