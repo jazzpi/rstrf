@@ -120,6 +120,7 @@ impl Pipeline {
         let primitive_data = self.instances.entry(primitive.id).or_insert_with_key(|id| {
             Self::create_buffers(
                 device,
+                queue,
                 &self.pipeline,
                 id,
                 spectrogram,
@@ -150,7 +151,7 @@ impl Pipeline {
 
         if primitive_data.spectrogram_id != spectrogram.id {
             primitive_data.buffers.spectrogram =
-                Self::create_spectrogram_buffers(device, &self.pipeline, spectrogram);
+                Self::create_spectrogram_buffers(device, queue, &self.pipeline, spectrogram);
             primitive_data.spectrogram_id = spectrogram.id;
         }
 
@@ -166,6 +167,7 @@ impl Pipeline {
 
     fn create_buffers(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         pipeline: &wgpu::RenderPipeline,
         id: &Uuid,
         spectrogram: &Spectrogram,
@@ -188,7 +190,7 @@ impl Pipeline {
             }],
         });
 
-        let spectrogram = Self::create_spectrogram_buffers(device, pipeline, spectrogram);
+        let spectrogram = Self::create_spectrogram_buffers(device, queue, pipeline, spectrogram);
 
         PrimitiveData {
             buffers: Buffers {
@@ -203,6 +205,7 @@ impl Pipeline {
 
     fn create_spectrogram_buffers(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         pipeline: &wgpu::RenderPipeline,
         spectrogram: &Spectrogram,
     ) -> Vec<SpectrogramChunk> {
@@ -304,6 +307,14 @@ impl Pipeline {
                     },
                 ],
             });
+            // `create_buffer_init` parks a host-visible staging copy of `chunk` in the queue's
+            // pending writes until the next submit. Flush + wait here so that staging memory is
+            // reclaimed before we build the next chunk, capping the transient overhead at one chunk
+            // instead of holding a full second copy of the whole spectrogram in RAM until the next
+            // frame happens to be rendered.
+            queue.submit(std::iter::empty());
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
             SpectrogramChunk {
                 uniform: uniform_buffer,
                 vertices: vertex_buffer,
