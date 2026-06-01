@@ -73,23 +73,20 @@ async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
     let (mut spectra, params) = load_strf_raw(path).await?;
     spectra.sort_unstable_by_key(|spec| spec.time);
 
-    let (data, timestamps, lengths): (Vec<_>, Vec<_>, Vec<_>) =
-        itertools::multiunzip(spectra.iter().map(|spec| {
-            (
-                spec.power_linear
-                    .iter()
-                    .cloned()
-                    .map(|v| 10.0 * (v + 1e-12f32).log10())
-                    .collect::<Vec<_>>(),
-                spec.time,
-                spec.length_s,
-            )
-        }));
-    let data = ArcArray2::from_shape_vec(
-        (timestamps.len(), params.nchan),
-        data.into_iter().flatten().collect(),
-    )
-    .context("Failed to shape data array")?;
+    let mut data = Vec::with_capacity(spectra.len() * params.nchan);
+    let mut timestamps = Vec::with_capacity(spectra.len());
+    let mut lengths = Vec::with_capacity(spectra.len());
+    for spec in spectra {
+        data.extend(
+            spec.power_linear
+                .iter()
+                .map(|v| 10.0 * (v + 1e-12f32).log10()),
+        );
+        timestamps.push(spec.time);
+        lengths.push(spec.length_s);
+    }
+    let data = ArcArray2::from_shape_vec((timestamps.len(), params.nchan), data)
+        .context("Failed to shape data array")?;
     Ok(Spectrogram {
         id: Uuid::new_v4(),
         nchan: params.nchan,
