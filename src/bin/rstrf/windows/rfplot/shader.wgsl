@@ -3,6 +3,7 @@ struct Uniforms {
     time_bounds: vec2f,
     freq_bounds: vec2f,
     pixel_height: f32,
+    viewport_width: f32,
     nslices: u32,
     nchan: u32,
 }
@@ -33,7 +34,12 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let x_range = x_ranges[in.time_idx];
     let x = mix(x_range.x, x_range.y, in.corner.x);
     let x_normalized = (x - uniforms.time_bounds.x) / (uniforms.time_bounds.y - uniforms.time_bounds.x);
-    let pos = vec2f(x_normalized, in.corner.y) * 2.0 - 1.0;
+    // Snap left edges down, right edges up
+    let px = x_normalized * uniforms.viewport_width;
+    let px_snapped = select(floor(px), ceil(px), in.corner.x > 0.5);
+
+    let x_snapped = px_snapped / uniforms.viewport_width;
+    let pos = vec2f(x_snapped, in.corner.y) * 2.0 - 1.0;
     let v = mix(uniforms.freq_bounds.x, uniforms.freq_bounds.y, in.corner.y);
     return VertexOut(vec4f(pos, 0.0, 1.0), in.time_idx, v);
 }

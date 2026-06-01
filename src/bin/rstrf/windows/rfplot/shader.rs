@@ -21,9 +21,9 @@ pub struct Uniforms {
     time_bounds: Vec2,
     freq_bounds: Vec2,
     pixel_height: f32,
+    viewport_width: f32,
     nslices: u32,
     nchan: u32,
-    _pad: u32,
 }
 
 // #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -160,7 +160,7 @@ impl Pipeline {
                 nslices: chunk.nslices,
                 nchan: spectrogram.nchan as u32,
                 pixel_height,
-                _pad: 0,
+                viewport_width: viewport.physical_width() as f32,
             };
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
 
