@@ -74,7 +74,7 @@ impl Controls {
     pub fn set_spectrogram(&mut self, spec: &Spectrogram) {
         self.set_power_bounds(spec.power_bounds);
         let data = spec.bounds();
-        self.set_data_bounds(data.0.width as f32, data.0.height as f32);
+        self.set_data_bounds(data.0.width, data.0.height);
     }
 
     fn set_power_bounds(&mut self, bounds: (f32, f32)) {
