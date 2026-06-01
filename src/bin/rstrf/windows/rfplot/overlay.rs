@@ -54,7 +54,7 @@ fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey
     }
     Some(PredictionKey {
         satellites,
-        start_time: spectrogram.start_time,
+        start_time: spectrogram.start_time(),
         length: spectrogram.length(),
         site,
     })
@@ -154,8 +154,9 @@ impl Overlay {
             .x_desc("Time [s]");
 
         let plot_center_freq = bounds.0.y + bounds.0.height / 2.0;
+        let start_time = spectrogram.start_time();
         let x_formatter = |v: &f32| {
-            let t = spectrogram.start_time + Duration::seconds(*v as i64);
+            let t = start_time + Duration::seconds(*v as i64);
             format!("{}", t.format("%H:%M"))
         };
         let y_formatter = |v: &f32| format!("{:.1}", (v - plot_center_freq) / 1000.0);
@@ -775,7 +776,7 @@ impl Overlay {
                     return Task::none();
                 };
                 let start_mjd =
-                    spectrogram.start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
+                    spectrogram.start_time().timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
                 let site_id = app.site_id;
                 let mut output = String::new();

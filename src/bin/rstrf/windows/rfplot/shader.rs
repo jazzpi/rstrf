@@ -246,10 +246,11 @@ impl Pipeline {
         }
 
         let prefix = format!("spectrogram.{}", spectrogram.id);
+        let start_time = spectrogram.start_time();
         let timestamps = spectrogram
             .timestamps
             .iter()
-            .map(|t| (*t - spectrogram.start_time).as_seconds_f32());
+            .map(|t| (*t - start_time).as_seconds_f32());
         let length = spectrogram.length().as_seconds_f32();
         let x_ranges = izip!(timestamps, spectrogram.lengths.iter())
             .map(|(t, len)| {

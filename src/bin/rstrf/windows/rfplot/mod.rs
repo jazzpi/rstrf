@@ -283,7 +283,7 @@ impl Window<Message> for RFPlot {
             self.shared
                 .spectrogram
                 .as_ref()
-                .map(|s| s.start_time.to_string())
+                .map(|s| s.start_time().to_string())
                 .unwrap_or("Loading...".to_string())
         )
     }

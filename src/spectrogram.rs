@@ -24,7 +24,8 @@ pub struct RawStrfSpectrum {
 }
 
 /// Parameters shared by all spectra in a strf `.bin` file.
-pub struct StrfParams {
+#[derive(PartialEq, Debug)]
+pub struct SpectrogramParams {
     pub freq: f32,
     pub bw: f32,
     pub nchan: usize,
@@ -32,9 +33,8 @@ pub struct StrfParams {
 
 /// Loads a spectrogram from the given file paths.
 ///
-/// Files ending in `.rstrf` are loaded as the constant-rate RSTRF format.
-/// All other files are treated as strf `.bin` files and resampled together
-/// onto a uniform time grid (gaps filled with [`FILL_DB`]).
+/// Files ending in `.rstrf` are loaded as the constant-rate RSTRF format. All other files are
+/// treated as strf `.bin` files and read the per-spectrum timestamps/lengths.
 pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
     if paths.is_empty() {
         bail!("No files provided");
@@ -50,7 +50,7 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
 
     if !bin_paths.is_empty() {
         spectrograms.push(
-            load_and_resample_strf(&bin_paths)
+            load_strf(&bin_paths)
                 .await
                 .context("Failed to load .bin files")?,
         );
@@ -64,119 +64,13 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
     .await?;
     spectrograms.extend(rstrf_results);
 
-    spectrograms.sort_by_key(|s| s.start_time);
+    spectrograms.sort_by_key(|s| s.start_time());
     Spectrogram::concatenate(&spectrograms)
 }
 
-/// Resamples raw strf spectra onto a uniform time grid.
-///
-/// The nominal slice length is determined as the median of inter-spectrum gaps,
-/// or overridden via `slice_length_s`. Gaps are filled with [`FILL_DB`].
-///
-/// TODO: This should be unnecessary if we render each spectrum as a separate quad
-pub fn resample_strf(
-    mut spectra: Vec<RawStrfSpectrum>,
-    params: &StrfParams,
-    slice_length_s: Option<f64>,
-) -> Result<Spectrogram> {
-    if spectra.is_empty() {
-        bail!("No spectra found");
-    }
-
-    spectra.sort_unstable_by_key(|s| s.time);
-
-    let nchan = params.nchan;
-
-    let slice_length_s = match slice_length_s {
-        Some(s) => {
-            ensure!(s > 0.0, "Slice length must be positive");
-            s
-        }
-        None => {
-            let mut gaps: Vec<f64> = spectra
-                .windows(2)
-                .map(|w| {
-                    (w[1].time - w[0].time).num_microseconds().unwrap_or(0) as f64 / 1_000_000.0
-                })
-                .collect();
-
-            ensure!(
-                !gaps.is_empty(),
-                "Need at least two spectra to determine slice length; use --slice-length"
-            );
-
-            gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            gaps[gaps.len() / 2]
-        }
-    };
-
-    log::info!(
-        "Resampling {} spectra onto {:.6} s grid ({} channels)",
-        spectra.len(),
-        slice_length_s,
-        nchan
-    );
-
-    let start_time = spectra[0].time;
-    let last_time = spectra.last().unwrap().time;
-
-    let nslices = (((last_time - start_time).num_microseconds().unwrap_or(0) as f64
-        / 1_000_000.0
-        / slice_length_s)
-        .round() as usize)
-        + 1;
-
-    let mut data_db = vec![FILL_DB; nslices * nchan];
-
-    for spectrum in &spectra {
-        let offset_s =
-            (spectrum.time - start_time).num_microseconds().unwrap_or(0) as f64 / 1_000_000.0;
-        let slot = (offset_s / slice_length_s).round() as usize;
-        if slot < nslices {
-            let row = &mut data_db[slot * nchan..(slot + 1) * nchan];
-            for (dst, &src) in row.iter_mut().zip(spectrum.power_linear.iter()) {
-                *dst = 10.0 * (src + 1e-12f32).log10();
-            }
-        }
-    }
-
-    let data = ArcArray2::from_shape_vec((nslices, nchan), data_db)
-        .context("Failed to shape data array")?;
-
-    let min = data
-        .iter()
-        .cloned()
-        .filter(|&v| v > FILL_DB)
-        .fold(f32::INFINITY, f32::min);
-    let max = data
-        .iter()
-        .cloned()
-        .filter(|&v| v > FILL_DB)
-        .fold(f32::NEG_INFINITY, f32::max);
-
-    let timestamps = (0..nslices)
-        .map(|i| start_time + Duration::milliseconds((slice_length_s * 1000.0) as i64 * i as i64))
-        .collect();
-    let lengths = vec![slice_length_s as f32; nslices];
-
-    Ok(Spectrogram {
-        id: Uuid::new_v4(),
-        start_time,
-        nchan,
-        nslices,
-        freq: params.freq,
-        bw: params.bw,
-        slice_length: slice_length_s as f32,
-        power_bounds: (min, max),
-        data,
-        timestamps,
-        lengths,
-    })
-}
-
-async fn load_and_resample_strf(paths: &[&PathBuf]) -> Result<Spectrogram> {
+async fn load_strf(paths: &[&PathBuf]) -> Result<Spectrogram> {
     let mut all_spectra: Vec<RawStrfSpectrum> = Vec::new();
-    let mut params: Option<StrfParams> = None;
+    let mut params: Option<SpectrogramParams> = None;
 
     for path in paths {
         let (spectra, file_params) = load_strf_raw(path)
@@ -197,8 +91,40 @@ async fn load_and_resample_strf(paths: &[&PathBuf]) -> Result<Spectrogram> {
         all_spectra.extend(spectra);
     }
 
+    all_spectra.sort_unstable_by_key(|spec| spec.time);
+
     let params = params.unwrap();
-    resample_strf(all_spectra, &params, None)
+    let (data, timestamps, lengths): (Vec<_>, Vec<_>, Vec<_>) =
+        itertools::multiunzip(all_spectra.iter().map(|spec| {
+            (
+                spec.power_linear
+                    .iter()
+                    .cloned()
+                    .map(|v| 10.0 * (v + 1e-12f32).log10())
+                    .collect::<Vec<_>>(),
+                spec.time,
+                spec.length_s,
+            )
+        }));
+    let data = ArcArray2::from_shape_vec(
+        (timestamps.len(), params.nchan),
+        data.into_iter().flatten().collect(),
+    )
+    .context("Failed to shape data array")?;
+    Ok(Spectrogram {
+        id: Uuid::new_v4(),
+        nchan: params.nchan,
+        nslices: timestamps.len(),
+        freq: params.freq,
+        bw: params.bw,
+        power_bounds: (
+            data.iter().cloned().fold(f32::INFINITY, f32::min),
+            data.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+        ),
+        data,
+        timestamps,
+        lengths,
+    })
 }
 
 /// Writes a spectrogram to the given file path in the RSTRF format.
@@ -209,11 +135,11 @@ pub async fn save(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
     // Header (64 bytes total)
     writer.write_all(RSTRF_MAGIC).await?;
     writer
-        .write_i64_le(spectrogram.start_time.timestamp_millis())
+        .write_i64_le(spectrogram.start_time().timestamp_millis())
         .await?;
     writer.write_f64_le(spectrogram.freq as f64).await?;
     writer.write_f64_le(spectrogram.bw as f64).await?;
-    writer.write_f64_le(spectrogram.slice_length as f64).await?;
+    writer.write_f64_le(spectrogram.lengths[0] as f64).await?;
     writer.write_u32_le(spectrogram.nchan as u32).await?;
     writer.write_u32_le(spectrogram.nslices as u32).await?;
     writer.write_all(&[0u8; 16]).await?; // reserved
@@ -228,17 +154,12 @@ pub async fn save(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
 }
 
 /// Writes a spectrogram to the given file path in the strf `.bin` format.
-///
-/// Use this when you need the output to be compatible with `rfplot` or other
-/// strf tools. For rstrf-internal use, prefer [`save`].
 pub async fn save_strf(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
     let mut file = tokio::fs::File::create(path).await?;
     let mut writer = tokio::io::BufWriter::new(&mut file);
 
-    let header = |nslice: usize| {
-        let mut start = (spectrogram.start_time
-            + Duration::milliseconds((spectrogram.slice_length * 1000.0) as i64 * nslice as i64))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let header = |start: DateTime<Utc>, length_s: f32| {
+        let mut start = start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         // Remove trailing Z for compatibility with STRF
         start.pop();
 
@@ -255,7 +176,7 @@ END
             start,
             spectrogram.freq,
             spectrogram.bw,
-            spectrogram.slice_length,
+            length_s,
             spectrogram.nchan,
             spectrogram.nslices
         );
@@ -263,7 +184,9 @@ END
     };
 
     for (i, slice) in spectrogram.data().outer_iter().enumerate() {
-        writer.write_all(header(i).as_bytes()).await?;
+        writer
+            .write_all(header(spectrogram.timestamps[i], spectrogram.lengths[i]).as_bytes())
+            .await?;
         for &value in slice.iter() {
             let linear_value = 10f32.powf(value / 10.0);
             writer.write_f32_le(linear_value).await?;
@@ -275,10 +198,7 @@ END
 }
 
 /// Reads all spectra from a strf `.bin` file with their per-spectrum timestamps.
-///
-/// Unlike [`load_strf_file`], this function does not enforce timestamp regularity, making
-/// it suitable for use by converters that need to handle gaps or jitter.
-pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, StrfParams)> {
+pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, SpectrogramParams)> {
     let file = tokio::fs::File::open(path).await?;
     let file_size = file.metadata().await?.len() as usize;
     let mut reader = tokio::io::BufReader::new(file);
@@ -286,7 +206,7 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, StrfPar
     let first_header = parse_header(&mut reader)
         .await
         .context("Failed to parse header")?;
-    let params = StrfParams {
+    let params = SpectrogramParams {
         freq: first_header.freq,
         bw: first_header.bw,
         nchan: first_header.nchan,
@@ -339,14 +259,13 @@ const HEADER_SIZE: usize = 256;
 #[derive(Clone, PartialEq)]
 pub struct Spectrogram {
     pub id: Uuid,
-    pub start_time: DateTime<Utc>,
     pub nchan: usize,
     pub nslices: usize,
     pub freq: f32,                // Hz
     pub bw: f32,                  // Hz
-    pub slice_length: f32,        // s
     pub power_bounds: (f32, f32), // dB
     pub data: ArcArray2<f32>,     // dB
+    // TODO: Replace with ArcArray1?
     pub timestamps: Vec<DateTime<Utc>>,
     pub lengths: Vec<f32>,
 }
@@ -354,10 +273,10 @@ pub struct Spectrogram {
 impl std::fmt::Debug for Spectrogram {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Spectrogram")
-            .field("start_time", &self.start_time)
+            .field("start_time", &self.start_time())
             .field("freq", &self.freq)
             .field("bw", &self.bw)
-            .field("slice_length", &self.slice_length)
+            .field("slice_length", &self.lengths[0])
             .field("nchan", &self.nchan)
             .field("nslices", &self.nslices)
             .field("power_bounds", &self.power_bounds)
@@ -372,25 +291,12 @@ impl Spectrogram {
         }
 
         let first = &components[0];
-        for (i, spectrogram) in components.iter().enumerate().skip(1) {
+        for spectrogram in components.iter().skip(1) {
             ensure!(
-                spectrogram.freq == first.freq
-                    && spectrogram.bw == first.bw
-                    && (spectrogram.slice_length / first.slice_length - 1.0).abs() < 0.01
-                    && spectrogram.nchan == first.nchan,
+                spectrogram.params() == first.params(),
                 "Inconsistent spectrogram parameters during concatenation: {:?} vs {:?}",
                 spectrogram,
                 first
-            );
-            let prev = &components[i - 1];
-            ensure!(
-                (spectrogram.start_time - prev.end_time())
-                    .num_milliseconds()
-                    .abs()
-                    < 10,
-                "Non-contiguous spectrograms during concatenation (expected {}, got {})",
-                prev.end_time(),
-                spectrogram.start_time
             );
         }
 
@@ -418,10 +324,8 @@ impl Spectrogram {
 
         Ok(Spectrogram {
             id: Uuid::new_v4(),
-            start_time: first.start_time,
             freq: first.freq,
             bw: first.bw,
-            slice_length: first.slice_length,
             nchan: first.nchan,
             nslices,
             power_bounds,
@@ -450,11 +354,16 @@ impl Spectrogram {
     }
 
     pub fn length(&self) -> Duration {
-        Duration::milliseconds((self.slice_length * 1000.0) as i64 * self.nslices as i64)
+        self.end_time() - self.start_time()
+    }
+
+    pub fn start_time(&self) -> DateTime<Utc> {
+        self.timestamps[0]
     }
 
     pub fn end_time(&self) -> DateTime<Utc> {
-        self.start_time + self.length()
+        let last = self.timestamps.len() - 1;
+        self.timestamps[last] + Duration::milliseconds((self.lengths[last] * 1000.0) as i64)
     }
 
     pub fn bounds(&self) -> data_absolute::Rectangle {
@@ -462,6 +371,14 @@ impl Spectrogram {
             data_absolute::Point::new(0.0, -self.bw / 2.0),
             data_absolute::Size::new(self.length().as_seconds_f32(), self.bw),
         )
+    }
+
+    pub fn params(&self) -> SpectrogramParams {
+        SpectrogramParams {
+            freq: self.freq,
+            bw: self.bw,
+            nchan: self.nchan,
+        }
     }
 }
 
@@ -513,12 +430,10 @@ async fn load_rstrf_file(path: &Path) -> Result<Spectrogram> {
 
     Ok(Spectrogram {
         id: Uuid::new_v4(),
-        start_time,
         nchan,
         nslices,
         freq,
         bw,
-        slice_length,
         power_bounds: (min, max),
         data,
         timestamps,
@@ -585,10 +500,8 @@ mod tests {
         let max = data.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         Spectrogram {
             id: Uuid::new_v4(),
-            start_time: start,
             freq: 437e6,
             bw: 100e3,
-            slice_length: 1.0,
             nchan,
             nslices,
             power_bounds: (min, max),
@@ -598,28 +511,6 @@ mod tests {
                 .collect(),
             lengths: vec![1.0; nslices],
         }
-    }
-
-    fn make_raw_spectra(
-        start: DateTime<Utc>,
-        n: usize,
-        nchan: usize,
-        interval_ms: i64,
-        power_linear: f32,
-    ) -> (Vec<RawStrfSpectrum>, StrfParams) {
-        let spectra = (0..n)
-            .map(|i| RawStrfSpectrum {
-                time: start + Duration::milliseconds(interval_ms * i as i64),
-                length_s: interval_ms as f32 / 1000.0,
-                power_linear: vec![power_linear; nchan],
-            })
-            .collect();
-        let params = StrfParams {
-            freq: 437e6,
-            bw: 100e3,
-            nchan,
-        };
-        (spectra, params)
     }
 
     #[test]
@@ -654,10 +545,10 @@ mod tests {
     fn concatenate_single_preserves_metadata() {
         let start = test_start();
         let spec = make_spec(start, 10, 1024, 1.0);
+        let spec_params = spec.params();
         let result = Spectrogram::concatenate(&[spec]).unwrap();
         assert_eq!(result.nslices, 10);
-        assert_eq!(result.start_time, start);
-        assert_eq!(result.nchan, 1024);
+        assert_eq!(result.params(), spec_params);
     }
 
     #[test]
@@ -703,212 +594,6 @@ mod tests {
         assert!(spec.set_data(ArcArray2::zeros((5, 1024))).is_ok());
     }
 
-    #[test]
-    fn resample_strf_empty_errors() {
-        let params = StrfParams {
-            freq: 437e6,
-            bw: 100e3,
-            nchan: 4,
-        };
-        assert!(resample_strf(vec![], &params, None).is_err());
-    }
-
-    #[test]
-    fn resample_strf_single_spectrum_without_override_errors() {
-        let (spectra, params) = make_raw_spectra(test_start(), 1, 4, 1000, 1.0);
-        assert!(resample_strf(spectra, &params, None).is_err());
-    }
-
-    #[test]
-    fn resample_strf_single_spectrum_with_override() {
-        let start = test_start();
-        let (spectra, params) = make_raw_spectra(start, 1, 4, 1000, 1.0);
-        let result = resample_strf(spectra, &params, Some(1.0)).unwrap();
-        assert_eq!(result.nslices, 1);
-        assert_eq!(result.nchan, 4);
-        assert_eq!(result.start_time, start);
-    }
-
-    #[test]
-    fn resample_strf_slice_length_from_median_gap() {
-        // 5 spectra at 1 s intervals → median gap = 1.0 s
-        let (spectra, params) = make_raw_spectra(test_start(), 5, 4, 1000, 1.0);
-        let result = resample_strf(spectra, &params, None).unwrap();
-        assert!((result.slice_length - 1.0).abs() < 1e-3);
-        assert_eq!(result.nslices, 5);
-    }
-
-    #[test]
-    fn resample_strf_start_time_is_earliest_spectrum() {
-        let start = test_start();
-        let params = StrfParams {
-            freq: 437e6,
-            bw: 100e3,
-            nchan: 4,
-        };
-        // Provide out-of-order spectra; start_time should be the earliest
-        let spectra = vec![
-            RawStrfSpectrum {
-                time: start + Duration::seconds(2),
-                length_s: 1.1,
-                power_linear: vec![1.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start,
-                length_s: 0.9,
-                power_linear: vec![1.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start + Duration::seconds(1),
-                length_s: 1.0,
-                power_linear: vec![1.0; 4],
-            },
-        ];
-        let result = resample_strf(spectra, &params, Some(1.0)).unwrap();
-        assert_eq!(result.start_time, start);
-    }
-
-    #[test]
-    fn resample_strf_out_of_order_input_sorted_correctly() {
-        let start = test_start();
-        let params = StrfParams {
-            freq: 437e6,
-            bw: 100e3,
-            nchan: 4,
-        };
-        let spectra = vec![
-            RawStrfSpectrum {
-                time: start + Duration::seconds(2),
-                length_s: 1.1,
-                power_linear: vec![3.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start,
-                length_s: 0.9,
-                power_linear: vec![1.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start + Duration::seconds(1),
-                length_s: 1.0,
-                power_linear: vec![2.0; 4],
-            },
-        ];
-        let result = resample_strf(spectra, &params, Some(1.0)).unwrap();
-        assert_eq!(result.nslices, 3);
-
-        let db = |x: f32| 10.0 * (x + 1e-12f32).log10();
-        let data = result.data();
-        for &v in data.slice(s![0, ..]).iter() {
-            assert!((v - db(1.0)).abs() < 1e-4);
-        }
-        for &v in data.slice(s![1, ..]).iter() {
-            assert!((v - db(2.0)).abs() < 1e-4);
-        }
-        for &v in data.slice(s![2, ..]).iter() {
-            assert!((v - db(3.0)).abs() < 1e-4);
-        }
-    }
-
-    #[test]
-    fn resample_strf_data_converted_to_db() {
-        let linear = 100.0f32;
-        let expected_db = 10.0 * (linear + 1e-12f32).log10();
-        let (spectra, params) = make_raw_spectra(test_start(), 3, 4, 1000, linear);
-        let result = resample_strf(spectra, &params, None).unwrap();
-        for &v in result.data().iter() {
-            assert!(
-                (v - expected_db).abs() < 1e-4,
-                "expected {expected_db}, got {v}"
-            );
-        }
-    }
-
-    #[test]
-    fn resample_strf_gap_filled_with_fill_db() {
-        let start = test_start();
-        let params = StrfParams {
-            freq: 437e6,
-            bw: 100e3,
-            nchan: 4,
-        };
-        // Spectra at t+0, t+1, t+3 — slot 2 (t+2) is missing
-        let spectra = vec![
-            RawStrfSpectrum {
-                time: start,
-                length_s: 1.0,
-                power_linear: vec![1.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start + Duration::seconds(1),
-                length_s: 1.0,
-                power_linear: vec![1.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start + Duration::seconds(3),
-                length_s: 1.0,
-                power_linear: vec![1.0; 4],
-            },
-        ];
-        let result = resample_strf(spectra, &params, Some(1.0)).unwrap();
-        assert_eq!(result.nslices, 4);
-        let data = result.data();
-        for &v in data.slice(s![2, ..]).iter() {
-            assert_eq!(v, FILL_DB, "gap slot should be FILL_DB");
-        }
-        // Non-gap slots should have real data
-        for row in [0, 1, 3] {
-            assert!(data.slice(s![row, ..]).iter().all(|&v| v > FILL_DB));
-        }
-    }
-
-    #[test]
-    fn resample_strf_power_bounds_exclude_fill_db() {
-        let start = test_start();
-        let params = StrfParams {
-            freq: 437e6,
-            bw: 100e3,
-            nchan: 4,
-        };
-        // Slot 1 will be a gap (FILL_DB); slots 0 and 2 have real data
-        let spectra = vec![
-            RawStrfSpectrum {
-                time: start,
-                length_s: 1.0,
-                power_linear: vec![1.0; 4],
-            },
-            RawStrfSpectrum {
-                time: start + Duration::seconds(2),
-                length_s: 1.0,
-                power_linear: vec![100.0; 4],
-            },
-        ];
-        let result = resample_strf(spectra, &params, Some(1.0)).unwrap();
-        let (min, max) = result.power_bounds;
-        assert!(min > FILL_DB, "min should exclude FILL_DB sentinel");
-        assert!(max > min);
-    }
-
-    #[test]
-    fn resample_strf_override_slice_length_used() {
-        // 3 spectra at 1 s intervals; override to 0.5 s → 5 slots spanning 0..2 s
-        let (spectra, params) = make_raw_spectra(test_start(), 3, 4, 1000, 1.0);
-        let result = resample_strf(spectra, &params, Some(0.5)).unwrap();
-        assert!((result.slice_length - 0.5).abs() < 1e-6);
-        assert_eq!(result.nslices, 5);
-    }
-
-    #[test]
-    fn resample_strf_zero_slice_length_errors() {
-        let (spectra, params) = make_raw_spectra(test_start(), 3, 4, 1000, 1.0);
-        assert!(resample_strf(spectra, &params, Some(0.0)).is_err());
-    }
-
-    #[test]
-    fn resample_strf_negative_slice_length_errors() {
-        let (spectra, params) = make_raw_spectra(test_start(), 3, 4, 1000, 1.0);
-        assert!(resample_strf(spectra, &params, Some(-1.0)).is_err());
-    }
-
     #[tokio::test]
     async fn load_single_bin_file_roundtrip() {
         let start = test_start();
@@ -922,15 +607,14 @@ mod tests {
 
         assert_eq!(loaded.nslices, spec.nslices);
         assert_eq!(loaded.nchan, spec.nchan);
-        assert_eq!(loaded.start_time, spec.start_time);
+        assert_eq!(loaded.start_time(), spec.start_time());
         assert!((loaded.freq - spec.freq).abs() < 1.0);
         assert!((loaded.bw - spec.bw).abs() < 1.0);
-        assert!((loaded.slice_length - spec.slice_length).abs() < 0.01);
 
         let orig = spec.data();
         let got = loaded.data();
         for (&a, &b) in orig.iter().zip(got.iter()) {
-            // save_strf converts dB→linear; resample_strf converts back, adding a second
+            // save_strf converts dB→linear; load_strf converts back, adding a second
             // epsilon; the round-trip error is negligible for non-tiny power values.
             assert!((a - b).abs() < 0.01, "dB mismatch: {a} vs {b}");
         }
@@ -952,7 +636,7 @@ mod tests {
 
         assert_eq!(loaded.nslices, s1.nslices + s2.nslices);
         assert_eq!(loaded.nchan, s1.nchan);
-        assert_eq!(loaded.start_time, start);
+        assert_eq!(loaded.start_time(), start);
     }
 
     #[tokio::test]
@@ -972,7 +656,7 @@ mod tests {
         let loaded_fwd = load(&[path1, path2]).await.unwrap();
 
         assert_eq!(loaded.nslices, loaded_fwd.nslices);
-        assert_eq!(loaded.start_time, loaded_fwd.start_time);
+        assert_eq!(loaded.start_time(), loaded_fwd.start_time());
     }
 
     #[tokio::test]
@@ -990,7 +674,7 @@ mod tests {
         let loaded = load(&[bin_path, rstrf_path]).await.unwrap();
 
         assert_eq!(loaded.nslices, s1.nslices + s2.nslices);
-        assert_eq!(loaded.start_time, start);
+        assert_eq!(loaded.start_time(), start);
     }
 
     #[tokio::test]
@@ -1006,10 +690,11 @@ mod tests {
 
         assert_eq!(loaded.nslices, spec.nslices);
         assert_eq!(loaded.nchan, spec.nchan);
-        assert_eq!(loaded.start_time, spec.start_time);
+        assert_eq!(loaded.start_time(), spec.start_time());
         assert!((loaded.freq - spec.freq).abs() < 1.0);
         assert!((loaded.bw - spec.bw).abs() < 1.0);
-        assert!((loaded.slice_length - spec.slice_length).abs() < 1e-4);
+        assert_eq!(loaded.timestamps, spec.timestamps);
+        assert_eq!(loaded.lengths, spec.lengths);
 
         let orig = spec.data();
         let got = loaded.data();

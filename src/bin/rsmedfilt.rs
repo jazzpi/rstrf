@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
 
     spectrogram.set_data(result.into())?;
 
-    spectrogram::save(&spectrogram, &args.output)
+    spectrogram::save_strf(&spectrogram, &args.output)
         .await
         .context("Failed to save filtered spectrogram")?;
 
