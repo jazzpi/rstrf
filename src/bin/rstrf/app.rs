@@ -270,7 +270,11 @@ impl AppModel {
                 };
                 let rfplot = RFPlot::with_initial_view(args.spectrograms, view);
                 self.windows.insert(id, AnyWindow::RFPlot(Box::new(rfplot)));
-                let task = self.windows.get_mut(&id).unwrap().init(&self.shared_state);
+                let task = self
+                    .windows
+                    .get_mut(&id)
+                    .unwrap()
+                    .init(id, &self.shared_state);
                 task.map(move |msg| Message::WindowMessage(id, msg))
             }
             Message::CatalogLoaded {
@@ -308,7 +312,7 @@ impl AppModel {
                 windows::Message::ToApp(message) => self.update(*message),
                 _ => match self.windows.get_mut(&id) {
                     Some(window) => window
-                        .update(message, &self.shared_state)
+                        .update(id, message, &self.shared_state)
                         .map(move |msg| Message::WindowMessage(id, msg)),
                     None => {
                         log::warn!(

@@ -1,4 +1,4 @@
-use iced::{Element, Subscription, Task};
+use iced::{Element, Subscription, Task, window};
 use rstrf::menu::MenuItem;
 
 use crate::{
@@ -91,8 +91,8 @@ pub trait Window<M: Clone> {
         Vec::new()
     }
     fn view<'a>(&'a self, app: &'a AppShared) -> Element<'a, WindowOut<M>>;
-    fn update(&mut self, message: M, app: &AppShared) -> Task<WindowOut<M>>;
-    fn init(&mut self, _app: &AppShared) -> Task<WindowOut<M>> {
+    fn update(&mut self, id: window::Id, message: M, app: &AppShared) -> Task<WindowOut<M>>;
+    fn init(&mut self, _id: window::Id, _app: &AppShared) -> Task<WindowOut<M>> {
         Task::none()
     }
     fn subscription(&self) -> Subscription<WindowOut<M>> {
@@ -143,22 +143,24 @@ impl AnyWindow {
         }
     }
 
-    pub fn init(&mut self, app: &AppShared) -> Task<Message> {
+    pub fn init(&mut self, id: window::Id, app: &AppShared) -> Task<Message> {
         match self {
-            AnyWindow::RFPlot(w) => w.init(app).map(Message::from),
-            AnyWindow::SatManager(w) => w.init(app).map(Message::from),
-            AnyWindow::Preferences(w) => w.init(app).map(Message::from),
+            AnyWindow::RFPlot(w) => w.init(id, app).map(Message::from),
+            AnyWindow::SatManager(w) => w.init(id, app).map(Message::from),
+            AnyWindow::Preferences(w) => w.init(id, app).map(Message::from),
         }
     }
 
-    pub fn update(&mut self, message: Message, app: &AppShared) -> Task<Message> {
+    pub fn update(&mut self, id: window::Id, message: Message, app: &AppShared) -> Task<Message> {
         match (self, message) {
             (AnyWindow::SatManager(w), Message::SatManager(msg)) => {
-                w.update(msg, app).map(Message::from)
+                w.update(id, msg, app).map(Message::from)
             }
-            (AnyWindow::RFPlot(w), Message::RFPlot(msg)) => w.update(msg, app).map(Message::from),
+            (AnyWindow::RFPlot(w), Message::RFPlot(msg)) => {
+                w.update(id, msg, app).map(Message::from)
+            }
             (AnyWindow::Preferences(w), Message::Preferences(msg)) => {
-                w.update(msg, app).map(Message::from)
+                w.update(id, msg, app).map(Message::from)
             }
             _ => Task::none(),
         }

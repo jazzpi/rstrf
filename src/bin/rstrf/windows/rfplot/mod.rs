@@ -4,7 +4,9 @@ use futures_util::{SinkExt, Stream};
 use iced::{
     Element, Length, Padding, Subscription, Task,
     widget::{self, button, container},
+    window,
 };
+use image::RgbaImage;
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{coord::plot_area, menu::MenuItem, spectrogram::Spectrogram};
@@ -30,6 +32,9 @@ pub enum Message {
     SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
     LoadProgress { loaded: usize, total: usize },
     GpuUploadDone,
+    CaptureScreenshot(Option<PathBuf>),
+    CapturedScreenshot(Result<(RgbaImage, Option<PathBuf>), String>),
+    SaveScreenshot(RgbaImage, PathBuf),
     Nop,
 }
 
@@ -215,7 +220,7 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
 }
 
 impl Window<Message> for RFPlot {
-    fn init(&mut self, app: &AppShared) -> Task<WindowOut<Message>> {
+    fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
         let cmap_task = self
             .shared
             .controls
@@ -228,6 +233,7 @@ impl Window<Message> for RFPlot {
             Task::none()
         } else {
             self.update(
+                id,
                 Message::LoadSpectrogram(self.shared.spectrogram_files.clone()),
                 app,
             )
@@ -317,7 +323,12 @@ impl Window<Message> for RFPlot {
         contents.map(WindowOut::Msg)
     }
 
-    fn update(&mut self, message: Message, app: &AppShared) -> Task<WindowOut<Message>> {
+    fn update(
+        &mut self,
+        id: window::Id,
+        message: Message,
+        app: &AppShared,
+    ) -> Task<WindowOut<Message>> {
         let result = match message {
             Message::Control(message) => self.shared.controls.update(message).map(Message::Control),
             Message::Overlay(message) => self
@@ -382,6 +393,41 @@ impl Window<Message> for RFPlot {
                     Message::Nop
                 }
             }),
+            Message::CaptureScreenshot(path) => window::screenshot(id).map(move |screenshot| {
+                let width = screenshot.size.width;
+                let height = screenshot.size.height;
+                Message::CapturedScreenshot(
+                    RgbaImage::from_raw(width, height, screenshot.rgba.to_vec())
+                        .map(|img| (img, path.clone()))
+                        .ok_or_else(|| "Screenshot buffer size mismatch".to_string()),
+                )
+            }),
+            Message::CapturedScreenshot(Err(err)) => {
+                log::error!("Failed to capture screenshot: {err}");
+                Task::none()
+            }
+            Message::CapturedScreenshot(Ok((img, Some(path)))) => {
+                Task::done(Message::SaveScreenshot(img, path))
+            }
+            Message::CapturedScreenshot(Ok((img, None))) => Task::future(async move {
+                match AsyncFileDialog::new()
+                    .add_filter("PNG image", &["png"])
+                    .add_filter("All files", &["*"])
+                    .set_file_name("screenshot.png")
+                    .save_file()
+                    .await
+                {
+                    Some(file) => Message::SaveScreenshot(img, file.path().to_path_buf()),
+                    None => Message::Nop,
+                }
+            }),
+            Message::SaveScreenshot(img, path) => {
+                match img.save(&path) {
+                    Ok(_) => log::info!("Saved screenshot to {path:?}"),
+                    Err(e) => log::error!("Failed to save screenshot to {path:?}: {e}"),
+                }
+                Task::none()
+            }
             Message::Nop => Task::none(),
         };
         result.map(WindowOut::Msg)

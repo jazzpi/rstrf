@@ -41,6 +41,7 @@ pub enum Icon {
     MarkSignal,
     Delete,
     Save,
+    Screenshot,
     Colormap(Colormap),
 }
 
@@ -91,6 +92,11 @@ impl From<Icon> for svg::Handle {
             Icon::Delete => include_bytes!("../../../../resources/icons/bytesize--trash.svg"),
             Icon::Save => {
                 include_bytes!("../../../../resources/icons/material-symbols--save-rounded.svg")
+            }
+            Icon::Screenshot => {
+                include_bytes!(
+                    "../../../../resources/icons/material-symbols--screenshot-monitor-outline-rounded.svg"
+                )
             }
             Icon::Colormap(colormap) => match colormap {
                 Colormap::Magma => include_bytes!("../../../../resources/icons/cmap-magma.svg"),

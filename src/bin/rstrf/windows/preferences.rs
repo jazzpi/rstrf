@@ -5,6 +5,7 @@ use iced::{
     alignment::Vertical,
     font,
     widget::{Space, button, column, container, pick_list, row, rule, space, text, text_input},
+    window,
 };
 use space_track::SpaceTrack;
 use strum::VariantArray;
@@ -251,6 +252,7 @@ impl super::Window<Message> for Window {
 
     fn update(
         &mut self,
+        _id: window::Id,
         message: Message,
         _app: &crate::app::AppShared,
     ) -> Task<WindowOut<Message>> {

@@ -8,6 +8,7 @@ use iced::{
         Column, Grid, Row, button, checkbox, column, container, grid::Sizing, scrollable, table,
         text,
     },
+    window,
 };
 use iced_aw::card;
 use rstrf::{
@@ -250,7 +251,11 @@ impl Window<Message> for SatManager {
                 button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
             Some(card(head, content).style(iced_aw::style::card::info))
-        } else if app.satellites.iter().all(|(sat, _)| sat.transmitters.is_empty()) {
+        } else if app
+            .satellites
+            .iter()
+            .all(|(sat, _)| sat.transmitters.is_empty())
+        {
             let head: Element<'_, WindowOut<Message>> = text("TIP").into();
             let content: Element<'_, WindowOut<Message>> = column![
                 text("You don't have any transmit frequencies set for the satellites. Try editing the frequency fields, or loading an STRF frequencies.txt file from the File menu or the button below."),
@@ -390,7 +395,12 @@ impl Window<Message> for SatManager {
         "Satellites".into()
     }
 
-    fn update(&mut self, message: Message, app: &AppShared) -> Task<WindowOut<Message>> {
+    fn update(
+        &mut self,
+        _id: window::Id,
+        message: Message,
+        app: &AppShared,
+    ) -> Task<WindowOut<Message>> {
         match message {
             Message::Nop => Task::none(),
             Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))

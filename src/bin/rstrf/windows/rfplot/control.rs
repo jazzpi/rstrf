@@ -225,6 +225,12 @@ impl Controls {
                 msg: rfplot::overlay::Message::SaveSignals.into(),
                 style: widget::button::primary,
             },
+            ToolbarButton::Icon {
+                icon: Icon::Screenshot,
+                tooltip: "Save screenshot",
+                msg: rfplot::Message::CaptureScreenshot(None),
+                style: widget::button::primary,
+            },
             ToolbarButton::Submenu {
                 toplevel: Box::new(ToolbarButton::Icon {
                     icon: Icon::Colormap(shared.controls.colormap),
