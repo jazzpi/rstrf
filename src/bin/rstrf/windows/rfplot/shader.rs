@@ -127,7 +127,7 @@ impl Pipeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         primitive: &Primitive,
-        viewport: &shader::Viewport,
+        viewport_bounds: &Rectangle,
     ) {
         let Some(spectrogram) = &primitive.spectrogram else {
             return;
@@ -145,7 +145,7 @@ impl Pipeline {
 
         let bounds = primitive.controls.bounds();
         let pixel_height =
-            bounds.0.height / viewport.physical_height() as f32 * spectrogram.nchan as f32;
+            bounds.0.height / viewport_bounds.height as f32 * spectrogram.nchan as f32;
 
         let xmin = bounds.0.x;
         let xmax = bounds.0.x + bounds.0.width;
@@ -160,7 +160,7 @@ impl Pipeline {
                 nslices: chunk.nslices,
                 nchan: spectrogram.nchan as u32,
                 pixel_height,
-                viewport_width: viewport.physical_width() as f32,
+                viewport_width: viewport_bounds.width,
             };
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
 
@@ -418,10 +418,10 @@ impl shader::Primitive for Primitive {
         pipeline: &mut Self::Pipeline,
         device: &iced::wgpu::Device,
         queue: &iced::wgpu::Queue,
-        _bounds: &Rectangle,
-        viewport: &shader::Viewport,
+        bounds: &Rectangle,
+        _viewport: &shader::Viewport,
     ) {
-        pipeline.update_buffers(device, queue, self, viewport);
+        pipeline.update_buffers(device, queue, self, bounds);
     }
 
     fn render(
