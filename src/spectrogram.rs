@@ -18,6 +18,7 @@ pub const FILL_DB: f32 = -120.0;
 /// Raw spectrum read from a strf `.bin` file, including its per-spectrum timestamp.
 pub struct RawStrfSpectrum {
     pub time: DateTime<Utc>,
+    pub length_s: f32,
     /// Linear (not dB) power values, one per frequency channel.
     pub power_linear: Vec<f32>,
 }
@@ -71,6 +72,8 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
 ///
 /// The nominal slice length is determined as the median of inter-spectrum gaps,
 /// or overridden via `slice_length_s`. Gaps are filled with [`FILL_DB`].
+///
+/// TODO: This should be unnecessary if we render each spectrum as a separate quad
 pub fn resample_strf(
     mut spectra: Vec<RawStrfSpectrum>,
     params: &StrfParams,
@@ -151,6 +154,11 @@ pub fn resample_strf(
         .filter(|&v| v > FILL_DB)
         .fold(f32::NEG_INFINITY, f32::max);
 
+    let timestamps = (0..nslices)
+        .map(|i| start_time + Duration::milliseconds((slice_length_s * 1000.0) as i64 * i as i64))
+        .collect();
+    let lengths = vec![slice_length_s as f32; nslices];
+
     Ok(Spectrogram {
         id: Uuid::new_v4(),
         start_time,
@@ -161,6 +169,8 @@ pub fn resample_strf(
         slice_length: slice_length_s as f32,
         power_bounds: (min, max),
         data,
+        timestamps,
+        lengths,
     })
 }
 
@@ -292,6 +302,7 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, StrfPar
     }
     spectra.push(RawStrfSpectrum {
         time: first_header.start_time,
+        length_s: first_header.length,
         power_linear: power,
     });
 
@@ -307,6 +318,7 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, StrfPar
         }
         spectra.push(RawStrfSpectrum {
             time: header.start_time,
+            length_s: header.length,
             power_linear: power,
         });
     }
@@ -335,6 +347,8 @@ pub struct Spectrogram {
     pub slice_length: f32,        // s
     pub power_bounds: (f32, f32), // dB
     pub data: ArcArray2<f32>,     // dB
+    pub timestamps: Vec<DateTime<Utc>>,
+    pub lengths: Vec<f32>,
 }
 
 impl std::fmt::Debug for Spectrogram {
@@ -385,6 +399,11 @@ impl Spectrogram {
             &components.iter().map(|s| s.data.view()).collect::<Vec<_>>(),
         )
         .context("Failed to concatenate spectrograms")?;
+        let timestamps = components
+            .iter()
+            .flat_map(|s| s.timestamps.clone())
+            .collect();
+        let lengths = components.iter().flat_map(|s| s.lengths.clone()).collect();
 
         let nslices: usize = components.iter().map(|s| s.nslices).sum();
         let power_bounds =
@@ -407,6 +426,8 @@ impl Spectrogram {
             nslices,
             power_bounds,
             data: data.into(),
+            timestamps,
+            lengths,
         })
     }
 
@@ -485,6 +506,11 @@ async fn load_rstrf_file(path: &Path) -> Result<Spectrogram> {
         .filter(|&v| v > FILL_DB)
         .fold(f32::NEG_INFINITY, f32::max);
 
+    let timestamps = (0..nslices)
+        .map(|i| start_time + Duration::milliseconds((slice_length * 1000.0) as i64 * i as i64))
+        .collect();
+    let lengths = vec![slice_length; nslices];
+
     Ok(Spectrogram {
         id: Uuid::new_v4(),
         start_time,
@@ -495,6 +521,8 @@ async fn load_rstrf_file(path: &Path) -> Result<Spectrogram> {
         slice_length,
         power_bounds: (min, max),
         data,
+        timestamps,
+        lengths,
     })
 }
 
@@ -565,6 +593,10 @@ mod tests {
             nslices,
             power_bounds: (min, max),
             data: data.into(),
+            timestamps: (0..nslices)
+                .map(|i| start + Duration::milliseconds((1.0 * 1000.0) as i64 * i as i64))
+                .collect(),
+            lengths: vec![1.0; nslices],
         }
     }
 
@@ -578,6 +610,7 @@ mod tests {
         let spectra = (0..n)
             .map(|i| RawStrfSpectrum {
                 time: start + Duration::milliseconds(interval_ms * i as i64),
+                length_s: interval_ms as f32 / 1000.0,
                 power_linear: vec![power_linear; nchan],
             })
             .collect();
@@ -717,14 +750,17 @@ mod tests {
         let spectra = vec![
             RawStrfSpectrum {
                 time: start + Duration::seconds(2),
+                length_s: 1.1,
                 power_linear: vec![1.0; 4],
             },
             RawStrfSpectrum {
                 time: start,
+                length_s: 0.9,
                 power_linear: vec![1.0; 4],
             },
             RawStrfSpectrum {
                 time: start + Duration::seconds(1),
+                length_s: 1.0,
                 power_linear: vec![1.0; 4],
             },
         ];
@@ -743,14 +779,17 @@ mod tests {
         let spectra = vec![
             RawStrfSpectrum {
                 time: start + Duration::seconds(2),
+                length_s: 1.1,
                 power_linear: vec![3.0; 4],
             },
             RawStrfSpectrum {
                 time: start,
+                length_s: 0.9,
                 power_linear: vec![1.0; 4],
             },
             RawStrfSpectrum {
                 time: start + Duration::seconds(1),
+                length_s: 1.0,
                 power_linear: vec![2.0; 4],
             },
         ];
@@ -796,14 +835,17 @@ mod tests {
         let spectra = vec![
             RawStrfSpectrum {
                 time: start,
+                length_s: 1.0,
                 power_linear: vec![1.0; 4],
             },
             RawStrfSpectrum {
                 time: start + Duration::seconds(1),
+                length_s: 1.0,
                 power_linear: vec![1.0; 4],
             },
             RawStrfSpectrum {
                 time: start + Duration::seconds(3),
+                length_s: 1.0,
                 power_linear: vec![1.0; 4],
             },
         ];
@@ -831,10 +873,12 @@ mod tests {
         let spectra = vec![
             RawStrfSpectrum {
                 time: start,
+                length_s: 1.0,
                 power_linear: vec![1.0; 4],
             },
             RawStrfSpectrum {
                 time: start + Duration::seconds(2),
+                length_s: 1.0,
                 power_linear: vec![100.0; 4],
             },
         ];
