@@ -188,10 +188,10 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, Spectro
     let n_blocks = file_size / (data_block_size + HEADER_SIZE);
     let mut spectra = Vec::with_capacity(n_blocks);
 
-    let mut power = vec![0f32; first_header.nchan];
-    for v in power.iter_mut() {
-        *v = reader.read_f32_le().await?;
-    }
+    let byte_len = first_header.nchan * 4;
+    let mut buf = vec![0u8; byte_len];
+    reader.read_exact(&mut buf).await?;
+    let power: Vec<f32> = bytemuck::cast_slice(&buf).to_vec();
     spectra.push(RawStrfSpectrum {
         time: first_header.start_time,
         length_s: first_header.length,
@@ -204,10 +204,9 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, Spectro
             params.freq == header.freq && params.bw == header.bw && params.nchan == header.nchan,
             "Inconsistent spectrogram parameters detected"
         );
-        let mut power = vec![0f32; header.nchan];
-        for v in power.iter_mut() {
-            *v = reader.read_f32_le().await?;
-        }
+        let mut buf = vec![0u8; header.nchan * 4];
+        reader.read_exact(&mut buf).await?;
+        let power: Vec<f32> = bytemuck::cast_slice(&buf).to_vec();
         spectra.push(RawStrfSpectrum {
             time: header.start_time,
             length_s: header.length,
