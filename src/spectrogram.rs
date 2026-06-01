@@ -39,6 +39,20 @@ pub struct SpectrogramParams {
     pub nchan: usize,
 }
 
+/// Loads a single spectrogram file, dispatching on extension.
+///
+/// `.rstrf` files are loaded as the constant-rate RSTRF format; all other files are treated as
+/// strf `.bin` files.
+pub async fn load_single(path: PathBuf) -> Result<Spectrogram> {
+    let spec = if path.extension().and_then(|e| e.to_str()) == Some("rstrf") {
+        load_rstrf_file(&path).await
+    } else {
+        load_strf_file(&path).await
+    };
+    log::debug!("Loaded {}", path.display());
+    spec.context(format!("Failed to load file {:?}", path))
+}
+
 /// Loads a spectrogram from the given file paths.
 ///
 /// Files ending in `.rstrf` are loaded as the constant-rate RSTRF format. All other files are
@@ -51,15 +65,7 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
     log::debug!("Loading {} spectrogram files", paths.len());
 
     let mut spectrograms: Vec<_> = futures_util::stream::iter(paths.iter().cloned())
-        .map(|path| async move {
-            let spec = if path.extension().and_then(|e| e.to_str()) == Some("rstrf") {
-                load_rstrf_file(&path).await
-            } else {
-                load_strf_file(&path).await
-            };
-            log::debug!("Loaded {}", path.display());
-            spec.context(format!("Failed to load file {:?}", path))
-        })
+        .map(load_single)
         .buffer_unordered(8)
         .try_collect()
         .await?;

@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, pin::Pin, sync::Arc};
 
+use futures_util::{SinkExt, Stream};
 use iced::{
-    Element, Length, Padding, Task,
+    Element, Length, Padding, Subscription, Task,
     widget::{self, button, container},
 };
 use plotters_iced2::ChartWidget;
@@ -12,6 +13,7 @@ use uuid::Uuid;
 
 use crate::{
     app::{AppEvent, AppShared},
+    io_service,
     windows::{Window, WindowOut, rfplot::control::Controls},
 };
 
@@ -26,6 +28,8 @@ pub enum Message {
     PickSpectrogram,
     LoadSpectrogram(Vec<PathBuf>),
     SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
+    LoadProgress { loaded: usize, total: usize },
+    GpuUploadDone,
     Nop,
 }
 
@@ -88,13 +92,68 @@ pub struct InitialView {
     pub zmax: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Default, Clone, PartialEq)]
+enum LoadingState {
+    #[default]
+    Idle,
+    LoadingFiles {
+        loaded: usize,
+        total: usize,
+    },
+    GpuUploading,
+}
+
+/// Subscription identity + wakeup handle for the GPU-upload-done signal.
+/// Hashed by `spec_id` so iced restarts the subscription for each new spectrogram.
+#[derive(Clone)]
+struct GpuDoneWatcher {
+    spec_id: Uuid,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl std::hash::Hash for GpuDoneWatcher {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.spec_id.hash(state);
+    }
+}
+
+fn gpu_done_stream(
+    watcher: &GpuDoneWatcher,
+) -> Pin<Box<dyn Stream<Item = WindowOut<Message>> + Send>> {
+    let notify = watcher.notify.clone();
+    Box::pin(iced::stream::channel(1, async move |mut sender| {
+        notify.notified().await;
+        sender
+            .send(WindowOut::Msg(Message::GpuUploadDone))
+            .await
+            .ok();
+        std::future::pending::<()>().await;
+    }))
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RFPlot {
     shared: SharedState,
     overlay: overlay::Overlay,
     id: Uuid,
     #[serde(skip)]
     initial_view: Option<Box<InitialView>>,
+    #[serde(skip)]
+    loading_state: LoadingState,
+    #[serde(skip)]
+    pending_paths: Vec<PathBuf>,
+    /// Watcher passed to the GPU-done subscription; keyed by `spec_id`.
+    #[serde(skip)]
+    gpu_watcher: Option<GpuDoneWatcher>,
+    /// Handle given to `Primitive` so `prepare()` can fire the wakeup.
+    #[serde(skip)]
+    pub gpu_notify: Option<Arc<tokio::sync::Notify>>,
+}
+
+impl PartialEq for RFPlot {
+    fn eq(&self, other: &Self) -> bool {
+        self.shared == other.shared && self.overlay == other.overlay && self.id == other.id
+    }
 }
 
 impl RFPlot {
@@ -109,6 +168,10 @@ impl RFPlot {
             overlay: overlay::Overlay::default(),
             id,
             initial_view: None,
+            loading_state: LoadingState::default(),
+            pending_paths: Vec::new(),
+            gpu_watcher: None,
+            gpu_notify: None,
         }
     }
 
@@ -184,9 +247,36 @@ impl Window<Message> for RFPlot {
     }
 
     fn view(&self, _app: &AppShared) -> Element<'_, WindowOut<Message>> {
+        match &self.loading_state {
+            LoadingState::LoadingFiles { loaded, total } => {
+                return container(widget::text(format!(
+                    "Loading spectrograms... {loaded}/{total}"
+                )))
+                .center(Length::Fill)
+                .into();
+            }
+            LoadingState::GpuUploading => {
+                // The shader must be in the tree so prepare() fires and creates GPU buffers.
+                // The text overlay communicates loading status on top.
+                let shader: Element<'_, Message> = widget::shader(self)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
+                let loading_text: Element<'_, Message> =
+                    container(widget::text("Uploading to GPU..."))
+                        .center(Length::Fill)
+                        .into();
+                let stack: Element<'_, Message> = widget::stack![shader, loading_text]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
+                return stack.map(WindowOut::Msg);
+            }
+            LoadingState::Idle => {}
+        }
+
         // The plot is implemented as a stack of two layers: the spectrogram itself (see
         // `shader.rs`) and the overlay (see `overlay.rs`).
-
         if self.shared.spectrogram.is_none() {
             return container(
                 button("Open Spectrogram")
@@ -234,10 +324,16 @@ impl Window<Message> for RFPlot {
                 .overlay
                 .update(message, &self.shared, app)
                 .map(Message::Overlay),
-            Message::LoadSpectrogram(paths) => Task::future(async move {
-                let spec = rstrf::spectrogram::load(&paths).await;
-                Message::SpectrogramLoaded(spec.map(|s| (paths, s)).map_err(|e| format!("{e:?}")))
-            }),
+            Message::LoadSpectrogram(paths) => {
+                let total = paths.len();
+                self.pending_paths = paths;
+                self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
+                Task::none()
+            }
+            Message::LoadProgress { loaded, total } => {
+                self.loading_state = LoadingState::LoadingFiles { loaded, total };
+                Task::none()
+            }
             Message::SpectrogramLoaded(result) => match result {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
@@ -245,17 +341,31 @@ impl Window<Message> for RFPlot {
                     if let Some(iv) = self.initial_view.take() {
                         apply_initial_view(&mut self.shared.controls, &spec, &iv);
                     }
+                    let spec_id = spec.id;
                     self.shared.spectrogram = Some(spec);
                     self.shared.spectrogram_files = paths;
+
+                    let notify = Arc::new(tokio::sync::Notify::new());
+                    self.gpu_notify = Some(notify.clone());
+                    self.gpu_watcher = Some(GpuDoneWatcher { spec_id, notify });
+                    self.loading_state = LoadingState::GpuUploading;
+
                     self.overlay
                         .update(overlay::Message::SpectrogramUpdated, &self.shared, app)
                         .map(Message::Overlay)
                 }
                 Err(err) => {
                     log::error!("Failed to load spectrogram: {err}");
+                    self.loading_state = LoadingState::Idle;
                     Task::none()
                 }
             },
+            Message::GpuUploadDone => {
+                self.loading_state = LoadingState::Idle;
+                self.gpu_watcher = None;
+                self.gpu_notify = None;
+                Task::none()
+            }
             Message::PickSpectrogram => Task::future(async {
                 let files = AsyncFileDialog::new()
                     .add_filter("Supported spectrogram formats", &["rstrf", "bin"])
@@ -275,6 +385,27 @@ impl Window<Message> for RFPlot {
             Message::Nop => Task::none(),
         };
         result.map(WindowOut::Msg)
+    }
+
+    fn subscription(&self) -> Subscription<WindowOut<Message>> {
+        let mut subs = Vec::new();
+
+        if matches!(self.loading_state, LoadingState::LoadingFiles { .. }) {
+            subs.push(
+                io_service::load_subscription(self.pending_paths.clone()).map(|e| match e {
+                    io_service::Event::Progress { loaded, total } => {
+                        WindowOut::Msg(Message::LoadProgress { loaded, total })
+                    }
+                    io_service::Event::Done(r) => WindowOut::Msg(Message::SpectrogramLoaded(r)),
+                }),
+            );
+        }
+
+        if let Some(watcher) = &self.gpu_watcher {
+            subs.push(Subscription::run_with(watcher.clone(), gpu_done_stream));
+        }
+
+        Subscription::batch(subs)
     }
 
     fn title(&self) -> String {

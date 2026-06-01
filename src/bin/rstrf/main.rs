@@ -2,6 +2,7 @@
 
 mod app;
 mod config;
+mod io_service;
 mod widgets;
 mod windows;
 

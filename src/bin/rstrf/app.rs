@@ -229,7 +229,15 @@ impl AppModel {
     /// stopped and started conditionally based on application state, or persist
     /// indefinitely.
     fn subscription(&self) -> Subscription<Message> {
-        let subscriptions = vec![window::close_events().map(Message::WindowClosed)];
+        let mut subscriptions = vec![window::close_events().map(Message::WindowClosed)];
+        for (id, window) in &self.windows {
+            subscriptions.push(
+                window
+                    .subscription()
+                    .with(*id)
+                    .map(|(id, msg)| Message::WindowMessage(id, msg)),
+            );
+        }
         Subscription::batch(subscriptions)
     }
 

@@ -1,6 +1,6 @@
 //! This module contains the WGPU shader implementation for the RFPlot widget. The shader is
 //! responsible for rendering the spectrogram itself.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use glam::{Vec2, vec2};
 use iced::{
@@ -117,6 +117,7 @@ impl Pipeline {
             return;
         };
 
+        let is_new_entry = !self.instances.contains_key(&primitive.id);
         let primitive_data = self.instances.entry(primitive.id).or_insert_with_key(|id| {
             Self::create_buffers(
                 device,
@@ -149,10 +150,19 @@ impl Pipeline {
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
         }
 
-        if primitive_data.spectrogram_id != spectrogram.id {
+        // TODO: do we need to track primitive ID & spectrogram ID separately?
+        if is_new_entry {
+            // Buffers were already created inside create_buffers; just signal upload done.
+            if let Some(notify) = &primitive.gpu_notify {
+                notify.notify_one();
+            }
+        } else if primitive_data.spectrogram_id != spectrogram.id {
             primitive_data.buffers.spectrogram =
                 Self::create_spectrogram_buffers(device, queue, &self.pipeline, spectrogram);
             primitive_data.spectrogram_id = spectrogram.id;
+            if let Some(notify) = &primitive.gpu_notify {
+                notify.notify_one();
+            }
         }
 
         if primitive_data.colormap != primitive.controls.colormap() {
@@ -190,6 +200,7 @@ impl Pipeline {
             }],
         });
 
+        let spectrogram_id = spectrogram.id;
         let spectrogram = Self::create_spectrogram_buffers(device, queue, pipeline, spectrogram);
 
         PrimitiveData {
@@ -198,7 +209,7 @@ impl Pipeline {
                 colormap_bind: colormap_bind_group,
                 spectrogram,
             },
-            spectrogram_id: *id,
+            spectrogram_id,
             colormap,
         }
     }
@@ -382,14 +393,21 @@ pub struct Primitive {
     id: uuid::Uuid,
     controls: Controls,
     spectrogram: Option<Spectrogram>,
+    gpu_notify: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl Primitive {
-    fn new(id: uuid::Uuid, controls: Controls, spectrogram: Option<Spectrogram>) -> Self {
+    fn new(
+        id: uuid::Uuid,
+        controls: Controls,
+        spectrogram: Option<Spectrogram>,
+        gpu_notify: Option<Arc<tokio::sync::Notify>>,
+    ) -> Self {
         Self {
             id,
             controls,
             spectrogram,
+            gpu_notify,
         }
     }
 }
@@ -433,6 +451,7 @@ impl shader::Program<Message> for RFPlot {
             self.id,
             self.shared.controls,
             self.shared.spectrogram.clone(),
+            self.gpu_notify.clone(),
         )
     }
 }

@@ -1,4 +1,4 @@
-use iced::{Element, Task};
+use iced::{Element, Subscription, Task};
 use rstrf::menu::MenuItem;
 
 use crate::{
@@ -95,6 +95,9 @@ pub trait Window<M: Clone> {
     fn init(&mut self, _app: &AppShared) -> Task<WindowOut<M>> {
         Task::none()
     }
+    fn subscription(&self) -> Subscription<WindowOut<M>> {
+        Subscription::none()
+    }
 }
 
 pub enum AnyWindow {
@@ -158,6 +161,14 @@ impl AnyWindow {
                 w.update(msg, app).map(Message::from)
             }
             _ => Task::none(),
+        }
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        match self {
+            AnyWindow::RFPlot(w) => w.subscription().map(Message::from),
+            AnyWindow::SatManager(w) => w.subscription().map(Message::from),
+            AnyWindow::Preferences(w) => w.subscription().map(Message::from),
         }
     }
 
