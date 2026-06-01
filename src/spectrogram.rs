@@ -40,62 +40,34 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
         bail!("No files provided");
     }
 
-    log::debug!("Parsing files {:?}", paths);
+    log::debug!("Loading {} spectrogram files", paths.len());
 
-    let (bin_paths, rstrf_paths): (Vec<_>, Vec<_>) = paths
-        .iter()
-        .partition(|p| p.extension().and_then(|e| e.to_str()) != Some("rstrf"));
-
-    let mut spectrograms: Vec<Spectrogram> = Vec::new();
-
-    if !bin_paths.is_empty() {
-        spectrograms.push(
-            load_strf(&bin_paths)
+    let mut spectrograms = try_join_all(paths.iter().map(|path| async {
+        let spec = if path.extension().and_then(|e| e.to_str()) == Some("rstrf") {
+            load_rstrf_file(path)
                 .await
-                .context("Failed to load .bin files")?,
-        );
-    }
-
-    let rstrf_results = try_join_all(rstrf_paths.iter().map(|path| async {
-        load_rstrf_file(path)
-            .await
-            .context(format!("Failed to load file {}", path.display()))
+                .context(format!("Failed to load file {}", path.display()))
+        } else {
+            load_strf_file(path)
+                .await
+                .context(format!("Failed to load file {}", path.display()))
+        };
+        log::debug!("Loaded {}", path.display());
+        spec
     }))
     .await?;
-    spectrograms.extend(rstrf_results);
 
+    log::debug!("Joining {} spectrograms", spectrograms.len());
     spectrograms.sort_by_key(|s| s.start_time());
     Spectrogram::concatenate(&spectrograms)
 }
 
-async fn load_strf(paths: &[&PathBuf]) -> Result<Spectrogram> {
-    let mut all_spectra: Vec<RawStrfSpectrum> = Vec::new();
-    let mut params: Option<SpectrogramParams> = None;
+async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
+    let (mut spectra, params) = load_strf_raw(path).await?;
+    spectra.sort_unstable_by_key(|spec| spec.time);
 
-    for path in paths {
-        let (spectra, file_params) = load_strf_raw(path)
-            .await
-            .context(format!("Failed to load {}", path.display()))?;
-
-        if let Some(ref p) = params {
-            ensure!(
-                p.freq == file_params.freq
-                    && p.bw == file_params.bw
-                    && p.nchan == file_params.nchan,
-                "Inconsistent parameters between .bin files"
-            );
-        } else {
-            params = Some(file_params);
-        }
-
-        all_spectra.extend(spectra);
-    }
-
-    all_spectra.sort_unstable_by_key(|spec| spec.time);
-
-    let params = params.unwrap();
     let (data, timestamps, lengths): (Vec<_>, Vec<_>, Vec<_>) =
-        itertools::multiunzip(all_spectra.iter().map(|spec| {
+        itertools::multiunzip(spectra.iter().map(|spec| {
             (
                 spec.power_linear
                     .iter()
