@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
 use ndarray::{ArcArray2, ArrayView2, Axis};
+use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
@@ -14,6 +18,9 @@ use crate::coord::data_absolute;
 const RSTRF_MAGIC: &[u8; 8] = b"RSTRF\x01\n\0";
 /// Sentinel dB value written to gap slots in `.rstrf` files.
 pub const FILL_DB: f32 = -120.0;
+static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END").unwrap()
+});
 
 /// Raw spectrum read from a strf `.bin` file, including its per-spectrum timestamp.
 pub struct RawStrfSpectrum {
@@ -421,11 +428,7 @@ async fn parse_header<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Result
 
     let text = std::str::from_utf8(&buf)?.trim_end_matches('\0').trim();
 
-    let re = regex::Regex::new(
-        r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END",
-    )?;
-
-    let caps = re
+    let caps = HEADER_RE
         .captures(text)
         .ok_or_else(|| anyhow!("Incorrect header format"))?;
 
