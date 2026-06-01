@@ -20,17 +20,17 @@ A Nix flake is provided for reproducible builds.
 
 rSTRF is a GPU-accelerated satellite radio waterfall spectrogram viewer — a Rust rewrite of the `strf` toolkit's `rfplot`. It displays power-vs-frequency-vs-time spectrograms, overlays Doppler-shifted satellite tracks, and detects signals.
 
-**Three binaries:**
+**Two binaries:**
 - `src/bin/rstrf/` — the GUI application
-- `src/bin/rsbinfmt.rs` — CLI pre-converter: strf `.bin` → `.rstrf`; thin wrapper around `spectrogram::resample_strf` (useful for faster subsequent loads; not required)
 - `src/bin/rsmedfilt.rs` — CLI median-filter preprocessor for `.bin` files
 
 **Library crate** (`src/lib.rs` re-exports):
-- `spectrogram.rs` — async load/save of STRF `.bin` and `.rstrf` files; `resample_strf` resamples raw spectra onto a uniform time grid (median gap → slice length, gaps filled with `FILL_DB`); `load` routes `.bin` files through a combined resample pass and `.rstrf` files through direct decode, then concatenates
-- `orbit.rs` — TLE parsing, SGP4 propagation, Doppler prediction, GMST-based site coordinates
+- `spectrogram.rs` — async load/save of STRF `.bin` and `.rstrf` files; `load` routes `.bin` files through direct decode (no resampling) and `.rstrf` files through the constant-rate format, then concatenates
+- `orbit.rs` — TLE parsing, SGP4 propagation, Doppler prediction, GMST-based site coordinates; each `Satellite` carries a `transmitters: Vec<f64>` for multiple frequencies; predictions are split per pass
 - `signal.rs` — `FitTrace` signal detection (frequency peaks above sigma threshold)
 - `coord.rs` — type-stated coordinate transforms using `glam::Mat4` + `duplicate` macro (see below)
-- `colormap.rs` — GPU-ready `[[f32;4];256]` colormaps (Magma, Viridis, Turbo, etc.)
+- `colormap.rs` — GPU-ready `[[f32;4];256]` colormaps (Viridis default, Magma, Turbo, etc.)
+- `util.rs` — shared utilities: `minmax`, `to_index`, `clip_line` (Liang–Barsky)
 
 **GUI layer uses iced 0.14 (Elm Architecture / `Daemon` mode):**
 
