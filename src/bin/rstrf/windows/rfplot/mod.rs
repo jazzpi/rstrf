@@ -241,7 +241,7 @@ impl Window<Message> for RFPlot {
             Message::SpectrogramLoaded(result) => match result {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
-                    self.shared.controls.set_power_bounds(spec.power_bounds);
+                    self.shared.controls.set_spectrogram(&spec);
                     if let Some(iv) = self.initial_view.take() {
                         apply_initial_view(&mut self.shared.controls, &spec, &iv);
                     }
