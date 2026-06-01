@@ -165,8 +165,7 @@ impl Overlay {
             .max_light_lines(0)
             .axis_style(WHITE)
             .label_style(&WHITE)
-            .bold_line_style(WHITE.mix(0.4))
-            .x_desc("Time [s]");
+            .bold_line_style(WHITE.mix(0.4));
 
         let plot_center_freq = bounds.0.y + bounds.0.height / 2.0;
         let start_time = spectrogram.start_time();
@@ -179,6 +178,7 @@ impl Overlay {
             frame = frame
                 .x_label_formatter(&x_formatter)
                 .y_label_formatter(&y_formatter)
+                .x_desc(format!("Time - {} [HH:MM]", start_time.format("%Y-%m-%d")))
                 .y_desc(format!(
                     "Frequency - {:.1} [kHz]",
                     (spectrogram.freq + plot_center_freq) / 1000.0
@@ -186,6 +186,7 @@ impl Overlay {
         } else {
             frame = frame
                 .y_label_formatter(&|v| format!("{:.1}", v / 1000.0))
+                .x_desc("Time [s]")
                 .y_desc("Frequency offset [kHz]");
         }
         if !self.show_grid {
