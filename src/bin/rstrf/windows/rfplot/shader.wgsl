@@ -21,8 +21,11 @@ struct VertexOut {
     @builtin(position) position: vec4f,
     @location(0) @interpolate(flat) u: u32,
     @location(1) v: f32,
-// TODO: Add @builtin(frag_depth) output for max-hold
-// maybe pair with alpha value based on overlap for antialiasing?
+}
+
+struct FragOut {
+    @builtin(frag_depth) depth: f32,
+    @location(0) color: vec4f,
 }
 
 @vertex
@@ -36,7 +39,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
 }
 
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4f {
+fn fs_main(in: VertexOut) -> FragOut {
     let value = get_value(in.u, in.v);
 
     let normalized = clamp((value - uniforms.power_bounds.x) / (uniforms.power_bounds.y - uniforms.power_bounds.x), 0.0, 1.0);
@@ -48,8 +51,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 
     let color_lower = color_map[lower_idx];
     let color_upper = color_map[upper_idx];
+    let color = mix(color_lower, color_upper, frac);
+    let depth = 1.0 - normalized; // lower depth is rendered above higher depth
 
-    return mix(color_lower, color_upper, frac);
+    return FragOut(depth, color);
 }
 
 fn get_value(u: u32, v: f32) -> f32 {
