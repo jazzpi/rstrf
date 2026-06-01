@@ -177,6 +177,18 @@ impl Controls {
                 style: widget::button::primary,
             },
             ToolbarButton::Icon {
+                icon: Icon::MarkTrackpoint,
+                tooltip: "Mark track points",
+                msg: rfplot::overlay::Message::MarkTrackpoints.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::Icon {
+                icon: Icon::MarkSignal,
+                tooltip: "Mark signals",
+                msg: rfplot::overlay::Message::MarkSignals.into(),
+                style: widget::button::primary,
+            },
+            ToolbarButton::Icon {
                 icon: Icon::Delete,
                 tooltip: "Clear signals & track points",
                 msg: rfplot::overlay::Message::ClearAll.into(),

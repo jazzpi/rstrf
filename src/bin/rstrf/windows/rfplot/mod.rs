@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use iced::{
-    Element, Length, Padding, Task, keyboard,
+    Element, Length, Padding, Task,
     widget::{self, button, container},
 };
 use plotters_iced2::ChartWidget;
@@ -41,16 +41,16 @@ impl From<overlay::Message> for Message {
     }
 }
 
-#[derive(Default)]
-pub struct MouseInteraction {
-    pub mouse: MouseState,
-    pub modifiers: keyboard::Modifiers,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub enum RectAction {
     Delete,
     Zoom,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MarkAction {
+    Trackpoint,
+    Signal,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -63,6 +63,7 @@ pub enum MouseState {
         corner1: plot_area::Point,
         corner2: plot_area::Point,
     },
+    Marking(MarkAction),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Default, Clone)]

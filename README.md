@@ -146,8 +146,8 @@ Using the mouse, you can
 - scroll to zoom (use `Ctrl`/`Shift`+scroll to zoom vertically/horizontally)
 - click+drag to pan
 
-There is a toolbar above the plot. Additionally, you can use the following
-hotkeys:
+There is a toolbar above the plot. Hover over the buttons for an explanatory
+tooltip. Additionally, you can use the following hotkeys:
 
 - `r` -> Reset view
 - `p` -> Toggle predictions
@@ -162,11 +162,16 @@ hotkeys:
 
 ### Signal export
 
-`f`/`D` work a little differently from STRF's `rfplot`. Pressing the keys by
-themselves does not generate any `out.dat`/`mark.dat` files. Instead, once you
-have found/marked all the signals (and potentially cleaned them up using `d`),
-press the *Save* button in the toolbar. This will write all signals into an
-`out.dat` file in the current directory.
+`s`/`f`/`D` work a little differently from STRF's `rfplot`. For one, pressing
+`s`/`D` does not directly add a track/mark point. Instead, it enters a "mode" in
+which each mouse click adds a track/mark point. You can exit this mode by
+pressing `ESC`.
+
+Further, pressing `f`/`D` by themselves does not generate any
+`out.dat`/`mark.dat` files. Instead, once you have found/marked all the signals
+(and potentially cleaned them up using `d`), press the *Save* button in the
+toolbar. This will write all signals into an `out.dat` file in the current
+directory.
 
 Currently, the sigma field in the `out.dat` file is set to 5 for all signals.
 The site ID field can be controlled using the `-C` CLI argument.

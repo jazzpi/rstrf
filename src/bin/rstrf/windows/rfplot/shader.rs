@@ -12,7 +12,7 @@ use itertools::{Itertools, izip};
 use rstrf::{colormap::Colormap, spectrogram::Spectrogram};
 use uuid::Uuid;
 
-use super::{Controls, Message, MouseInteraction, RFPlot};
+use super::{Controls, Message, RFPlot};
 
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
@@ -409,7 +409,7 @@ impl shader::Primitive for Primitive {
 }
 
 impl shader::Program<Message> for RFPlot {
-    type State = MouseInteraction;
+    type State = ();
     type Primitive = Primitive;
 
     fn draw(
