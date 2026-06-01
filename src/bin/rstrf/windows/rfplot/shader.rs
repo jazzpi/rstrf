@@ -26,28 +26,12 @@ pub struct Uniforms {
     nchan: u32,
 }
 
-// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-// #[repr(C)]
-// struct Vertex {
-//     corner: Vec2,
-// }
-
-// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-// #[repr(C)]
-// struct Instance {
-//     time_idx: u32,
-// }
-
 struct SpectrogramChunk {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
     instances: wgpu::Buffer,
-    #[allow(dead_code)] // Keep this around in case we need it for future features
-    spectrogram: wgpu::Buffer,
-    x_ranges: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     nslices: u32,
-    slice_offset: u32,
     visible: bool,
 }
 
@@ -144,15 +128,14 @@ impl Pipeline {
         });
 
         let bounds = primitive.controls.bounds();
-        let pixel_height =
-            bounds.0.height / viewport_bounds.height as f32 * spectrogram.nchan as f32;
+        let pixel_height = bounds.0.height / viewport_bounds.height * spectrogram.nchan as f32;
 
         let xmin = bounds.0.x;
         let xmax = bounds.0.x + bounds.0.width;
         let vmin = bounds.0.y;
         let vmax = bounds.0.y + bounds.0.height;
 
-        for (i, chunk) in primitive_data.buffers.spectrogram.iter_mut().enumerate() {
+        for chunk in primitive_data.buffers.spectrogram.iter_mut() {
             let uniforms = Uniforms {
                 power_bounds: primitive.controls.power_range().into(),
                 time_bounds: vec2(xmin, xmax),
@@ -163,13 +146,6 @@ impl Pipeline {
                 viewport_width: viewport_bounds.width,
             };
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
-
-            // let left = spectrogram.timestamps[i * chunk.nslices as usize];
-            // let width = chunk.nslices as f32 / spectrogram.nslices as f32;
-            // let xmin = (left - bounds.0.x) / bounds.0.width;
-            // let xmax = ((left + width) - bounds.0.x) / bounds.0.width;
-            // chunk.visible = xmax > 0.0 && xmin < 1.0;
-            // left += width;
         }
 
         if primitive_data.spectrogram_id != spectrogram.id {
@@ -332,11 +308,8 @@ impl Pipeline {
                 uniform: uniform_buffer,
                 vertices: vertex_buffer,
                 instances: instance_buffer,
-                spectrogram: spectrogram_buffer,
-                x_ranges: x_ranges_buffer,
                 bind_group,
                 nslices: nslices as u32,
-                slice_offset: (i * chunk_len) as u32,
                 visible: true,
             }
         })

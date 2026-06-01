@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use crate::{
     app::{AppEvent, AppShared},
-    // panes::{Message as PaneMessage, Pane, PaneTree, PaneWidget, rfplot::control::Controls},
     windows::{Window, WindowOut, rfplot::control::Controls},
 };
 
