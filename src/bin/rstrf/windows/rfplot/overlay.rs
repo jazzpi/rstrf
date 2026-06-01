@@ -4,7 +4,13 @@
 
 use chrono::{DateTime, Duration, Utc};
 use copy_range::CopyRange;
-use iced::{Rectangle, Task, event::Status, keyboard, mouse, widget::canvas};
+use iced::{
+    Rectangle, Task,
+    event::Status,
+    keyboard::{self, key::Named},
+    mouse,
+    widget::canvas,
+};
 use itertools::{Itertools, izip};
 use ndarray::s;
 use plotters::prelude::*;
@@ -532,17 +538,55 @@ impl Overlay {
             return (Status::Ignored, None);
         };
 
-        // ESC cancels rectangle drawing regardless of cursor position
-        if *key == keyboard::Key::Named(keyboard::key::Named::Escape)
-            && matches!(state.mouse, MouseState::DrawingRect { .. })
-        {
-            state.mouse = MouseState::Idle;
-            return (
-                Status::Captured,
-                Some(Message::UpdateRectPreview(None).into()),
-            );
-        }
+        // Some keys should work regardless of cursor position...
+        let pan = if state.modifiers.shift() { 0.5 } else { 1.0 };
+        match key.as_ref() {
+            keyboard::Key::Named(keyboard::key::Named::Escape)
+                if matches!(state.mouse, MouseState::DrawingRect { .. }) =>
+            {
+                state.mouse = MouseState::Idle;
+                return (
+                    Status::Captured,
+                    Some(Message::UpdateRectPreview(None).into()),
+                );
+            }
+            keyboard::Key::Character("r") => {
+                return (Status::Captured, Some(control::Message::ResetView.into()));
+            }
+            keyboard::Key::Character("f") => {
+                return (Status::Captured, Some(Message::FindSignals.into()));
+            }
+            keyboard::Key::Character("p") => {
+                return (Status::Captured, Some(Message::TogglePredictions.into()));
+            }
+            keyboard::Key::Named(Named::ArrowLeft) => {
+                return (
+                    Status::Captured,
+                    Some(control::Message::PanningDelta(plot_area::Vector::new(pan, 0.0)).into()),
+                );
+            }
+            keyboard::Key::Named(Named::ArrowRight) => {
+                return (
+                    Status::Captured,
+                    Some(control::Message::PanningDelta(plot_area::Vector::new(-pan, 0.0)).into()),
+                );
+            }
+            keyboard::Key::Named(Named::ArrowUp) => {
+                return (
+                    Status::Captured,
+                    Some(control::Message::PanningDelta(plot_area::Vector::new(0.0, -pan)).into()),
+                );
+            }
+            keyboard::Key::Named(Named::ArrowDown) => {
+                return (
+                    Status::Captured,
+                    Some(control::Message::PanningDelta(plot_area::Vector::new(0.0, pan)).into()),
+                );
+            }
+            _ => (),
+        };
 
+        // And some should only work when the cursor is over the actual spectrogram
         let Some(pos) = cursor
             .position_in(bounds)
             .map(|pos| screen::Point::new(pos.x, pos.y))
@@ -552,9 +596,6 @@ impl Overlay {
         let plot_pos = pos * ScreenToPlotArea::new(&screen::Size(bounds.size()));
 
         match key.as_ref() {
-            keyboard::Key::Character("r") => {
-                (Status::Captured, Some(control::Message::ResetView.into()))
-            }
             keyboard::Key::Character("s") => match &shared.spectrogram {
                 Some(spectrogram) => (
                     Status::Captured,
@@ -608,10 +649,6 @@ impl Overlay {
                     corner2: plot_pos,
                 };
                 (Status::Captured, None)
-            }
-            keyboard::Key::Character("f") => (Status::Captured, Some(Message::FindSignals.into())),
-            keyboard::Key::Character("p") => {
-                (Status::Captured, Some(Message::TogglePredictions.into()))
             }
             _ => (Status::Ignored, None),
         }
