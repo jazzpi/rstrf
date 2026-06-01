@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::{DateTime, Duration, Utc};
 use futures_util::future::try_join_all;
-use ndarray::{ArcArray2, ArrayView2, Axis};
+use ndarray::{ArcArray2, ArrayView2};
 use rayon::prelude::*;
 use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -67,29 +67,29 @@ pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
 
     log::debug!("Joining {} spectrograms", spectrograms.len());
     spectrograms.sort_by_key(|s| s.start_time());
-    Spectrogram::concatenate(&spectrograms)
+    Spectrogram::concatenate(spectrograms)
 }
 
 async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
     let (mut spectra, params) = load_strf_raw(path).await?;
     spectra.sort_unstable_by_key(|spec| spec.time);
 
-    let mut data = Vec::with_capacity(spectra.len() * params.nchan);
-    let mut timestamps = Vec::with_capacity(spectra.len());
-    let mut lengths = Vec::with_capacity(spectra.len());
-    for spec in spectra {
-        let power_linear = spec.power_linear;
-        let data_db = tokio::task::spawn_blocking(move || {
-            power_linear
-                .par_iter()
-                .map(|&v| 10.0 * (v + 1e-12f32).log10())
-                .collect::<Vec<f32>>()
-        })
-        .await?;
-        data.extend(data_db);
-        timestamps.push(spec.time);
-        lengths.push(spec.length_s);
-    }
+    let nchan = params.nchan;
+    let (data, timestamps, lengths) = tokio::task::spawn_blocking(move || {
+        let nslices = spectra.len();
+        let timestamps: Vec<_> = spectra.iter().map(|s| s.time).collect();
+        let lengths: Vec<_> = spectra.iter().map(|s| s.length_s).collect();
+
+        let mut data = Vec::with_capacity(nslices * nchan);
+        for spec in spectra {
+            data.extend(spec.power_linear);
+        }
+        data.par_iter_mut()
+            .for_each(|v| *v = 10.0 * (*v + 1e-12f32).log10());
+
+        (data, timestamps, lengths)
+    })
+    .await?;
     let data = ArcArray2::from_shape_vec((timestamps.len(), params.nchan), data)
         .context("Failed to shape data array")?;
     Ok(Spectrogram {
@@ -265,7 +265,7 @@ impl std::fmt::Debug for Spectrogram {
 }
 
 impl Spectrogram {
-    pub fn concatenate(components: &[Spectrogram]) -> Result<Spectrogram> {
+    pub fn concatenate(components: Vec<Spectrogram>) -> Result<Spectrogram> {
         if components.is_empty() {
             bail!("No spectrograms to concatenate");
         }
@@ -280,36 +280,35 @@ impl Spectrogram {
             );
         }
 
-        let data = ndarray::concatenate(
-            Axis(0),
-            &components.iter().map(|s| s.data.view()).collect::<Vec<_>>(),
-        )
-        .context("Failed to concatenate spectrograms")?;
-        let timestamps = components
-            .iter()
-            .flat_map(|s| s.timestamps.clone())
-            .collect();
-        let lengths = components.iter().flat_map(|s| s.lengths.clone()).collect();
-
         let nslices: usize = components.iter().map(|s| s.nslices).sum();
-        let power_bounds =
-            components
-                .iter()
-                .fold((f32::INFINITY, f32::NEG_INFINITY), |bounds, spectrogram| {
-                    (
-                        bounds.0.min(spectrogram.power_bounds.0),
-                        bounds.1.max(spectrogram.power_bounds.1),
-                    )
-                });
+        let nchan = first.nchan;
+        let freq = first.freq;
+        let bw = first.bw;
+
+        let mut data_flat = Vec::with_capacity(nslices * nchan);
+        let mut timestamps = Vec::with_capacity(nslices);
+        let mut lengths = Vec::with_capacity(nslices);
+        let mut power_bounds = (f32::INFINITY, f32::NEG_INFINITY);
+
+        for spec in components {
+            data_flat.extend_from_slice(spec.data.as_slice().unwrap());
+            timestamps.extend(spec.timestamps);
+            lengths.extend(spec.lengths);
+            power_bounds.0 = power_bounds.0.min(spec.power_bounds.0);
+            power_bounds.1 = power_bounds.1.max(spec.power_bounds.1);
+        }
+
+        let data = ArcArray2::from_shape_vec((nslices, nchan), data_flat)
+            .context("Failed to concatenate spectrograms")?;
 
         Ok(Spectrogram {
             id: Uuid::new_v4(),
-            freq: first.freq,
-            bw: first.bw,
-            nchan: first.nchan,
+            freq,
+            bw,
+            nchan,
             nslices,
             power_bounds,
-            data: data.into(),
+            data,
             timestamps,
             lengths,
         })
@@ -514,7 +513,7 @@ mod tests {
 
     #[test]
     fn concatenate_empty_errors() {
-        assert!(Spectrogram::concatenate(&[]).is_err());
+        assert!(Spectrogram::concatenate(vec![]).is_err());
     }
 
     #[test]
@@ -522,7 +521,7 @@ mod tests {
         let start = test_start();
         let spec = make_spec(start, 10, 1024, 1.0);
         let spec_params = spec.params();
-        let result = Spectrogram::concatenate(&[spec]).unwrap();
+        let result = Spectrogram::concatenate(vec![spec]).unwrap();
         assert_eq!(result.nslices, 10);
         assert_eq!(result.params(), spec_params);
     }
@@ -532,7 +531,7 @@ mod tests {
         let start = test_start();
         let s1 = make_spec(start, 10, 1024, 1.0);
         let s2 = make_spec(s1.end_time(), 5, 1024, 2.0);
-        let result = Spectrogram::concatenate(&[s1, s2]).unwrap();
+        let result = Spectrogram::concatenate(vec![s1, s2]).unwrap();
         assert_eq!(result.nslices, 15);
 
         let data = result.data();
@@ -555,7 +554,7 @@ mod tests {
         let start = test_start();
         let s1 = make_spec(start, 5, 1024, 1.0);
         let s2 = make_spec(s1.end_time(), 5, 512, 1.0);
-        assert!(Spectrogram::concatenate(&[s1, s2]).is_err());
+        assert!(Spectrogram::concatenate(vec![s1, s2]).is_err());
     }
 
     #[test]
