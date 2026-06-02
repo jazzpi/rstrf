@@ -251,6 +251,14 @@ pub struct PassPrediction {
     pub za: Array1<f64>,
 }
 
+impl std::fmt::Debug for PassPrediction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PassPrediction")
+            .field("time_range", &self.time_range)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Site {
     /// Latitude in radians

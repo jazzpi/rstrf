@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::config::Config;
+use crate::pass_png::{self, PassPngMode};
 use crate::windows::rfplot::{InitialView, RFPlot};
 use crate::windows::sat_manager::SatManager;
 use crate::windows::{self, AnyWindow};
-use crate::{CliArgs, Command, PlotArgs};
+use crate::{CliArgs, Command, PassPngArgs, PlotArgs};
 use anyhow::Context;
 use iced::widget::{self, space};
 use iced::window::Settings;
@@ -13,6 +14,7 @@ use iced::{Daemon, window};
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::menu::{MenuItem, view_menu};
 use rstrf::orbit::Satellite;
+use rstrf::spectrogram::SpectrogramBounds;
 use space_track::SpaceTrack;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -56,6 +58,7 @@ pub struct AppModel {
     config_path: PathBuf,
     shared_state: AppShared,
     windows: HashMap<window::Id, AnyWindow>,
+    pass_png: Option<PassPngMode>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -74,8 +77,8 @@ pub enum Message {
     #[allow(clippy::enum_variant_names)]
     WindowMessage(window::Id, windows::Message),
     Event(AppEvent),
-    OpenRFPlotWith(Box<PlotArgs>),
     WindowOpenedRFPlotWith(window::Id, Box<PlotArgs>),
+    WindowOpenedPassPng(window::Id, Box<PassPngArgs>),
     CatalogLoaded {
         satellites: Vec<(Satellite, bool)>,
         frequencies: HashMap<u64, Vec<f64>>,
@@ -83,6 +86,9 @@ pub enum Message {
     SatellitesChanged(Vec<(Satellite, bool)>),
     SatelliteChanged(usize, Box<(Satellite, bool)>),
     FrequenciesChanged(HashMap<u64, Vec<f64>>),
+    RFPlotReady(window::Id, SpectrogramBounds),
+    PassPng(pass_png::Message),
+    ScreenshotSaved(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -132,40 +138,36 @@ impl AppModel {
         tasks.push(Task::done(Message::UpdateConfig(config)));
 
         match flags.command {
-            Some(Command::Plot(plot_args)) => {
-                if plot_args.catalog.is_some() || plot_args.freqs.is_some() {
-                    let catalog = plot_args.catalog.clone();
-                    let freqs_path = plot_args.freqs.clone();
-                    tasks.push(Task::future(async move {
-                        let freqs = if let Some(p) = freqs_path {
-                            match rstrf::orbit::load_frequencies(&p).await {
-                                Ok(f) => f,
-                                Err(e) => {
-                                    log::error!("Failed to load frequencies: {e:?}");
-                                    HashMap::new()
-                                }
-                            }
-                        } else {
-                            HashMap::new()
-                        };
-                        let satellites = if let Some(p) = catalog {
-                            match rstrf::orbit::load_tles(&p, freqs.clone()).await {
-                                Ok(sats) => sats.into_iter().map(|s| (s, true)).collect(),
-                                Err(e) => {
-                                    log::error!("Failed to load catalog: {e:?}");
-                                    Vec::new()
-                                }
-                            }
-                        } else {
-                            Vec::new()
-                        };
-                        Message::CatalogLoaded {
+            Some(Command::Plot(args)) => {
+                tasks.push(
+                    Self::load_catalog(args.catalog.clone(), args.freqs.clone(), HashMap::new())
+                        .map(|(satellites, frequencies)| Message::CatalogLoaded {
                             satellites,
-                            frequencies: freqs,
-                        }
+                            frequencies,
+                        }),
+                );
+                tasks
+                    .push(Self::open_window().map(move |id| {
+                        Message::WindowOpenedRFPlotWith(id, Box::new(args.clone()))
                     }));
-                }
-                tasks.push(Task::done(Message::OpenRFPlotWith(Box::new(plot_args))));
+            }
+            Some(Command::PassPng(args)) => {
+                let norad_id = args.norad_id as u64;
+                let frequencies = HashMap::from([(norad_id, args.freq.clone())]);
+                tasks.push(
+                    Self::load_catalog(Some(args.catalog.clone()), args.freqs.clone(), frequencies)
+                        .map(move |(satellites, frequencies)| Message::CatalogLoaded {
+                            satellites: satellites
+                                .into_iter()
+                                .filter(|(sat, _)| sat.norad_id() == norad_id)
+                                .collect(),
+                            frequencies,
+                        }),
+                );
+                tasks.push(
+                    Self::open_window()
+                        .map(move |id| Message::WindowOpenedPassPng(id, Box::new(args.clone()))),
+                );
             }
             None => {
                 tasks.push(Task::done(Message::OpenRFPlot));
@@ -176,6 +178,7 @@ impl AppModel {
             config_path,
             shared_state: AppShared::default(),
             windows: HashMap::default(),
+            pass_png: None,
         };
 
         (app, Task::batch(tasks))
@@ -238,6 +241,9 @@ impl AppModel {
                     .map(|(id, msg)| Message::WindowMessage(id, msg)),
             );
         }
+        if let Some(m) = &self.pass_png {
+            subscriptions.extend(m.subscription().map(|s| s.map(Message::PassPng)));
+        }
         Subscription::batch(subscriptions)
     }
 
@@ -255,9 +261,6 @@ impl AppModel {
                     .insert(id, AnyWindow::RFPlot(Box::new(RFPlot::new())));
                 Task::none()
             }
-            Message::OpenRFPlotWith(args) => {
-                Self::open_window().map(move |id| Message::WindowOpenedRFPlotWith(id, args.clone()))
-            }
             Message::WindowOpenedRFPlotWith(id, args) => {
                 self.shared_state.site_id = args.site_id;
                 let view = InitialView {
@@ -268,14 +271,20 @@ impl AppModel {
                     zmin: args.zmin,
                     zmax: args.zmax,
                 };
-                let rfplot = RFPlot::with_initial_view(args.spectrograms, view);
-                self.windows.insert(id, AnyWindow::RFPlot(Box::new(rfplot)));
-                let task = self
-                    .windows
-                    .get_mut(&id)
-                    .unwrap()
-                    .init(id, &self.shared_state);
-                task.map(move |msg| Message::WindowMessage(id, msg))
+                self.open_rfplot_with(id, args.spectrograms, view)
+            }
+            Message::WindowOpenedPassPng(id, args) => {
+                let view = InitialView {
+                    fmin: None,
+                    fmax: None,
+                    tmin: None,
+                    tmax: None,
+                    zmin: args.zmin,
+                    zmax: args.zmax,
+                };
+                let task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
+                self.pass_png = Some(PassPngMode::new(id, *args));
+                task
             }
             Message::CatalogLoaded {
                 satellites,
@@ -357,6 +366,25 @@ impl AppModel {
                 self.shared_state.frequencies = freqs;
                 Task::done(Message::Event(AppEvent::SatellitesChanged))
             }
+            Message::RFPlotReady(window_id, spec_bounds) => {
+                let Some(mode) = &mut self.pass_png else {
+                    return Task::none();
+                };
+                mode.update(
+                    pass_png::Message::RFPlotReady(window_id, spec_bounds),
+                    &self.shared_state,
+                )
+            }
+            Message::ScreenshotSaved(path) => match &mut self.pass_png {
+                Some(mode) => {
+                    mode.update(pass_png::Message::ScreenshotSaved(path), &self.shared_state)
+                }
+                None => Task::none(),
+            },
+            Message::PassPng(msg) => match &mut self.pass_png {
+                Some(mode) => mode.update(msg, &self.shared_state),
+                None => Task::none(),
+            },
         }
     }
 
@@ -425,5 +453,54 @@ impl AppModel {
             ..Default::default()
         });
         open
+    }
+
+    fn open_rfplot_with(
+        &mut self,
+        id: window::Id,
+        spectrograms: Vec<PathBuf>,
+        view: InitialView,
+    ) -> Task<Message> {
+        let rfplot = RFPlot::with_initial_view(spectrograms, view);
+        self.windows.insert(id, AnyWindow::RFPlot(Box::new(rfplot)));
+        let task = self
+            .windows
+            .get_mut(&id)
+            .unwrap()
+            .init(id, &self.shared_state);
+        task.map(move |msg| Message::WindowMessage(id, msg))
+    }
+
+    fn load_catalog(
+        catalog: Option<PathBuf>,
+        freqs: Option<PathBuf>,
+        initial_freqs: HashMap<u64, Vec<f64>>,
+    ) -> Task<(Vec<(Satellite, bool)>, HashMap<u64, Vec<f64>>)> {
+        if catalog.is_none() && freqs.is_none() {
+            return Task::none();
+        }
+        Task::future(async move {
+            let mut frequencies = initial_freqs;
+            if let Some(p) = freqs {
+                match rstrf::orbit::load_frequencies(&p).await {
+                    Ok(f) => frequencies.extend(f),
+                    Err(e) => {
+                        log::error!("Failed to load frequencies: {e:?}");
+                    }
+                }
+            }
+            let satellites = if let Some(p) = catalog {
+                match rstrf::orbit::load_tles(&p, frequencies.clone()).await {
+                    Ok(sats) => sats.into_iter().map(|s| (s, true)).collect(),
+                    Err(e) => {
+                        log::error!("Failed to load catalog: {e:?}");
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            (satellites, frequencies)
+        })
     }
 }

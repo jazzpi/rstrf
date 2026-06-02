@@ -9,14 +9,18 @@ use iced::{
 use image::RgbaImage;
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
-use rstrf::{coord::plot_area, menu::MenuItem, spectrogram::Spectrogram};
+use rstrf::{
+    coord::{data_normalized, plot_area},
+    menu::MenuItem,
+    spectrogram::Spectrogram,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    app::{AppEvent, AppShared},
+    app::{self, AppEvent, AppShared},
     io_service,
-    windows::{Window, WindowOut, rfplot::control::Controls},
+    windows::{Window, WindowEffect, WindowOut, rfplot::control::Controls},
 };
 
 mod control;
@@ -32,6 +36,7 @@ pub enum Message {
     SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
     LoadProgress { loaded: usize, total: usize },
     GpuUploadDone,
+    SetView(data_normalized::Rectangle),
     CaptureScreenshot(Option<PathBuf>),
     CapturedScreenshot(Result<(RgbaImage, Option<PathBuf>), String>),
     SaveScreenshot(RgbaImage, PathBuf),
@@ -329,6 +334,29 @@ impl Window<Message> for RFPlot {
         message: Message,
         app: &AppShared,
     ) -> Task<WindowOut<Message>> {
+        // Handle messages that (can) trigger ToApp effects first
+        match message {
+            Message::GpuUploadDone => {
+                self.loading_state = LoadingState::Idle;
+                self.gpu_watcher = None;
+                self.gpu_notify = None;
+                if let Some(spec) = &self.shared.spectrogram {
+                    return Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                        app::Message::RFPlotReady(id, spec.absolute_bounds()),
+                    )));
+                }
+            }
+            Message::SaveScreenshot(img, path) => {
+                match img.save(&path) {
+                    Ok(_) => log::info!("Saved screenshot to {path:?}"),
+                    Err(e) => log::error!("Failed to save screenshot to {path:?}: {e}"),
+                }
+                return Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::ScreenshotSaved(path),
+                )));
+            }
+            _ => (),
+        };
         let result = match message {
             Message::Control(message) => self.shared.controls.update(message).map(Message::Control),
             Message::Overlay(message) => self
@@ -371,12 +399,6 @@ impl Window<Message> for RFPlot {
                     Task::none()
                 }
             },
-            Message::GpuUploadDone => {
-                self.loading_state = LoadingState::Idle;
-                self.gpu_watcher = None;
-                self.gpu_notify = None;
-                Task::none()
-            }
             Message::PickSpectrogram => Task::future(async {
                 let files = AsyncFileDialog::new()
                     .add_filter("Supported spectrogram formats", &["rstrf", "bin"])
@@ -421,14 +443,14 @@ impl Window<Message> for RFPlot {
                     None => Message::Nop,
                 }
             }),
-            Message::SaveScreenshot(img, path) => {
-                match img.save(&path) {
-                    Ok(_) => log::info!("Saved screenshot to {path:?}"),
-                    Err(e) => log::error!("Failed to save screenshot to {path:?}: {e}"),
-                }
-                Task::none()
-            }
+            Message::SetView(rect) => self
+                .shared
+                .controls
+                .update(control::Message::ZoomToRect(rect))
+                .map(Message::Control),
             Message::Nop => Task::none(),
+            // Handled by the outer match
+            Message::GpuUploadDone | Message::SaveScreenshot(_, _) => unreachable!(),
         };
         result.map(WindowOut::Msg)
     }

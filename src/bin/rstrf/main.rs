@@ -3,10 +3,11 @@
 mod app;
 mod config;
 mod io_service;
+mod pass_png;
 mod widgets;
 mod windows;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 use crate::app::AppModel;
@@ -22,6 +23,8 @@ pub struct CliArgs {
 pub enum Command {
     /// Open an RFPlot window with the given spectrograms
     Plot(PlotArgs),
+    /// Generate images for each pass of a given satellite
+    PassPng(PassPngArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -56,6 +59,35 @@ pub struct PlotArgs {
     /// Site ID written to out.dat (replaces the trailing 0)
     #[arg(short = 'C', long, value_name = "SITE_ID", default_value_t = 0)]
     pub site_id: i32,
+}
+
+#[derive(Args, Debug, Clone)]
+#[command(group(ArgGroup::new("freq_source").required(true).args(["freq", "freqs"])))]
+pub struct PassPngArgs {
+    /// Spectrogram files to display
+    #[arg(value_name = "SPECTROGRAMS", required = true)]
+    pub spectrograms: Vec<PathBuf>,
+    /// TLE catalog file
+    #[arg(short = 'c', long)]
+    pub catalog: PathBuf,
+    /// Satellite to generate pass images for
+    #[arg(short = 'i', long)]
+    pub norad_id: u64,
+    /// Transmitter frequency (Hz), may be specified multiple times
+    #[arg(short = 'f', long, allow_hyphen_values = true)]
+    pub freq: Vec<f64>,
+    /// Path to frequencies.txt
+    #[arg(short = 'F', long, value_name = "FREQLIST")]
+    pub freqs: Option<PathBuf>,
+    /// Minimum power (dB)
+    #[arg(long, allow_hyphen_values = true)]
+    pub zmin: Option<f32>,
+    /// Maximum power (dB)
+    #[arg(long, allow_hyphen_values = true)]
+    pub zmax: Option<f32>,
+    /// Output path prefix; files are named <prefix>_000.png, <prefix>_001.png, ...
+    #[arg(short = 'o', long)]
+    pub output: std::path::PathBuf,
 }
 
 fn main() -> iced::Result {
