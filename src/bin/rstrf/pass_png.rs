@@ -135,45 +135,49 @@ impl PassPngMode {
                     .unwrap_or(std::path::Path::new("."))
                     .to_owned();
 
-                let queue =
-                    passes
-                        .iter()
-                        .enumerate()
-                        .flat_map(|(pass_idx, pass)| {
-                            let t_start = times[pass.time_range.start] as f32;
-                            let t_end = times[pass.time_range.end.saturating_sub(1)] as f32;
-                            let stem = stem.clone();
-                            let parent = parent.clone();
-                            pass.frequencies.iter().enumerate().map(move |(tx_idx, f)| {
-                            let (f_lo, f_hi) = minmax(f);
-                            if f_hi < spec_bounds.freq_range.start.into()
-                                || f_lo > spec_bounds.freq_range.end.into()
-                            {
-                                log::info!(
-                                    "pass-png: skipping pass {pass_idx} transmitter {tx_idx} \
-                                    at [{f_lo}, {f_hi}] Hz (out of spectrogram bounds)"
+                let queue = passes
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(pass_idx, pass)| {
+                        let t_start = times[pass.time_range.start] as f32;
+                        let t_end = times[pass.time_range.end.saturating_sub(1)] as f32;
+                        let stem = stem.clone();
+                        let parent = parent.clone();
+                        pass.frequencies
+                            .iter()
+                            .enumerate()
+                            .map(move |(tx_idx, f)| {
+                                let (f_lo, f_hi) = minmax(f);
+                                if f_hi < spec_bounds.freq_range.start.into()
+                                    || f_lo > spec_bounds.freq_range.end.into()
+                                {
+                                    log::info!(
+                                        "pass-png: skipping pass {pass_idx} transmitter {tx_idx} \
+                                        at [{f_lo}, {f_hi}] Hz (out of spectrogram bounds)"
+                                    );
+                                    return None;
+                                }
+
+                                let f_min = (f_lo as f32 - center_freq) - FREQ_MARGIN_HZ;
+                                let f_max = (f_hi as f32 - center_freq) + FREQ_MARGIN_HZ;
+
+                                let rect_da = data_absolute::Rectangle::new(
+                                    data_absolute::Point::new(t_start, f_min),
+                                    data_absolute::Size::new(
+                                        (t_end - t_start).max(1.0),
+                                        (f_max - f_min).max(1.0),
+                                    ),
                                 );
-                                return None;
-                            }
-
-                            let f_min = (f_lo as f32 - center_freq) - FREQ_MARGIN_HZ;
-                            let f_max = (f_hi as f32 - center_freq) + FREQ_MARGIN_HZ;
-
-                            let rect_da = data_absolute::Rectangle::new(
-                                data_absolute::Point::new(t_start, f_min),
-                                data_absolute::Size::new(
-                                    (t_end - t_start).max(1.0),
-                                    (f_max - f_min).max(1.0),
-                                ),
-                            );
-                            Some(PassJob {
-                                view: rect_da * to_norm,
-                                // TODO: replace TX idx with TX frequency
-                                path: parent.join(format!("{stem}_{pass_idx:03}_{tx_idx:03}.png")),
+                                Some(PassJob {
+                                    view: rect_da * to_norm,
+                                    // TODO: replace TX idx with TX frequency
+                                    path: parent
+                                        .join(format!("{stem}_{pass_idx:03}_{tx_idx:03}.png")),
+                                })
                             })
-                        }).flatten()
-                        })
-                        .collect();
+                            .flatten()
+                    })
+                    .collect();
 
                 self.process_next_pass(queue)
             }
