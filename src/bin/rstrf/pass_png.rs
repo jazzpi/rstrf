@@ -142,7 +142,6 @@ impl PassPngMode {
                 transmitters,
                 passes,
             } => {
-                const FREQ_MARGIN_HZ: f32 = 50_000.0;
                 let to_norm = DataAbsoluteToDataNormalized::from_absolute(&spec_bounds);
                 let center_freq = spec_bounds.freq_range.start
                     + (spec_bounds.freq_range.end - spec_bounds.freq_range.start) / 2.0;
@@ -184,8 +183,10 @@ impl PassPngMode {
                                     return None;
                                 }
 
-                                let f_min = (f_lo as f32 - center_freq) - FREQ_MARGIN_HZ;
-                                let f_max = (f_hi as f32 - center_freq) + FREQ_MARGIN_HZ;
+                                let freq_margin = (f_hi - f_lo) * 0.25;
+
+                                let f_min = (f_lo as f32 - center_freq) - freq_margin as f32;
+                                let f_max = (f_hi as f32 - center_freq) + freq_margin as f32;
 
                                 let rect_da = data_absolute::Rectangle::new(
                                     data_absolute::Point::new(t_start, f_min),
