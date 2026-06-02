@@ -38,7 +38,12 @@ pub struct PassPngMode {
 pub enum Message {
     // TODO: DRY with app::Message::RFPlotReady
     RFPlotReady(window::Id, SpectrogramBounds),
-    PredictionsReady(SpectrogramBounds, Array1<f64>, Vec<PassPrediction>),
+    PredictionsReady {
+        spec_bounds: SpectrogramBounds,
+        times: Array1<f64>,
+        transmitters: Vec<f64>,
+        passes: Vec<PassPrediction>,
+    },
     FrameReady,
     ScreenshotSaved(PathBuf),
 }
@@ -92,6 +97,7 @@ impl PassPngMode {
 
                 let site = app.config.site.clone().unwrap_or_default();
                 let time_range = spec_bounds.time_range.clone();
+                let transmitters = satellite.transmitters.clone();
                 Task::future(async move {
                     tokio::task::spawn_blocking(move || {
                         predict_satellites(&[satellite], time_range, &site)
@@ -111,12 +117,22 @@ impl PassPngMode {
                         return iced::exit();
                     }
                     Task::done(
-                        Message::PredictionsReady(spec_bounds.clone(), predictions.times, passes)
-                            .into(),
+                        Message::PredictionsReady {
+                            spec_bounds: spec_bounds.clone(),
+                            times: predictions.times,
+                            transmitters: transmitters.clone(),
+                            passes,
+                        }
+                        .into(),
                     )
                 })
             }
-            Message::PredictionsReady(spec_bounds, times, passes) => {
+            Message::PredictionsReady {
+                spec_bounds,
+                times,
+                transmitters,
+                passes,
+            } => {
                 const FREQ_MARGIN_HZ: f32 = 50_000.0;
                 let to_norm = DataAbsoluteToDataNormalized::from_absolute(&spec_bounds);
                 let center_freq = spec_bounds.freq_range.start
@@ -146,13 +162,14 @@ impl PassPngMode {
                         pass.frequencies
                             .iter()
                             .enumerate()
-                            .map(move |(tx_idx, f)| {
+                            .map(|(tx_idx, f)| (transmitters[tx_idx], f))
+                            .map(move |(tx_freq, f)| {
                                 let (f_lo, f_hi) = minmax(f);
                                 if f_hi < spec_bounds.freq_range.start.into()
                                     || f_lo > spec_bounds.freq_range.end.into()
                                 {
                                     log::info!(
-                                        "pass-png: skipping pass {pass_idx} transmitter {tx_idx} \
+                                        "pass-png: skipping pass {pass_idx} transmitter {tx_freq} \
                                         at [{f_lo}, {f_hi}] Hz (out of spectrogram bounds)"
                                     );
                                     return None;
@@ -170,9 +187,9 @@ impl PassPngMode {
                                 );
                                 Some(PassJob {
                                     view: rect_da * to_norm,
-                                    // TODO: replace TX idx with TX frequency
-                                    path: parent
-                                        .join(format!("{stem}_{pass_idx:03}_{tx_idx:03}.png")),
+                                    path: parent.join(format!(
+                                        "{stem}_{pass_idx:03}_tx_{tx_freq:.0}Hz.png"
+                                    )),
                                 })
                             })
                             .flatten()
