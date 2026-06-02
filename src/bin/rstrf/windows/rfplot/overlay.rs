@@ -659,6 +659,12 @@ impl Overlay {
         }
     }
 
+    /// Returns `true` if predictions are enabled and a prediction computation is currently in
+    /// flight.
+    pub(super) fn is_predicting(&self) -> bool {
+        self.show_predictions && self.prediction_cache.busy()
+    }
+
     /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
     /// recomputation. Called at the top of every `update()` so any incoming message acts as a
     /// trigger.

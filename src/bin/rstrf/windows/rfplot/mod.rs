@@ -3,6 +3,7 @@ use std::{path::PathBuf, pin::Pin, sync::Arc};
 use futures_util::{SinkExt, Stream};
 use iced::{
     Element, Length, Padding, Subscription, Task,
+    alignment::{Horizontal, Vertical},
     widget::{self, button, container},
     window,
 };
@@ -318,7 +319,35 @@ impl Window<Message> for RFPlot {
             .height(Length::Fill)
             .into();
 
-        let plot_area: Element<'_, Message> = widget::stack![spectrogram, plot_overlay,].into();
+        let status = if self.overlay.is_predicting() {
+            Some("Computing pass predictions...")
+        } else {
+            None
+        };
+
+        let mut stack = widget::stack![spectrogram, plot_overlay];
+        if let Some(status) = status {
+            let indicator: Element<'_, Message> = container(
+                container(widget::text(status).size(12))
+                    .style(container::secondary)
+                    .padding(Padding {
+                        left: 8.0,
+                        right: 8.0,
+                        top: 4.0,
+                        bottom: 4.0,
+                        ..Default::default()
+                    })
+                    .height(Length::Shrink)
+                    .width(Length::Shrink),
+            )
+            .align_x(Horizontal::Left)
+            .align_y(Vertical::Bottom)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+            stack = stack.push(indicator);
+        }
+        let plot_area: Element<'_, Message> = stack.into();
 
         let contents: Element<'_, Message> = widget::column![controls, plot_area]
             .padding(8)

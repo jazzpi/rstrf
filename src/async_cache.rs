@@ -60,6 +60,11 @@ impl<K: PartialEq, V> AsyncCache<K, V> {
         }
     }
 
+    /// Returns `true` if a computation is currently in flight.
+    pub fn busy(&self) -> bool {
+        self.computing.is_some()
+    }
+
     /// Clears both the stored result and the in-flight flag. Use when inputs become entirely
     /// invalid so nothing stale is displayed.
     pub fn reset(&mut self) {
