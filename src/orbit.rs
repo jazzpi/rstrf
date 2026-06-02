@@ -310,10 +310,13 @@ pub fn gmst_deriv_days(time: &NaiveDateTime) -> f64 {
 
 pub fn predict_satellites(
     satellites: &[Satellite],
-    start_time: DateTime<Utc>,
-    length_s: f64,
+    time_range: std::ops::Range<DateTime<Utc>>,
     site: &Site,
 ) -> Predictions {
+    let length_s = time_range
+        .end
+        .signed_duration_since(time_range.start)
+        .as_seconds_f64();
     let times = ndarray::Array1::linspace(0.0, length_s, length_s.round() as usize);
     // TODO: Parallelize predictions?
     let passes = satellites
@@ -321,7 +324,7 @@ pub fn predict_satellites(
         .filter(|sat| !sat.transmitters.is_empty())
         .map(|sat| {
             let id = sat.norad_id();
-            let passes = sat.predict_passes(start_time, times.view(), site);
+            let passes = sat.predict_passes(time_range.start, times.view(), site);
             (id, passes)
         })
         .collect();
@@ -441,7 +444,11 @@ mod tests {
 
     #[test]
     fn predict_satellites_empty_input_gives_empty_output() {
-        let predictions = predict_satellites(&[], Utc::now(), 10.0, &Site::default());
+        let predictions = predict_satellites(
+            &[],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            &Site::default(),
+        );
         assert_eq!(predictions.n_satellites(), 0);
     }
 
@@ -457,13 +464,21 @@ mod tests {
             &HashMap::new(),
         )
         .unwrap();
-        let predictions = predict_satellites(&[sat], Utc::now(), 10.0, &Site::default());
+        let predictions = predict_satellites(
+            &[sat],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            &Site::default(),
+        );
         assert_eq!(predictions.n_satellites(), 0);
     }
 
     #[test]
     fn predictions_for_id_unknown_returns_empty_slice() {
-        let predictions = predict_satellites(&[], Utc::now(), 10.0, &Site::default());
+        let predictions = predict_satellites(
+            &[],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            &Site::default(),
+        );
         assert!(predictions.for_id(99999).is_empty());
     }
 
@@ -477,7 +492,11 @@ mod tests {
         let sat =
             Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
         // Use a 2-hour window to have a good chance of at least one pass
-        let predictions = predict_satellites(&[sat], Utc::now(), 7200.0, &Site::default());
+        let predictions = predict_satellites(
+            &[sat],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(7200),
+            &Site::default(),
+        );
         assert_eq!(predictions.n_satellites(), 1);
         for pass in predictions.for_id(5) {
             let pass_len = pass.time_range.len();
@@ -507,7 +526,8 @@ mod tests {
         // Use the TLE epoch as start so SGP4 is in its valid range
         use chrono::TimeZone;
         let start = Utc.with_ymd_and_hms(2008, 9, 20, 12, 25, 40).unwrap();
-        let predictions = predict_satellites(&[sat], start, 86400.0, &site);
+        let predictions =
+            predict_satellites(&[sat], start..start + chrono::Duration::days(1), &site);
         let passes = predictions.for_id(25544);
         assert!(passes.len() >= 3);
         // Passes must not overlap and must be strictly ordered
@@ -529,7 +549,11 @@ mod tests {
         freqs.insert(5u64, vec![108.03e6]);
         let sat =
             Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
-        let predictions = predict_satellites(&[sat], Utc::now(), 7200.0, &Site::default());
+        let predictions = predict_satellites(
+            &[sat],
+            Utc::now()..Utc::now() + chrono::Duration::hours(2),
+            &Site::default(),
+        );
         for (id, passes) in predictions.iter_satellites() {
             assert_eq!(passes.len(), predictions.for_id(id).len());
         }

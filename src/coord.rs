@@ -5,6 +5,9 @@ use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 use duplicate::{duplicate, duplicate_item};
 
+use crate::spectrogram::SpectrogramBounds;
+
+// TODO: data_absolute is really data_relative (to (start_time, center_freq))
 #[duplicate_item(name; [screen]; [plot_area]; [data_normalized]; [data_absolute])]
 pub mod name {
     use duplicate::duplicate_item;
@@ -303,6 +306,18 @@ impl DataAbsoluteToDataNormalized {
     pub fn new(bounds: &data_absolute::Rectangle) -> Self {
         Self(DataNormalizedToDataAbsolute::new(bounds).0.inverse())
     }
+
+    pub fn from_absolute(bounds: &SpectrogramBounds) -> Self {
+        let bw = bounds.freq_range.end - bounds.freq_range.start;
+        let abs_rect = data_absolute::Rectangle::new(
+            data_absolute::Point::new(0.0, -bw / 2.0),
+            data_absolute::Size::new(
+                (bounds.time_range.end - bounds.time_range.start).as_seconds_f32(),
+                bw,
+            ),
+        );
+        Self::new(&abs_rect)
+    }
 }
 
 #[cfg(test)]
@@ -314,11 +329,17 @@ mod tests {
     }
 
     fn norm_bounds(x: f32, y: f32, w: f32, h: f32) -> data_normalized::Rectangle {
-        data_normalized::Rectangle::new(data_normalized::Point::new(x, y), data_normalized::Size::new(w, h))
+        data_normalized::Rectangle::new(
+            data_normalized::Point::new(x, y),
+            data_normalized::Size::new(w, h),
+        )
     }
 
     fn abs_bounds(x: f32, y: f32, w: f32, h: f32) -> data_absolute::Rectangle {
-        data_absolute::Rectangle::new(data_absolute::Point::new(x, y), data_absolute::Size::new(w, h))
+        data_absolute::Rectangle::new(
+            data_absolute::Point::new(x, y),
+            data_absolute::Size::new(w, h),
+        )
     }
 
     #[test]

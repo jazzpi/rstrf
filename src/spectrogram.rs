@@ -357,6 +357,14 @@ impl Spectrogram {
         )
     }
 
+    // TODO: `bounds()`, which returns `data_absolute`, isn't absolute...
+    pub fn absolute_bounds(&self) -> SpectrogramBounds {
+        SpectrogramBounds {
+            time_range: self.start_time()..self.end_time(),
+            freq_range: (self.freq - self.bw / 2.0)..(self.freq + self.bw / 2.0),
+        }
+    }
+
     pub fn params(&self) -> SpectrogramParams {
         SpectrogramParams {
             freq: self.freq,
@@ -364,6 +372,12 @@ impl Spectrogram {
             nchan: self.nchan,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpectrogramBounds {
+    pub time_range: std::ops::Range<DateTime<Utc>>,
+    pub freq_range: std::ops::Range<f32>,
 }
 
 async fn load_rstrf_file(path: &Path) -> Result<Spectrogram> {
