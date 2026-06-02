@@ -66,7 +66,7 @@ pub enum Message {
     UpdateMaxPower(f32),
     UpdateSignalSigma(f32),
     UpdateTrackBW(f32),
-    ToggleControls,
+    SetControlsVisible(bool),
     UpdateColormap(Colormap),
 }
 
@@ -168,7 +168,7 @@ impl Controls {
             ToolbarButton::Icon {
                 icon: Icon::Sliders,
                 tooltip: "Toggle controls",
-                msg: Message::ToggleControls.into(),
+                msg: Message::SetControlsVisible(!self.show_controls).into(),
                 style: widget::button::primary,
             },
             ToolbarButton::Icon {
@@ -372,7 +372,7 @@ impl Controls {
             Message::UpdateTrackBW(bw) => {
                 self.track_bw = bw;
             }
-            Message::ToggleControls => self.show_controls = !self.show_controls,
+            Message::SetControlsVisible(visible) => self.show_controls = visible,
             Message::UpdateColormap(colormap) => self.colormap = colormap,
         }
         self.snap_to_bounds();
@@ -535,12 +535,12 @@ mod tests {
     }
 
     #[test]
-    fn toggle_controls_flips_visibility() {
+    fn set_controls_visible_changes_visibility() {
         let mut c = Controls::default();
         assert!(c.show_controls);
-        update(&mut c, Message::ToggleControls);
+        update(&mut c, Message::SetControlsVisible(false));
         assert!(!c.show_controls);
-        update(&mut c, Message::ToggleControls);
+        update(&mut c, Message::SetControlsVisible(true));
         assert!(c.show_controls);
     }
 }

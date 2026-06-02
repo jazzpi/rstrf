@@ -98,7 +98,7 @@ impl PassPngMode {
                 let site = app.config.site.clone().unwrap_or_default();
                 let time_range = spec_bounds.time_range.clone();
                 let transmitters = satellite.transmitters.clone();
-                Task::future(async move {
+                let predict_task = Task::future(async move {
                     tokio::task::spawn_blocking(move || {
                         predict_satellites(&[satellite], time_range, &site)
                     })
@@ -125,7 +125,16 @@ impl PassPngMode {
                         }
                         .into(),
                     )
-                })
+                });
+                Task::batch(vec![
+                    predict_task,
+                    Task::done(app::Message::WindowMessage(
+                        self.window_id,
+                        windows::Message::RFPlot(windows::rfplot::Message::Control(
+                            windows::rfplot::control::Message::SetControlsVisible(false),
+                        )),
+                    )),
+                ])
             }
             Message::PredictionsReady {
                 spec_bounds,

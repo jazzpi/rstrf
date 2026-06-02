@@ -24,7 +24,7 @@ use crate::{
     windows::{Window, WindowEffect, WindowOut, rfplot::control::Controls},
 };
 
-mod control;
+pub mod control;
 pub mod overlay;
 mod shader;
 
@@ -82,7 +82,7 @@ pub enum MouseState {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Default, Clone)]
-struct SharedState {
+pub(crate) struct SharedState {
     pub controls: Controls,
     pub spectrogram_files: Vec<PathBuf>,
     #[serde(skip)]
