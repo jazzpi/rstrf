@@ -147,7 +147,7 @@ impl AppModel {
                         }),
                 );
                 tasks
-                    .push(Self::open_window().map(move |id| {
+                    .push(Self::open_window(None).map(move |id| {
                         Message::WindowOpenedRFPlotWith(id, Box::new(args.clone()))
                     }));
             }
@@ -165,7 +165,7 @@ impl AppModel {
                         }),
                 );
                 tasks.push(
-                    Self::open_window()
+                    Self::open_window(Some(iced::Size::new(args.width as f32, args.height as f32)))
                         .map(move |id| Message::WindowOpenedPassPng(id, Box::new(args.clone()))),
                 );
             }
@@ -255,7 +255,7 @@ impl AppModel {
         match message {
             Message::Nop => Task::none(),
             Message::UpdateConfig(config) => self.update_config(config),
-            Message::OpenRFPlot => Self::open_window().map(Message::WindowOpenedRFPlot),
+            Message::OpenRFPlot => Self::open_window(None).map(Message::WindowOpenedRFPlot),
             Message::WindowOpenedRFPlot(id) => {
                 self.windows
                     .insert(id, AnyWindow::RFPlot(Box::new(RFPlot::new())));
@@ -293,13 +293,15 @@ impl AppModel {
                 Task::done(Message::SatellitesChanged(satellites)),
                 Task::done(Message::FrequenciesChanged(frequencies)),
             ]),
-            Message::OpenSatManager => Self::open_window().map(Message::WindowOpenedSatManager),
+            Message::OpenSatManager => Self::open_window(None).map(Message::WindowOpenedSatManager),
             Message::WindowOpenedSatManager(id) => {
                 self.windows
                     .insert(id, AnyWindow::SatManager(Box::new(SatManager::new())));
                 Task::none()
             }
-            Message::OpenPreferences => Self::open_window().map(Message::WindowOpenedPreferences),
+            Message::OpenPreferences => {
+                Self::open_window(None).map(Message::WindowOpenedPreferences)
+            }
             Message::WindowOpenedPreferences(id) => {
                 self.windows.insert(
                     id,
@@ -432,8 +434,8 @@ impl AppModel {
         Task::done(Message::Event(AppEvent::ConfigUpdated))
     }
 
-    fn open_window() -> Task<window::Id> {
-        let (_, open) = window::open(Settings {
+    fn open_window(size: Option<iced::Size<f32>>) -> Task<window::Id> {
+        let mut settings = Settings {
             platform_specific: PlatformSpecific {
                 #[cfg(target_os = "linux")]
                 application_id: "de.jazzpi.rstrf".into(),
@@ -451,7 +453,11 @@ impl AppModel {
                 .unwrap(),
             ),
             ..Default::default()
-        });
+        };
+        if let Some(size) = size {
+            settings.size = size;
+        }
+        let (_, open) = window::open(settings);
         open
     }
 
