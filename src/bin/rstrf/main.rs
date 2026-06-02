@@ -17,6 +17,9 @@ use crate::app::AppModel;
 pub struct CliArgs {
     #[command(subcommand)]
     pub command: Option<Command>,
+    /// Increase rstrf log level (-v: debug, -vv: trace); RUST_LOG overrides
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -95,9 +98,15 @@ pub struct PassPngArgs {
 }
 
 fn main() -> iced::Result {
-    env_logger::init();
-
     let args = CliArgs::parse();
+
+    let default_filter = match args.verbose {
+        0 => "warn,rstrf=info,cosmic_config::dbus=off",
+        1 => "warn,rstrf=debug,cosmic_config::dbus=off",
+        _ => "warn,rstrf=trace,cosmic_config::dbus=off",
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
+        .init();
 
     AppModel::create(args).run()
 }

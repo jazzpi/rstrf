@@ -111,7 +111,6 @@
               export RUSTC="${toolchainPath}/bin/rustc"
               export LD_LIBRARY_PATH="${ldLibraryPath}:$LD_LIBRARY_PATH"
               export __EGL_VENDOR_LIBRARY_FILENAMES=${mesa}/share/glvnd/egl_vendor.d/50_mesa.json
-              export RUST_LOG="warn,rstrf=debug,cosmic_config::dbus=off"
               export RUST_BACKTRACE=1
             '';
         };
