@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use iced::{Point, Rectangle};
+use image::RgbaImage;
 use itertools::izip;
 use ndarray::Array1;
 use rfd::AsyncFileDialog;
@@ -95,6 +96,21 @@ where
         ranges.push(s..arr.len());
     }
     ranges
+}
+
+#[derive(Clone)]
+pub struct DebugRgbaImage(pub RgbaImage);
+
+impl std::fmt::Debug for DebugRgbaImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DebugRgbaImage({}x{})", self.0.width(), self.0.height())
+    }
+}
+
+impl From<RgbaImage> for DebugRgbaImage {
+    fn from(img: RgbaImage) -> Self {
+        DebugRgbaImage(img)
+    }
 }
 
 #[cfg(test)]

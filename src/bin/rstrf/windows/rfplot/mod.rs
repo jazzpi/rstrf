@@ -13,6 +13,7 @@ use rstrf::{
     coord::{data_normalized, plot_area},
     menu::MenuItem,
     spectrogram::Spectrogram,
+    util::DebugRgbaImage,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -38,8 +39,8 @@ pub enum Message {
     GpuUploadDone,
     SetView(data_normalized::Rectangle),
     CaptureScreenshot(Option<PathBuf>),
-    CapturedScreenshot(Result<(RgbaImage, Option<PathBuf>), String>),
-    SaveScreenshot(RgbaImage, PathBuf),
+    CapturedScreenshot(Result<(DebugRgbaImage, Option<PathBuf>), String>),
+    SaveScreenshot(DebugRgbaImage, PathBuf),
     Nop,
 }
 
@@ -347,7 +348,7 @@ impl Window<Message> for RFPlot {
                 }
             }
             Message::SaveScreenshot(img, path) => {
-                match img.save(&path) {
+                match img.0.save(&path) {
                     Ok(_) => log::info!("Saved screenshot to {path:?}"),
                     Err(e) => log::error!("Failed to save screenshot to {path:?}: {e}"),
                 }
@@ -420,7 +421,7 @@ impl Window<Message> for RFPlot {
                 let height = screenshot.size.height;
                 Message::CapturedScreenshot(
                     RgbaImage::from_raw(width, height, screenshot.rgba.to_vec())
-                        .map(|img| (img, path.clone()))
+                        .map(|img| (img.into(), path.clone()))
                         .ok_or_else(|| "Screenshot buffer size mismatch".to_string()),
                 )
             }),
