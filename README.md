@@ -77,7 +77,7 @@ You will also need to [install Rust](https://rust-lang.org/tools/install/),
 then:
 
 ```sh
-git clone https://github.com/jazzpi/rstrf -b v0.1.0
+git clone https://github.com/jazzpi/rstrf
 cd rstrf
 cargo build --release
 ```
@@ -90,54 +90,28 @@ cargo run --release
 
 ## Usage
 
-### Spectrogram preparation
+### Spectrogram data
 
 rSTRF does not (currently) include a way to record/generate spectrograms. For
-this, please use STRF's `rffft`.
-
-rSTRF does not use `rffft`'s data format directly. It first resamples the
-spectrogram data to a constant rate. If you generate the `.bin` files from an IQ
-recording, this does not change anything. However, if you record `.bin` files
-live, the spectrogram is not recorded at a constant rate. So there it does make
-a difference.
-
-You can pre-convert the `.bin` files to rSTRF's format (`.rstrf`) with the
-`rsbinfmt` tool. This will make loading it into rSTRF a bit faster.
-
-For example, the following command will convert an hour's worth of `.bin` files
-(recorded with the default `rffft` settings for `-t`/`-n`) into `.rstrf` format:
-
-```sh
-cargo run --release --bin rsbinfmt \
-  /path/to/rffft_data/2026-02-19T00\:00\:01_*{00..59}.bin \
-  /path/to/spec.rstrf
-```
-
-For more usage information, see `cargo run --release --bin rsbinfmt -- -h`.
+this, please use STRF's `rffft` to generate `.bin` files.
 
 ### Plotting
 
-Use the `plot` subcommand. You can pass `.rstrf` or `.bin` files (or a mix):
-
-```sh
-cargo run --release -- plot /path/to/spec.rstrf \
-  -c /path/to/bulk.tle \
-  -F /path/to/frequencies.txt \
-  --zmin -38 \
-  -C 4801
-```
-
-Unlike STRF's `rfplot`, you need to pass all the `.bin` files instead of just
-the beginning of the file name (before the index):
+Use the `plot` subcommand and pass the `.bin` files you want to display. Unlike
+STRF's `rfplot`, you need to pass all the files instead of just the beginning of
+the file name (before the index). For example:
 
 ```sh
 cargo run --release -- plot \
-  /path/to/rffft_data/2026-02-19T00\:00\:01_*{00..59}.bin
+  /path/to/rffft_data/2026-02-19T00\:00\:01_0000{00..59}.bin \
   -c /path/to/bulk.tle \
   -F /path/to/frequencies.txt \
   --zmin -38 \
   -C 4801
 ```
+
+You can also restrict the initial view with `--fmin`/`--fmax` (Hz) and
+`--tmin`/`--tmax` (seconds since the start of the spectrogram).
 
 For more usage information, see `cargo run --release -- plot -h`.
 
@@ -175,10 +149,45 @@ toolbar. This will write all signals into a `.dat` file directory.
 Currently, the sigma field in the `out.dat` file is set to 5 for all signals.
 The site ID field can be controlled using the `-C` CLI argument.
 
+### Following your STRF site
+
+rSTRF can read the observer ground site from STRF's `sites.txt` instead of using
+the site configured in the preferences. Enable "Follow STRF site" in the
+preferences. The site is then looked up from `sites.txt` (located via the
+`$ST_SITES_TXT` / `$ST_DATADIR` environment variables) using the COSPAR site ID
+from `$ST_COSPAR` or the `-C` command-line argument.
+
+### Generating pass images
+
+The `pass-png` subcommand batch-generates a PNG for each pass of a given
+satellite over the spectrogram, without opening the GUI. Select the satellite by
+its NORAD ID (`-i`) and one or more transmitter frequencies (`-f`, repeatable,
+in Hz) — or load a `frequencies.txt` with `-F`. Output files are named
+`<prefix>_000.png`, `<prefix>_001.png`, ...
+
+```sh
+cargo run --release -- pass-png \
+  /path/to/rffft_data/2026-02-19T00\:00\:01_*{00..59}.bin \
+  -c /path/to/bulk.tle \
+  -i 25544 \
+  -f 435.5e6 \
+  -o /path/to/output/pass \
+  --zmin -38
+```
+
+You can set the image size with `-w`/`-h` (default 800x600). For more usage
+information, see `cargo run --release -- pass-png -h`.
+
+**NOTE**: For technical reasons, rSTRF opens a plot window and navigates to each
+pass, then saves a screenshot of the full window.
+
 ## Troubleshooting
 
-You can enable debug logs and backtraces by setting the
-`RUST_LOG`/`RUST_BACKTRACE` environment variables:
+You can increase the log verbosity with `-v` (debug) or `-vv` (trace), e.g.
+`cargo run --release -- -vv plot ...`.
+
+For finer control, you can enable debug logs and backtraces by setting the
+`RUST_LOG`/`RUST_BACKTRACE` environment variables (`RUST_LOG` overrides `-v`):
 
 ```sh
 export RUST_LOG=debug
