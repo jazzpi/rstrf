@@ -28,6 +28,8 @@ use rstrf::{
 };
 use serde::{Deserialize, Serialize};
 
+use rfd::AsyncFileDialog;
+
 use crate::{app::AppShared, windows::rfplot::MarkAction};
 use rstrf::async_cache::AsyncCache;
 
@@ -88,6 +90,7 @@ pub enum Message {
     DeleteInRect(data_absolute::Rectangle),
     UpdateRectPreview(Option<plot_area::Point>),
     SaveSignals,
+    WriteSignals(String, Option<std::path::PathBuf>),
 }
 
 fn clamp_line_to_plot(
@@ -855,9 +858,21 @@ impl Overlay {
                     let freq = center_freq + sig.0.y as f64;
                     output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));
                 }
-                match std::fs::write("out.dat", &output) {
-                    Ok(()) => log::info!("Wrote {} signals to out.dat", self.signals.len()),
-                    Err(e) => log::error!("Failed to write out.dat: {e}"),
+                Task::future(async move {
+                    let path = AsyncFileDialog::new()
+                        .set_file_name("out.dat")
+                        .save_file()
+                        .await
+                        .map(|f| f.path().to_path_buf());
+                    Message::WriteSignals(output, path)
+                })
+            }
+            Message::WriteSignals(_, None) => Task::none(),
+            Message::WriteSignals(output, Some(path)) => {
+                let n = output.lines().count();
+                match std::fs::write(&path, &output) {
+                    Ok(()) => log::info!("Wrote {n} signals to {path:?}"),
+                    Err(e) => log::error!("Failed to write {path:?}: {e}"),
                 }
                 Task::none()
             }

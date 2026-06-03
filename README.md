@@ -170,8 +170,7 @@ pressing `ESC`.
 Further, pressing `f`/`D` by themselves does not generate any
 `out.dat`/`mark.dat` files. Instead, once you have found/marked all the signals
 (and potentially cleaned them up using `d`), press the *Save* button in the
-toolbar. This will write all signals into an `out.dat` file in the current
-directory.
+toolbar. This will write all signals into a `.dat` file directory.
 
 Currently, the sigma field in the `out.dat` file is set to 5 for all signals.
 The site ID field can be controlled using the `-C` CLI argument.
