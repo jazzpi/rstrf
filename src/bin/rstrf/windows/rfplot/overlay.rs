@@ -546,6 +546,11 @@ impl Overlay {
                         MarkAction::Signal => Message::AddSignal(da_pos).into(),
                     };
                     return (Status::Captured, Some(msg));
+                } else if matches!(event, mouse::Event::ButtonPressed(mouse::Button::Left))
+                    && !cursor.is_over(bounds)
+                {
+                    self.mouse_state.set(MouseState::Idle);
+                    return (Status::Captured, None);
                 }
             }
         };
@@ -564,6 +569,10 @@ impl Overlay {
             return (Status::Ignored, None);
         };
         let modifiers = self.modifiers.get();
+
+        if matches!(self.mouse_state.get(), MouseState::Marking(_)) {
+            self.mouse_state.set(MouseState::Idle);
+        }
 
         // Some keys should work regardless of cursor position...
         let pan = if modifiers.shift() { 0.5 } else { 1.0 };
