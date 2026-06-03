@@ -66,9 +66,11 @@ impl From<BuiltinTheme> for Theme {
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub version: String,
     pub space_track_creds: Option<(String, String)>,
+    pub follow_strf_site: bool,
     pub site: Option<Site>,
     pub theme: BuiltinTheme,
     pub default_colormap: Colormap,
@@ -77,7 +79,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: "0.2.0".to_string(),
             space_track_creds: None,
             site: None,
             theme: BuiltinTheme::default(),
@@ -106,6 +108,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn missing_fields_use_defaults() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
     fn default_config_round_trips() {
         let config = Config::default();
         let json = serde_json::to_string(&config).unwrap();
@@ -121,9 +129,7 @@ mod tests {
                 "user@example.com".to_string(),
                 "s3cr3t_password".to_string(),
             )),
-            site: None,
-            theme: BuiltinTheme::Dark,
-            default_colormap: Colormap::Cividis,
+            ..Default::default()
         };
         let debug = format!("{:?}", config);
         assert!(
