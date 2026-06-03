@@ -77,6 +77,7 @@ to save them to a `.dat` file.
 - **Save a screenshot** of the current view.
 - **Viridis is now the default colormap** (still configurable in preferences).
 - **Windows is now supported** - see the new build instructions in the README.
+  Thanks [@ev3nvy](https://github.com/ev3nvy)!
 - **Follow STRF site:** rSTRF can now automatically read the observer ground
   site from STRF's `sites.txt` based on your `$ST_SITES_TXT` / `$ST_DATADIR` /
   `$ST_COSPAR` environment variables & the `-C` command-line option. Set "Follow
