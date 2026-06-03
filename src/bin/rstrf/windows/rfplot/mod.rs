@@ -259,7 +259,7 @@ impl Window<Message> for RFPlot {
         }]
     }
 
-    fn view(&self, _app: &AppShared) -> Element<'_, WindowOut<Message>> {
+    fn view(&self, app: &AppShared) -> Element<'_, WindowOut<Message>> {
         match &self.loading_state {
             LoadingState::LoadingFiles { loaded, total } => {
                 return container(widget::text(format!(
@@ -319,11 +319,7 @@ impl Window<Message> for RFPlot {
             .height(Length::Fill)
             .into();
 
-        let status = if self.overlay.is_predicting() {
-            Some("Computing pass predictions...")
-        } else {
-            None
-        };
+        let status = self.overlay.status(app);
 
         let mut stack = widget::stack![spectrogram, plot_overlay];
         if let Some(status) = status {

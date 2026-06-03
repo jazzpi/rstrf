@@ -671,10 +671,21 @@ impl Overlay {
         }
     }
 
-    /// Returns `true` if predictions are enabled and a prediction computation is currently in
-    /// flight.
-    pub(super) fn is_predicting(&self) -> bool {
-        self.show_predictions && self.prediction_cache.busy()
+    pub(super) fn status(&self, app: &AppShared) -> Option<&str> {
+        if !self.show_predictions {
+            return None;
+        }
+        if app.satellites.is_empty() {
+            Some("No satellites")
+        } else if self.prediction_cache.busy() {
+            Some("Predicting satellite passes...")
+        } else if app.config.site.is_none() {
+            Some("No site configured")
+        } else if self.prediction_cache.get_stored().is_none() {
+            Some("No passes predicted")
+        } else {
+            None
+        }
     }
 
     /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
