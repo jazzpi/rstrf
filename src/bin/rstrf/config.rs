@@ -81,6 +81,7 @@ impl Default for Config {
         Self {
             version: "0.2.0".to_string(),
             space_track_creds: None,
+            follow_strf_site: false,
             site: None,
             theme: BuiltinTheme::default(),
             default_colormap: Colormap::Viridis,

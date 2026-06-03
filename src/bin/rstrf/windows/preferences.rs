@@ -4,7 +4,10 @@ use iced::{
     Element, Font, Length, Task,
     alignment::Vertical,
     font,
-    widget::{Space, button, column, container, pick_list, row, rule, space, text, text_input},
+    widget::{
+        Space, button, checkbox, column, container, pick_list, row, rule, space, text, text_input,
+        tooltip,
+    },
     window,
 };
 use space_track::SpaceTrack;
@@ -30,6 +33,7 @@ pub enum Message {
     SiteAltitude(f64),
     ThemeSelected(BuiltinTheme),
     ColormapSelected(Colormap),
+    FollowStrfSite(bool),
     Submit,
 }
 
@@ -78,7 +82,7 @@ impl Window {
         label: &'a str,
         value: T,
         precision: usize,
-        on_input: impl Fn(T) -> Message + Clone + 'a,
+        on_input: Option<impl Fn(T) -> Message + Clone + 'a>,
     ) -> Element<'a, Message>
     where
         T: Display + FromStr + Clone + 'a,
@@ -105,6 +109,22 @@ impl Window {
     {
         let label_text = text(label).font(BOLD).width(Length::FillPortion(1));
         let input = pick_list(options, value, on_selected)
+            .padding(10)
+            .width(Length::FillPortion(3));
+        row![label_text, input]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(Vertical::Center)
+            .into()
+    }
+
+    fn checkbox_field<'a>(
+        label: &'a str,
+        checked: bool,
+        on_toggle: Option<impl Fn(bool) -> Message + 'a>,
+    ) -> Element<'a, Message> {
+        let label_text = text(label).font(BOLD).width(Length::FillPortion(1));
+        let input = container(checkbox(checked).on_toggle_maybe(on_toggle).size(20))
             .padding(10)
             .width(Length::FillPortion(3));
         row![label_text, input]
@@ -188,22 +208,41 @@ impl Window {
 
     fn view_site(&self) -> Element<'_, Message> {
         let site = self.working_copy.site.clone().unwrap_or_default();
+        let enabled = !self.working_copy.follow_strf_site;
         Self::view_group(
             "Ground Site",
             column![
+                tooltip(
+                    Self::checkbox_field(
+                        "Follow STRF site",
+                        self.working_copy.follow_strf_site,
+                        Some(Message::FollowStrfSite)
+                    ),
+                    container(text(
+                        "Determine site location from STRF's sites.txt and the site ID"
+                    ))
+                    .padding(5)
+                    .style(container::dark),
+                    tooltip::Position::FollowCursor,
+                ),
                 Self::number_field(
                     "Latitude (°)",
                     site.latitude.to_degrees(),
                     4,
-                    Message::SiteLatitude
+                    enabled.then_some(Message::SiteLatitude)
                 ),
                 Self::number_field(
                     "Longitude (°)",
                     site.longitude.to_degrees(),
                     4,
-                    Message::SiteLongitude
+                    enabled.then_some(Message::SiteLongitude)
                 ),
-                Self::number_field("Altitude (km)", site.altitude, 3, Message::SiteAltitude),
+                Self::number_field(
+                    "Altitude (km)",
+                    site.altitude,
+                    3,
+                    enabled.then_some(Message::SiteAltitude)
+                ),
             ],
         )
     }
@@ -340,6 +379,10 @@ impl super::Window<Message> for Window {
             }
             Message::ColormapSelected(colormap) => {
                 self.working_copy.default_colormap = colormap;
+                Task::none()
+            }
+            Message::FollowStrfSite(enable) => {
+                self.working_copy.follow_strf_site = enable;
                 Task::none()
             }
             Message::Submit => Task::done(WindowOut::Effect(WindowEffect::ToApp(

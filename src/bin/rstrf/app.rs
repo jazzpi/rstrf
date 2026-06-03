@@ -13,7 +13,7 @@ use iced::window::settings::PlatformSpecific;
 use iced::{Daemon, window};
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::menu::{MenuItem, view_menu};
-use rstrf::orbit::Satellite;
+use rstrf::orbit::{Satellite, Site};
 use rstrf::spectrogram::SpectrogramBounds;
 use space_track::SpaceTrack;
 use std::collections::HashMap;
@@ -30,10 +30,14 @@ pub struct AppShared {
     pub space_track: Option<Arc<Mutex<SpaceTrack>>>,
     /// Configuration data that persists between application runs.
     pub config: Config,
+    /// Site determined from site_id & STRF's sites.txt
+    strf_site: Option<Site>,
     pub satellites: Vec<(Satellite, bool)>,
     pub frequencies: HashMap<u64, Vec<f64>>,
-    /// Site ID written to out.dat when saving signals (set from --site-id/-C CLI arg).
-    pub site_id: i32,
+    /// Site ID for saving signals (set from --site-id/-C CLI arg).
+    ///
+    /// Also used for location if `config.follow_strf_site` is true.
+    pub site_id: Option<i32>,
 }
 
 impl AppShared {
@@ -49,6 +53,14 @@ impl AppShared {
             .iter()
             .filter_map(|(sat, active)| active.then(|| sat.norad_id()))
             .collect()
+    }
+
+    pub fn site(&self) -> Option<Site> {
+        if self.config.follow_strf_site {
+            self.strf_site.clone()
+        } else {
+            self.config.site.clone()
+        }
     }
 }
 
@@ -66,6 +78,7 @@ pub struct AppModel {
 pub enum Message {
     Nop,
     UpdateConfig(Config),
+    UpdateStrfSite(Option<Site>),
     // TODO: how will the app restore an rfplot with a given spectrogram/controls?
     OpenRFPlot,
     WindowOpenedRFPlot(window::Id),
@@ -255,6 +268,10 @@ impl AppModel {
         match message {
             Message::Nop => Task::none(),
             Message::UpdateConfig(config) => self.update_config(config),
+            Message::UpdateStrfSite(site) => {
+                self.shared_state.strf_site = site;
+                Task::done(Message::Event(AppEvent::ConfigUpdated))
+            }
             Message::OpenRFPlot => Self::open_window(None).map(Message::WindowOpenedRFPlot),
             Message::WindowOpenedRFPlot(id) => {
                 self.windows
@@ -271,7 +288,13 @@ impl AppModel {
                     zmin: args.zmin,
                     zmax: args.zmax,
                 };
-                self.open_rfplot_with(id, args.spectrograms, view)
+                let rfplot_task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
+                if self.shared_state.config.follow_strf_site {
+                    let strf_site_task = self.update_strf_site();
+                    Task::batch([rfplot_task, strf_site_task])
+                } else {
+                    rfplot_task
+                }
             }
             Message::WindowOpenedPassPng(id, args) => {
                 let view = InitialView {
@@ -431,7 +454,56 @@ impl AppModel {
             Ok(_) => log::debug!("Saved config"),
             Err(err) => log::error!("Failed to save config: {:?}", err),
         }
-        Task::done(Message::Event(AppEvent::ConfigUpdated))
+        if self.shared_state.config.follow_strf_site {
+            self.update_strf_site()
+        } else {
+            Task::done(Message::Event(AppEvent::ConfigUpdated))
+        }
+    }
+
+    fn update_strf_site(&mut self) -> Task<Message> {
+        let site_id = self.shared_state.site_id.or_else(|| {
+            std::env::var("ST_COSPAR")
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok())
+        });
+        let Some(site_id) = site_id else {
+            log::error!("no site ID provided for STRF site lookup");
+            return Task::done(Message::Event(AppEvent::ConfigUpdated));
+        };
+        let sites_path = std::env::var("ST_SITES_TXT")
+            .map(PathBuf::from)
+            .or_else(|_| {
+                std::env::var("ST_DATADIR").map(|dir| {
+                    [dir, "data".to_string(), "sites.txt".to_string()]
+                        .iter()
+                        .collect()
+                })
+            });
+        let sites_path = match sites_path {
+            Ok(path) => path,
+            Err(err) => {
+                log::error!("Failed to determine path to STRF sites.txt: {:?}", err);
+                return Task::done(Message::Event(AppEvent::ConfigUpdated));
+            }
+        };
+        Task::future(async move {
+            let site = rstrf::orbit::load_strf_sites(&sites_path)
+                .await
+                .and_then(|sites| {
+                    sites
+                        .get(&site_id)
+                        .cloned()
+                        .context(format!("Site ID {} not found in STRF sites.txt", site_id))
+                });
+            log::debug!("Loaded STRF site with ID {}: {:?}", site_id, site);
+            Message::UpdateStrfSite(
+                site.inspect_err(|err| {
+                    log::error!("Failed to load STRF site with ID {}: {:?}", site_id, err);
+                })
+                .ok(),
+            )
+        })
     }
 
     fn open_window(size: Option<iced::Size<f32>>) -> Task<window::Id> {

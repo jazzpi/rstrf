@@ -91,17 +91,22 @@ impl TableColumn {
                         let sat2 = sat.clone();
                         Row::new()
                             .push(
-                                number_input("", freq / 1e6, 3, move |new_freq| {
-                                    let mut transmitters = sat2.transmitters.clone();
-                                    transmitters[tx_idx] = new_freq * 1e6;
-                                    Message::SatelliteEdited(
-                                        idx,
-                                        Box::new(Satellite {
-                                            transmitters,
-                                            ..sat2.clone()
-                                        }),
-                                    )
-                                })
+                                number_input(
+                                    "",
+                                    freq / 1e6,
+                                    3,
+                                    Some(move |new_freq| {
+                                        let mut transmitters = sat2.transmitters.clone();
+                                        transmitters[tx_idx] = new_freq * 1e6;
+                                        Message::SatelliteEdited(
+                                            idx,
+                                            Box::new(Satellite {
+                                                transmitters,
+                                                ..sat2.clone()
+                                            }),
+                                        )
+                                    }),
+                                )
                                 .on_submit(Message::SatelliteEditCommited(idx))
                                 .width(Length::Fixed(90.0)),
                             )

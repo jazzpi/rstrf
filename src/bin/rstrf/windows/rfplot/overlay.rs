@@ -56,7 +56,7 @@ pub(crate) struct PredictionKey {
 
 fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey> {
     let spectrogram = shared.spectrogram.as_ref()?;
-    let site = app.config.site.as_ref()?.clone();
+    let site = app.site()?;
     let satellites = app.active_satellite_ids();
     if satellites.is_empty() {
         return None;
@@ -679,7 +679,7 @@ impl Overlay {
             Some("No satellites")
         } else if self.prediction_cache.busy() {
             Some("Predicting satellite passes...")
-        } else if app.config.site.is_none() {
+        } else if app.site().is_none() {
             Some("No site configured")
         } else if self.prediction_cache.get_stored().is_none() {
             Some("No passes predicted")
@@ -856,13 +856,16 @@ impl Overlay {
             }
             Message::SaveSignals => {
                 let Some(spectrogram) = &shared.spectrogram else {
-                    log::warn!("No spectrogram loaded, cannot save signals");
+                    log::error!("No spectrogram loaded, cannot save signals");
+                    return Task::none();
+                };
+                let Some(site_id) = app.site_id else {
+                    log::error!("No site configured, cannot save signals");
                     return Task::none();
                 };
                 let start_mjd =
                     spectrogram.start_time().timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
-                let site_id = app.site_id;
                 let mut output = String::new();
                 for sig in &self.signals {
                     let mjd = start_mjd + sig.0.x as f64 / 86400.0;

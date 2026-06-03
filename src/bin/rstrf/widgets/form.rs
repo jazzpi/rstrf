@@ -114,17 +114,21 @@ pub fn number_input<'a, T, Message>(
     placeholder: &str,
     value: T,
     precision: usize,
-    on_input: impl Fn(T) -> Message + Clone + 'a,
+    on_input: Option<impl Fn(T) -> Message + Clone + 'a>,
 ) -> TextInput<'a, Message>
 where
     T: Display + FromStr + Clone + 'a,
     Message: Clone,
 {
-    text_input(placeholder, format!("{:.1$}", value, precision).as_str()).on_input(move |s| {
-        s.parse::<T>().map(on_input.clone()).unwrap_or_else({
-            let value = value.clone();
-            let on_input = on_input.clone();
-            move |_| on_input(value)
-        })
-    })
+    text_input(placeholder, format!("{:.1$}", value, precision).as_str()).on_input_maybe(
+        on_input.map(|f| {
+            move |s: String| {
+                s.parse::<T>().map(f.clone()).unwrap_or_else({
+                    let value = value.clone();
+                    let f = f.clone();
+                    move |_| f(value)
+                })
+            }
+        }),
+    )
 }

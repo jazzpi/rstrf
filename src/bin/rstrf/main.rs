@@ -59,9 +59,10 @@ pub struct PlotArgs {
     /// Maximum power (dB)
     #[arg(long, allow_hyphen_values = true)]
     pub zmax: Option<f32>,
-    /// Site ID written to out.dat (replaces the trailing 0)
-    #[arg(short = 'C', long, value_name = "SITE_ID", default_value_t = 0)]
-    pub site_id: i32,
+    /// Site ID written to .dat files. Used for site lookup if "Follow STRF site" is enabled in
+    /// preferences.
+    #[arg(short = 'C', long, value_name = "SITE_ID")]
+    pub site_id: Option<i32>,
 }
 
 #[derive(Args, Debug, Clone)]

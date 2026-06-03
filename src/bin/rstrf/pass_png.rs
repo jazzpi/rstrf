@@ -95,7 +95,10 @@ impl PassPngMode {
 
                 self.state = State::WaitingForPredictions;
 
-                let site = app.config.site.clone().unwrap_or_default();
+                let Some(site) = app.site() else {
+                    log::error!("pass-png: no site available");
+                    return iced::exit();
+                };
                 let time_range = spec_bounds.time_range.clone();
                 let transmitters = satellite.transmitters.clone();
                 let predict_task = Task::future(async move {

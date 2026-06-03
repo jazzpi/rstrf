@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use ndarray::{Array1, ArrayView1, Zip, arr1, s};
 use ndarray_linalg::Norm;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
 use tokio::io::AsyncBufReadExt;
@@ -97,6 +98,38 @@ pub async fn load_tles(
         };
     }
     Ok(elements)
+}
+
+/// Loads sites from an STRF sites.txt file
+pub async fn load_strf_sites(path: &PathBuf) -> anyhow::Result<HashMap<i32, Site>> {
+    let file = tokio::fs::File::open(path).await?;
+
+    let pattern = Regex::new(r"^(\d+)\s+\w+\s+([0-9.+\-]+)\s+([0-9.+\-]+)\s+([0-9]+).*$")?;
+
+    let reader = tokio::io::BufReader::new(file);
+    let mut lines = reader.lines();
+    let mut sites = HashMap::new();
+    while let Some(line) = lines.next_line().await? {
+        if line.starts_with("#") || line.trim().is_empty() {
+            continue;
+        }
+        let captures = pattern.captures(&line);
+        let Some(captures) = captures else {
+            log::warn!("Failed to parse STRF site line {}", line);
+            continue;
+        };
+        let site_id = captures[1].parse::<i32>()?;
+        sites.insert(
+            site_id,
+            Site {
+                latitude: captures[2].parse::<f64>()?.to_radians(),
+                longitude: captures[3].parse::<f64>()?.to_radians(),
+                altitude: captures[4].parse::<f64>()? / 1000.0,
+            },
+        );
+    }
+
+    Ok(sites)
 }
 
 const RADIUS_EARTH: f64 = 6378.137; // km
