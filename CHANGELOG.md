@@ -11,7 +11,8 @@ In addition, there's a bunch of new features, bugfixes and big performance
 improvements on large datasets.
 
 Thanks a lot to the people in [`#rstrf`](https://matrix.to/#/#rstrf:matrix.org)
-(especially Ben and Jan for being beta-testers and Cees for the explanations of STRF's design).
+(especially Ben and Jan for being beta-testers and Cees for the explanations of
+STRF's design).
 
 ## Changes
 ### UI Rework
@@ -76,75 +77,19 @@ to save them to a `.dat` file.
 - **Save a screenshot** of the current view.
 - **Viridis is now the default colormap** (still configurable in preferences).
 - **Windows is now supported** - see the new build instructions in the README.
+- **Follow STRF site:** rSTRF can now automatically read the observer ground
+  site from STRF's `sites.txt` based on your `$ST_SITES_TXT` / `$ST_DATADIR` /
+  `$ST_COSPAR` environment variables & the `-C` command-line option. Set "Follow
+  STRF site" in Preferences.
+- **Prediction status indicator:** a status indicator is shown while Doppler
+  pass predictions are being computed.
 - `-v`/`-vv` flags to increase log verbosity.
 - Significant performance improvements.
 - Various bug fixes.
 
 ## Full commit list
 
-- `da73483` build: use upstream sgp4
-- `5bfd902` build: remove obsolete git hash
-- `44c6da2` fix: windows compilation
-- `b75f246` docs: add Windows build instructions
-- `ecc3575` Merge pull request #8 from ev3nvy/windows-compile-fix
-- `912f61c` refactor: replace `Box<dyn PaneWidget>` with concrete enum
-- `0f311c5` refactor: extract caching logic to new type
-- `7635089` llm: Claude integration
-- `4969818` test: let claude write some tests
-- `67ee7c4` feat: custom spectrogram format
-- `1e34be3` feat: Github Actions integration
-- `9cdc0dd` feat: shift/ctrl+Scroll for x/y zoom
-- `e652474` fix: pick .rstrf & .bin spectrograms
-- `03343b9` refactor: get rid of panegrid, change panes to windows
-- `e816080` llm: update CLAUDE.md for non-panegrid architecture
-- `0754357` feat: strf-like CLI for rfplot
-- `80ca783` feat: configure default colormap in preferences
-- `fbc8712` feat: 1 prediction per second
-- `fd8e901` refactor: remove unused panes module
-- `c5ffc0c` feat: add signals by pressing `D`
-- `79a83b6` feat: clear signals & track points
-- `01ec238` feat: zoom-to-rect & delete-points-in-rect
-- `af5b6ca` feat: write signals to out.dat
-- `5beb6ef` docs: update README
-- `1c295cc` feat: resample .bin files on loading into rfplot
-- `a23eb13` feat: allow multiple transmitters per satellite
-- `aa238c3` perf: remove satellite data from PredictionKey
-- `c13e420` refactor: split pass predictions into passes
-- `b3e71cc` chore: clippy
-- `5f76629` feat: use Viridis as default colormap
-- `5bb2a4c` feat: absolute axes ticks
-- `23c4d1f` feat: add script for generating synthetic STRF data
-- `fb09a4d` wip: render each spectrum as a separate quad
-- `58e3e79` refactor!: don't resample STRF .bin files
-- `8ff80d3` feat: use frag_depth output for max-hold emulation
-- `00f7f3f` feat: snap spectra to nearest pixel boundaries
-- `0f6c59f` fix: use correct rectangle for viewport width
-- `d78528e` chore: clean up dead code
-- `ebf10b3` feat: pan with arrow keys
-- `ea90b7b` feat: use marking modes for trackpoints/signals
-- `d6c1e4c` feat: set maximum zoom based on spectrogram bounds
-- `333a3f9` refactor: load all spectrogram file types together
-- `9da3727` perf: bulk-read each spectrum in .bin files
-- `5fc6c23` perf: only compile header regex once
-- `a08d545` perf: avoid intermediate allocations
-- `51a6364` chore: clippy
-- `3c0ef1e` perf: use rayon for dB calculation
-- `8f45f3e` llm: update CLAUDE.md
-- `0cdf094` perf: avoid keeping duplicates of data in RAM
-- `a730655` perf: commit each chunk write immediately
-- `a934921` perf: limit number of files loaded in parallel
-- `75c0972` feat: progress indicator for spectrogram loading
-- `da856b2` feat: save screenshot
-- `cb49d75` feat: show date in absolute time mode
-- `3160a0c` refactor: add actually absolute spectrogram bounds
-- `2c5c4b9` feat: generate screenshots for passes of a given satellite
-- `5d53121` perf: exclude screenshot data from Debug output
-- `3ad093e` chore: fix formatting
-- `87d84d1` feat: name pass PNG files by transmitter frequency
-- `9301381` feat: hide controls when generating pass PNGs
-- `99429c4` feat: specify window size for pass-png
-- `3b3a89b` feat: use 25% relative margin for pass PNGs
-- `ef26c9d` feat: add `-v` flag for verbosity
+[See Github](https://github.com/jazzpi/rstrf/compare/v0.1.1...v0.2.0)
 
 # v0.1.1
 
