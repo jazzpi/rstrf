@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use iced::{Point, Rectangle};
+use iced::{
+    Point, Rectangle,
+    keyboard::{Key, key::Named},
+};
 use image::RgbaImage;
 use itertools::izip;
 use ndarray::Array1;
@@ -113,10 +116,20 @@ impl From<RgbaImage> for DebugRgbaImage {
     }
 }
 
+pub fn is_modifier(key: &Key) -> bool {
+    let Key::Named(named) = key else {
+        return false;
+    };
+    matches!(
+        named,
+        Named::Shift | Named::Control | Named::Alt | Named::AltGraph | Named::Meta | Named::Super
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::{Point as IcedPoint, Rectangle, Size};
+    use iced::{Point as IcedPoint, Rectangle, Size, keyboard::key::Named};
     use ndarray::arr1;
 
     #[test]
@@ -269,5 +282,14 @@ mod tests {
         assert!((clipped_a.y - 0.5).abs() < 1e-5);
         assert!((clipped_b.x - 0.5).abs() < 1e-5);
         assert!((clipped_b.y - 0.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn is_modifier_works() {
+        assert!(is_modifier(&Key::Named(Named::Shift)));
+        assert!(is_modifier(&Key::Named(Named::Control)));
+        assert!(is_modifier(&Key::Named(Named::Alt)));
+        assert!(!is_modifier(&Key::Named(Named::Escape)));
+        assert!(!is_modifier(&Key::Character("d".into())));
     }
 }

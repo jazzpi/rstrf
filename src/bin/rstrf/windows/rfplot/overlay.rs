@@ -24,7 +24,7 @@ use rstrf::{
     },
     orbit::{self, Site},
     signal,
-    util::clip_line,
+    util::{clip_line, is_modifier},
 };
 use serde::{Deserialize, Serialize};
 
@@ -573,7 +573,7 @@ impl Overlay {
         };
         let modifiers = self.modifiers.get();
 
-        if matches!(self.mouse_state.get(), MouseState::Marking(_)) {
+        if matches!(self.mouse_state.get(), MouseState::Marking(_)) && !is_modifier(key) {
             self.mouse_state.set(MouseState::Idle);
         }
 
