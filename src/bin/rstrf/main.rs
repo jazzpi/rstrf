@@ -92,9 +92,9 @@ pub struct PassPngArgs {
     /// Output path prefix; files are named <prefix>_000.png, <prefix>_001.png, ...
     #[arg(short = 'o', long)]
     pub output: std::path::PathBuf,
-    #[arg(short = 'w', long, default_value_t = 800)]
+    #[arg(short = 'W', long, default_value_t = 800)]
     pub width: u32,
-    #[arg(short = 'h', long, default_value_t = 600)]
+    #[arg(short = 'H', long, default_value_t = 600)]
     pub height: u32,
 }
 

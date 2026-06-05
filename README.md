@@ -175,7 +175,7 @@ cargo run --release -- pass-png \
   --zmin -38
 ```
 
-You can set the image size with `-w`/`-h` (default 800x600). For more usage
+You can set the image size with `-W`/`-H` (default 800x600). For more usage
 information, see `cargo run --release -- pass-png -h`.
 
 **NOTE**: For technical reasons, rSTRF opens a plot window and navigates to each
