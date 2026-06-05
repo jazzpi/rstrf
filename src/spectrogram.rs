@@ -16,9 +16,6 @@ use uuid::Uuid;
 
 use crate::coord::data_absolute;
 
-const RSTRF_MAGIC: &[u8; 8] = b"RSTRF\x01\n\0";
-/// Sentinel dB value written to gap slots in `.rstrf` files.
-pub const FILL_DB: f32 = -120.0;
 static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END").unwrap()
 });
@@ -41,23 +38,16 @@ pub struct SpectrogramParams {
 
 /// Loads a single spectrogram file, dispatching on extension.
 ///
-/// `.rstrf` files are loaded as the constant-rate RSTRF format; all other files are treated as
-/// strf `.bin` files.
-pub async fn load_single(path: PathBuf) -> Result<Spectrogram> {
-    let spec = if path.extension().and_then(|e| e.to_str()) == Some("rstrf") {
-        load_rstrf_file(&path).await
-    } else {
-        load_strf_file(&path).await
-    };
+/// This is simply a wrapper around `load_strf_file`, but we might add a different format in the
+/// future.
+pub async fn load_single(path: PathBuf, freq_range: Option<(u64, u64)>) -> Result<Spectrogram> {
+    let spec = load_strf_file(&path, freq_range).await;
     log::debug!("Loaded {}", path.display());
     spec.context(format!("Failed to load file {:?}", path))
 }
 
 /// Loads a spectrogram from the given file paths.
-///
-/// Files ending in `.rstrf` are loaded as the constant-rate RSTRF format. All other files are
-/// treated as strf `.bin` files and read the per-spectrum timestamps/lengths.
-pub async fn load(paths: &[PathBuf]) -> Result<Spectrogram> {
+pub async fn load(paths: &[PathBuf], freq_range: Option<(u64, u64)>) -> Result<Spectrogram> {
     if paths.is_empty() {
         bail!("No files provided");
     }
@@ -111,32 +101,6 @@ async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
         timestamps,
         lengths,
     })
-}
-
-/// Writes a spectrogram to the given file path in the RSTRF format.
-pub async fn save(spectrogram: &Spectrogram, path: &Path) -> Result<()> {
-    let mut file = tokio::fs::File::create(path).await?;
-    let mut writer = tokio::io::BufWriter::new(&mut file);
-
-    // Header (64 bytes total)
-    writer.write_all(RSTRF_MAGIC).await?;
-    writer
-        .write_i64_le(spectrogram.start_time().timestamp_millis())
-        .await?;
-    writer.write_f64_le(spectrogram.freq as f64).await?;
-    writer.write_f64_le(spectrogram.bw as f64).await?;
-    writer.write_f64_le(spectrogram.lengths[0] as f64).await?;
-    writer.write_u32_le(spectrogram.nchan as u32).await?;
-    writer.write_u32_le(spectrogram.nslices as u32).await?;
-    writer.write_all(&[0u8; 16]).await?; // reserved
-
-    // Data: nslices * nchan f32 dB values, little-endian, row-major
-    for &value in spectrogram.data().iter() {
-        writer.write_f32_le(value).await?;
-    }
-
-    writer.flush().await?;
-    Ok(())
 }
 
 /// Writes a spectrogram to the given file path in the strf `.bin` format.
@@ -380,65 +344,6 @@ pub struct SpectrogramBounds {
     pub freq_range: std::ops::Range<f32>,
 }
 
-async fn load_rstrf_file(path: &Path) -> Result<Spectrogram> {
-    let file = tokio::fs::File::open(path).await?;
-    let mut reader = tokio::io::BufReader::new(file);
-
-    let mut magic = [0u8; 8];
-    reader
-        .read_exact(&mut magic)
-        .await
-        .context("Failed to read magic bytes")?;
-    ensure!(&magic == RSTRF_MAGIC, "Not an RSTRF file (bad magic bytes)");
-
-    let start_time_ms = reader.read_i64_le().await?;
-    let freq = reader.read_f64_le().await? as f32;
-    let bw = reader.read_f64_le().await? as f32;
-    let slice_length = reader.read_f64_le().await? as f32;
-    let nchan = reader.read_u32_le().await? as usize;
-    let nslices = reader.read_u32_le().await? as usize;
-    // reserved
-    let mut _reserved = [0u8; 16];
-    reader.read_exact(&mut _reserved).await?;
-
-    let start_time = DateTime::from_timestamp_millis(start_time_ms)
-        .ok_or_else(|| anyhow!("Invalid start timestamp: {}", start_time_ms))?;
-
-    let mut data_db = vec![0f32; nslices * nchan];
-    for v in data_db.iter_mut() {
-        *v = reader.read_f32_le().await?;
-    }
-
-    let data = ArcArray2::from_shape_vec((nslices, nchan), data_db)?;
-    let min = data
-        .iter()
-        .cloned()
-        .filter(|&v| v > FILL_DB)
-        .fold(f32::INFINITY, f32::min);
-    let max = data
-        .iter()
-        .cloned()
-        .filter(|&v| v > FILL_DB)
-        .fold(f32::NEG_INFINITY, f32::max);
-
-    let timestamps = (0..nslices)
-        .map(|i| start_time + Duration::milliseconds((slice_length * 1000.0) as i64 * i as i64))
-        .collect();
-    let lengths = vec![slice_length; nslices];
-
-    Ok(Spectrogram {
-        id: Uuid::new_v4(),
-        nchan,
-        nslices,
-        freq,
-        bw,
-        power_bounds: (min, max),
-        data,
-        timestamps,
-        lengths,
-    })
-}
-
 async fn parse_header<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Result<Header> {
     let mut buf = [0u8; HEADER_SIZE];
     reader
@@ -651,49 +556,5 @@ mod tests {
 
         assert_eq!(loaded.nslices, loaded_fwd.nslices);
         assert_eq!(loaded.start_time(), loaded_fwd.start_time());
-    }
-
-    #[tokio::test]
-    async fn load_bin_and_rstrf_concatenated() {
-        let start = test_start();
-        let s1 = make_spec(start, 5, 16, 100.0);
-        let s2 = make_spec(s1.end_time(), 5, 16, 200.0);
-
-        let dir = tempfile::tempdir().unwrap();
-        let bin_path = dir.path().join("part1.bin");
-        let rstrf_path = dir.path().join("part2.rstrf");
-        save_strf(&s1, &bin_path).await.unwrap();
-        save(&s2, &rstrf_path).await.unwrap();
-
-        let loaded = load(&[bin_path, rstrf_path]).await.unwrap();
-
-        assert_eq!(loaded.nslices, s1.nslices + s2.nslices);
-        assert_eq!(loaded.start_time(), start);
-    }
-
-    #[tokio::test]
-    async fn save_load_rstrf_roundtrip() {
-        let start = test_start();
-        let spec = make_spec(start, 10, 64, 1.5);
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.rstrf");
-
-        save(&spec, &path).await.unwrap();
-        let loaded = load(&[path]).await.unwrap();
-
-        assert_eq!(loaded.nslices, spec.nslices);
-        assert_eq!(loaded.nchan, spec.nchan);
-        assert_eq!(loaded.start_time(), spec.start_time());
-        assert!((loaded.freq - spec.freq).abs() < 1.0);
-        assert!((loaded.bw - spec.bw).abs() < 1.0);
-        assert_eq!(loaded.timestamps, spec.timestamps);
-        assert_eq!(loaded.lengths, spec.lengths);
-
-        let orig = spec.data();
-        let got = loaded.data();
-        for (&a, &b) in orig.iter().zip(got.iter()) {
-            assert!((a - b).abs() < 1e-4, "dB mismatch: {} vs {}", a, b);
-        }
     }
 }
