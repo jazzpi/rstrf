@@ -11,12 +11,15 @@ pub enum Event {
 
 // run_with(D, fn(&D) -> S) requires fn(&Vec<PathBuf>) since D == Vec<PathBuf>
 #[allow(clippy::ptr_arg)]
-fn load_worker(paths: &Vec<PathBuf>) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
+fn load_worker(
+    paths: &Vec<PathBuf>,
+    freq_range: Option<(u64, u64)>,
+) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
     let paths = paths.clone();
     Box::pin(iced::stream::channel(16, async move |mut sender| {
         let total = paths.len();
         let mut file_stream = stream::iter(paths.clone())
-            .map(rstrf::spectrogram::load_single)
+            .map(|path| rstrf::spectrogram::load_single(path, freq_range))
             .buffer_unordered(8);
         let mut spectrograms = Vec::with_capacity(total);
 
@@ -48,6 +51,9 @@ fn load_worker(paths: &Vec<PathBuf>) -> Pin<Box<dyn Stream<Item = Event> + Send>
     }))
 }
 
-pub fn load_subscription(paths: Vec<PathBuf>) -> Subscription<Event> {
-    Subscription::run_with(paths, load_worker)
+pub fn load_subscription(
+    paths: Vec<PathBuf>,
+    freq_range: Option<(u64, u64)>,
+) -> Subscription<Event> {
+    Subscription::run_with((paths, freq_range), |(p, f)| load_worker(&p, *f))
 }

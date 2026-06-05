@@ -20,6 +20,9 @@ pub struct CliArgs {
     /// Increase rstrf log level (-v: debug, -vv: trace); RUST_LOG overrides
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+    /// Frequency range to load in Hz: MIN MAX (channels outside this range are skipped)
+    #[arg(long, value_name = "FREQ", num_args = 2, global = true)]
+    pub freq_range: Option<Vec<f64>>,
 }
 
 #[derive(Subcommand, Debug, Clone)]

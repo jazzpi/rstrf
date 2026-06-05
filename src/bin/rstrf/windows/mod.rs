@@ -95,7 +95,7 @@ pub trait Window<M: Clone> {
     fn init(&mut self, _id: window::Id, _app: &AppShared) -> Task<WindowOut<M>> {
         Task::none()
     }
-    fn subscription(&self) -> Subscription<WindowOut<M>> {
+    fn subscription(&self, _app: &AppShared) -> Subscription<WindowOut<M>> {
         Subscription::none()
     }
 }
@@ -166,11 +166,11 @@ impl AnyWindow {
         }
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&self, app: &AppShared) -> Subscription<Message> {
         match self {
-            AnyWindow::RFPlot(w) => w.subscription().map(Message::from),
-            AnyWindow::SatManager(w) => w.subscription().map(Message::from),
-            AnyWindow::Preferences(w) => w.subscription().map(Message::from),
+            AnyWindow::RFPlot(w) => w.subscription(app).map(Message::from),
+            AnyWindow::SatManager(w) => w.subscription(app).map(Message::from),
+            AnyWindow::Preferences(w) => w.subscription(app).map(Message::from),
         }
     }
 

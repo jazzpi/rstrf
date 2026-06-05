@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    io::SeekFrom,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -11,7 +12,7 @@ use futures_util::{StreamExt, TryStreamExt};
 use ndarray::{ArcArray2, ArrayView2};
 use rayon::prelude::*;
 use regex::Regex;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
 use crate::coord::data_absolute;
@@ -55,7 +56,7 @@ pub async fn load(paths: &[PathBuf], freq_range: Option<(u64, u64)>) -> Result<S
     log::debug!("Loading {} spectrogram files", paths.len());
 
     let mut spectrograms: Vec<_> = futures_util::stream::iter(paths.iter().cloned())
-        .map(load_single)
+        .map(|path| load_single(path, freq_range))
         .buffer_unordered(8)
         .try_collect()
         .await?;
@@ -65,8 +66,8 @@ pub async fn load(paths: &[PathBuf], freq_range: Option<(u64, u64)>) -> Result<S
     Spectrogram::concatenate(spectrograms)
 }
 
-async fn load_strf_file(path: &Path) -> Result<Spectrogram> {
-    let (mut spectra, params) = load_strf_raw(path).await?;
+async fn load_strf_file(path: &Path, freq_range: Option<(u64, u64)>) -> Result<Spectrogram> {
+    let (mut spectra, params) = load_strf_raw(path, freq_range).await?;
     spectra.sort_unstable_by_key(|spec| spec.time);
 
     let nchan = params.nchan;
@@ -147,8 +148,71 @@ END
     Ok(())
 }
 
+/// Applies a frequency range filter to the spectrogram parameters.
+///
+/// Returns
+/// - the updated parameters
+/// - how many bytes to skip before reading each spectrum
+/// - how many bytes to skip after reading each spectrum
+fn apply_freq_range(
+    header: &Header,
+    freq_range: Option<(u64, u64)>,
+) -> (SpectrogramParams, usize, usize) {
+    let Some((min_freq, max_freq)) = freq_range else {
+        return (
+            SpectrogramParams {
+                freq: header.freq,
+                bw: header.bw,
+                nchan: header.nchan,
+            },
+            0,
+            0,
+        );
+    };
+    let chan_width = header.bw / header.nchan as f32;
+    let start_freq = header.freq - header.bw / 2.0;
+    let range_start = (((min_freq as f32 - start_freq).clamp(0.0, header.bw) / chan_width).floor()
+        as usize)
+        .min(header.nchan);
+    let range_end = (((max_freq as f32 - start_freq).clamp(0.0, header.bw) / chan_width).ceil()
+        as usize)
+        .min(header.nchan);
+    let nchan = range_end.saturating_sub(range_start);
+    let skip_before = range_start * 4;
+    let skip_after = (header.nchan - range_end) * 4;
+    (
+        SpectrogramParams {
+            freq: start_freq + (range_start as f32 + nchan as f32 / 2.0) * chan_width,
+            bw: nchan as f32 * chan_width,
+            nchan,
+        },
+        skip_before,
+        skip_after,
+    )
+}
+
+async fn read_spectrum<F>(
+    reader: &mut BufReader<F>,
+    byte_len: usize,
+    skip_before: usize,
+    skip_after: usize,
+) -> Result<Vec<f32>>
+where
+    F: tokio::io::AsyncRead + tokio::io::AsyncSeek + Unpin,
+{
+    reader.seek(SeekFrom::Current(skip_before as i64)).await?;
+    let mut buf = vec![0u8; byte_len];
+    reader.read_exact(&mut buf).await?;
+    reader.seek(SeekFrom::Current(skip_after as i64)).await?;
+    let power: Vec<f32> = bytemuck::cast_slice(&buf).to_vec();
+    Ok(power)
+}
+
 /// Reads all spectra from a strf `.bin` file with their per-spectrum timestamps.
-pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, SpectrogramParams)> {
+pub async fn load_strf_raw(
+    path: &Path,
+    freq_range: Option<(u64, u64)>,
+) -> Result<(Vec<RawStrfSpectrum>, SpectrogramParams)> {
     let file = tokio::fs::File::open(path).await?;
     let file_size = file.metadata().await?.len() as usize;
     let mut reader = tokio::io::BufReader::new(file);
@@ -156,20 +220,26 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, Spectro
     let first_header = parse_header(&mut reader)
         .await
         .context("Failed to parse header")?;
-    let params = SpectrogramParams {
-        freq: first_header.freq,
-        bw: first_header.bw,
-        nchan: first_header.nchan,
-    };
+    let (params, skip_before, skip_after) = apply_freq_range(&first_header, freq_range);
+    ensure!(
+        params.nchan > 0,
+        "Frequency range filter excludes all channels: {:?}",
+        params
+    );
+    log::debug!(
+        "Reading {}/{} channels per spectrum",
+        params.nchan,
+        first_header.nchan
+    );
 
     let data_block_size = first_header.nchan * 4;
     let n_blocks = file_size / (data_block_size + HEADER_SIZE);
     let mut spectra = Vec::with_capacity(n_blocks);
 
-    let byte_len = first_header.nchan * 4;
-    let mut buf = vec![0u8; byte_len];
-    reader.read_exact(&mut buf).await?;
-    let power: Vec<f32> = bytemuck::cast_slice(&buf).to_vec();
+    let byte_len = params.nchan * 4;
+    let power = read_spectrum(&mut reader, byte_len, skip_before, skip_after)
+        .await
+        .context("Failed to read first spectrum")?;
     spectra.push(RawStrfSpectrum {
         time: first_header.start_time,
         length_s: first_header.length,
@@ -179,12 +249,14 @@ pub async fn load_strf_raw(path: &Path) -> Result<(Vec<RawStrfSpectrum>, Spectro
     while spectra.len() < n_blocks {
         let header = parse_header(&mut reader).await?;
         ensure!(
-            params.freq == header.freq && params.bw == header.bw && params.nchan == header.nchan,
+            first_header.freq == header.freq
+                && first_header.bw == header.bw
+                && first_header.nchan == header.nchan,
             "Inconsistent spectrogram parameters detected"
         );
-        let mut buf = vec![0u8; header.nchan * 4];
-        reader.read_exact(&mut buf).await?;
-        let power: Vec<f32> = bytemuck::cast_slice(&buf).to_vec();
+        let power = read_spectrum(&mut reader, byte_len, skip_before, skip_after)
+            .await
+            .context("Failed to read spectrum")?;
         spectra.push(RawStrfSpectrum {
             time: header.start_time,
             length_s: header.length,
@@ -502,7 +574,7 @@ mod tests {
         let path = dir.path().join("test.bin");
         save_strf(&spec, &path).await.unwrap();
 
-        let loaded = load(&[path]).await.unwrap();
+        let loaded = load(&[path], None).await.unwrap();
 
         assert_eq!(loaded.nslices, spec.nslices);
         assert_eq!(loaded.nchan, spec.nchan);
@@ -531,7 +603,7 @@ mod tests {
         save_strf(&s1, &path1).await.unwrap();
         save_strf(&s2, &path2).await.unwrap();
 
-        let loaded = load(&[path1, path2]).await.unwrap();
+        let loaded = load(&[path1, path2], None).await.unwrap();
 
         assert_eq!(loaded.nslices, s1.nslices + s2.nslices);
         assert_eq!(loaded.nchan, s1.nchan);
@@ -551,10 +623,160 @@ mod tests {
         save_strf(&s2, &path2).await.unwrap();
 
         // Pass in reverse order — should produce the same result
-        let loaded = load(&[path2.clone(), path1.clone()]).await.unwrap();
-        let loaded_fwd = load(&[path1, path2]).await.unwrap();
+        let loaded = load(&[path2.clone(), path1.clone()], None).await.unwrap();
+        let loaded_fwd = load(&[path1, path2], None).await.unwrap();
 
         assert_eq!(loaded.nslices, loaded_fwd.nslices);
         assert_eq!(loaded.start_time(), loaded_fwd.start_time());
+    }
+
+    // Header for apply_freq_range unit tests: freq=500_000 Hz, bw=1_000 Hz, nchan=10
+    // chan_width=100 Hz, channels span [499_500, 500_500) Hz
+    fn test_header() -> Header {
+        Header {
+            start_time: test_start(),
+            freq: 500_000.0,
+            bw: 1_000.0,
+            length: 1.0,
+            nchan: 10,
+        }
+    }
+
+    #[test]
+    fn apply_freq_range_none_returns_full_params_and_no_skips() {
+        let h = test_header();
+        let (params, skip_before, skip_after) = apply_freq_range(&h, None);
+        assert_eq!(params.nchan, 10);
+        assert!((params.freq - 500_000.0).abs() < 0.1);
+        assert!((params.bw - 1_000.0).abs() < 0.1);
+        assert_eq!(skip_before, 0);
+        assert_eq!(skip_after, 0);
+    }
+
+    #[test]
+    fn apply_freq_range_full_span_returns_all_channels() {
+        let h = test_header();
+        let (params, skip_before, skip_after) = apply_freq_range(&h, Some((499_500, 500_500)));
+        assert_eq!(params.nchan, 10);
+        assert_eq!(skip_before, 0);
+        assert_eq!(skip_after, 0);
+    }
+
+    #[test]
+    fn apply_freq_range_lower_half_skips_after() {
+        // [499_500, 500_000) → channels 0..5; 5 channels after skipped
+        let h = test_header();
+        let (params, skip_before, skip_after) = apply_freq_range(&h, Some((499_500, 500_000)));
+        assert_eq!(params.nchan, 5);
+        assert_eq!(skip_before, 0);
+        assert_eq!(skip_after, 5 * 4);
+        assert!((params.freq - 499_750.0).abs() < 1.0);
+        assert!((params.bw - 500.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn apply_freq_range_upper_half_skips_before() {
+        // [500_000, 500_500) → channels 5..10; 5 channels before skipped
+        let h = test_header();
+        let (params, skip_before, skip_after) = apply_freq_range(&h, Some((500_000, 500_500)));
+        assert_eq!(params.nchan, 5);
+        assert_eq!(skip_before, 5 * 4);
+        assert_eq!(skip_after, 0);
+        assert!((params.freq - 500_250.0).abs() < 1.0);
+        assert!((params.bw - 500.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn apply_freq_range_middle_channels_skips_both_sides() {
+        // [499_700, 500_200) → channels 2..7
+        let h = test_header();
+        let (params, skip_before, skip_after) = apply_freq_range(&h, Some((499_700, 500_200)));
+        assert_eq!(params.nchan, 5);
+        assert_eq!(skip_before, 2 * 4);
+        assert_eq!(skip_after, 3 * 4);
+        assert!((params.freq - 499_950.0).abs() < 1.0);
+        assert!((params.bw - 500.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn apply_freq_range_wider_than_spectrum_clamps_to_all() {
+        let h = test_header();
+        let (params, skip_before, skip_after) = apply_freq_range(&h, Some((0, 1_000_000)));
+        assert_eq!(params.nchan, 10);
+        assert_eq!(skip_before, 0);
+        assert_eq!(skip_after, 0);
+    }
+
+    #[test]
+    fn apply_freq_range_entirely_below_spectrum_returns_zero_nchan() {
+        let h = test_header();
+        let (params, _, _) = apply_freq_range(&h, Some((400_000, 450_000)));
+        assert_eq!(params.nchan, 0);
+    }
+
+    #[test]
+    fn apply_freq_range_entirely_above_spectrum_returns_zero_nchan() {
+        let h = test_header();
+        let (params, _, _) = apply_freq_range(&h, Some((600_000, 700_000)));
+        assert_eq!(params.nchan, 0);
+    }
+
+    #[tokio::test]
+    async fn load_with_freq_range_reduces_nchan_and_updates_freq_bw() {
+        // make_spec uses freq=437e6, bw=100e3, nchan=16
+        // chan_width = 6250 Hz, start_freq = 436_950_000 Hz
+        // Lower 8 channels: [436_950_000, 437_000_000)
+        let start = test_start();
+        let spec = make_spec(start, 5, 16, 100.0);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        save_strf(&spec, &path).await.unwrap();
+
+        let loaded = load(&[path], Some((436_950_000, 437_000_000))).await.unwrap();
+
+        assert_eq!(loaded.nchan, 8);
+        assert!((loaded.bw - 50_000.0).abs() < 1.0);
+        assert!((loaded.freq - 436_975_000.0).abs() < 1.0);
+        assert_eq!(loaded.nslices, spec.nslices);
+    }
+
+    #[tokio::test]
+    async fn load_with_freq_range_data_values_match_unfiltered_slice() {
+        // Save a file and load it twice — once full, once with lower half only.
+        // The loaded values for the lower channels should match.
+        let start = test_start();
+        let spec = make_spec(start, 3, 16, 100.0);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        save_strf(&spec, &path).await.unwrap();
+
+        let full = load(&[path.clone()], None).await.unwrap();
+        let filtered = load(&[path], Some((436_950_000, 437_000_000))).await.unwrap();
+
+        let full_data = full.data();
+        let filt_data = filtered.data();
+        for row in 0..3 {
+            for ch in 0..8 {
+                let expected = full_data[[row, ch]];
+                let got = filt_data[[row, ch]];
+                assert!((expected - got).abs() < 0.01, "row={row} ch={ch}: {expected} vs {got}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn load_with_freq_range_excluding_all_channels_errors() {
+        let start = test_start();
+        let spec = make_spec(start, 3, 16, 100.0);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        save_strf(&spec, &path).await.unwrap();
+
+        // Range entirely outside the spectrum [436_950_000, 437_050_000)
+        let result = load(&[path], Some((100_000, 200_000))).await;
+        assert!(result.is_err());
     }
 }

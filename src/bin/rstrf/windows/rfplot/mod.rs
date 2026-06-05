@@ -481,17 +481,19 @@ impl Window<Message> for RFPlot {
         result.map(WindowOut::Msg)
     }
 
-    fn subscription(&self) -> Subscription<WindowOut<Message>> {
+    fn subscription(&self, app: &AppShared) -> Subscription<WindowOut<Message>> {
         let mut subs = Vec::new();
 
         if matches!(self.loading_state, LoadingState::LoadingFiles { .. }) {
             subs.push(
-                io_service::load_subscription(self.pending_paths.clone()).map(|e| match e {
-                    io_service::Event::Progress { loaded, total } => {
-                        WindowOut::Msg(Message::LoadProgress { loaded, total })
-                    }
-                    io_service::Event::Done(r) => WindowOut::Msg(Message::SpectrogramLoaded(r)),
-                }),
+                io_service::load_subscription(self.pending_paths.clone(), app.freq_range).map(
+                    |e| match e {
+                        io_service::Event::Progress { loaded, total } => {
+                            WindowOut::Msg(Message::LoadProgress { loaded, total })
+                        }
+                        io_service::Event::Done(r) => WindowOut::Msg(Message::SpectrogramLoaded(r)),
+                    },
+                ),
             );
         }
 

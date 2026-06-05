@@ -38,6 +38,8 @@ pub struct AppShared {
     ///
     /// Also used for location if `config.follow_strf_site` is true.
     pub site_id: Option<i32>,
+    /// Frequency range to load in Hz (channels outside this range are skipped)
+    pub freq_range: Option<(u64, u64)>,
 }
 
 impl AppShared {
@@ -189,7 +191,12 @@ impl AppModel {
 
         let app = AppModel {
             config_path,
-            shared_state: AppShared::default(),
+            shared_state: AppShared {
+                freq_range: flags
+                    .freq_range
+                    .map(|v| (v[0].round() as u64, v[1].round() as u64)),
+                ..Default::default()
+            },
             windows: HashMap::default(),
             pass_png: None,
         };
@@ -249,7 +256,7 @@ impl AppModel {
         for (id, window) in &self.windows {
             subscriptions.push(
                 window
-                    .subscription()
+                    .subscription(&self.shared_state)
                     .with(*id)
                     .map(|(id, msg)| Message::WindowMessage(id, msg)),
             );

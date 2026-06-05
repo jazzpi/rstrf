@@ -16,13 +16,19 @@ struct Args {
     /// Window size in Hz
     #[arg(short = 'w', long, value_name = "WINDOW_SIZE", default_value = "20000")]
     window_size: f32,
+    /// Frequency range to load in Hz: MIN MAX (channels outside this range are skipped)
+    #[arg(long, value_name = "FREQ", num_args = 2)]
+    freq_range: Option<Vec<f64>>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let mut spectrogram = spectrogram::load(&args.input)
+    let freq_range = args
+        .freq_range
+        .map(|v| (v[0].round() as u64, v[1].round() as u64));
+    let mut spectrogram = spectrogram::load(&args.input, freq_range)
         .await
         .context("Failed to load input spectrogram")?;
 
