@@ -1,3 +1,12 @@
+# v0.2.1
+
+This is a patch release fixing two bugs that Ben noticed.
+
+## Changes
+
+- fix the `SHIFT`+`d` hotkey
+- replace the pass-png `-w`/`-h` flags with `-W`/`-H`
+
 # v0.2.0
 
 The three big things in this release are
