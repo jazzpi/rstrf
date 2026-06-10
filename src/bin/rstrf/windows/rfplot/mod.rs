@@ -234,7 +234,6 @@ impl Window<Message> for RFPlot {
             .update(control::Message::UpdateColormap(
                 app.config.default_colormap,
             ))
-            .map(Message::Control)
             .map(WindowOut::Msg);
         let spec_task = if self.shared.spectrogram_files.is_empty() {
             Task::none()
@@ -383,7 +382,7 @@ impl Window<Message> for RFPlot {
             _ => (),
         };
         let result = match message {
-            Message::Control(message) => self.shared.controls.update(message).map(Message::Control),
+            Message::Control(message) => self.shared.controls.update(message),
             Message::Overlay(message) => self
                 .overlay
                 .update(message, &self.shared, app)
@@ -471,8 +470,7 @@ impl Window<Message> for RFPlot {
             Message::SetView(rect) => self
                 .shared
                 .controls
-                .update(control::Message::ZoomToRect(rect))
-                .map(Message::Control),
+                .update(control::Message::ZoomToRect(rect)),
             Message::Nop => Task::none(),
             // Handled by the outer match
             Message::GpuUploadDone | Message::SaveScreenshot(_, _) => unreachable!(),

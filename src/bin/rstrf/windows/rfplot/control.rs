@@ -173,7 +173,7 @@ impl Controls {
             },
             ToolbarButton::Icon {
                 icon: Icon::ZoomReset,
-                tooltip: "Reset view",
+                tooltip: "Reset view & clear marks",
                 msg: Message::ResetView.into(),
                 style: widget::button::primary,
             },
@@ -319,7 +319,7 @@ impl Controls {
             .into()
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Task<rfplot::Message> {
         match message {
             Message::UpdateZoomX(zoom_x) => {
                 self.log_scale.x = zoom_x.clamp(ZOOM_MIN, self.zoom_max.x);
@@ -356,6 +356,7 @@ impl Controls {
             Message::ResetView => {
                 self.log_scale = Vec2::new(ZOOM_MIN, ZOOM_MIN);
                 self.center = data_normalized::Point::new(0.5, 0.5);
+                return Task::done(rfplot::overlay::Message::ClearAll.into());
             }
             Message::ZoomToRect(rect) => {
                 self.set_view_from_rect_dn(&rect);
