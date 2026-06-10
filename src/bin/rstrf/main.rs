@@ -23,6 +23,12 @@ pub struct CliArgs {
     /// Frequency range to load in Hz: MIN MAX (channels outside this range are skipped)
     #[arg(long, value_name = "FREQ", num_args = 2, global = true)]
     pub freq_range: Option<Vec<f64>>,
+    /// Window width in pixels
+    #[arg(short = 'W', long, default_value_t = 800, global = true)]
+    pub width: u32,
+    /// Window height in pixels
+    #[arg(short = 'H', long, default_value_t = 600, global = true)]
+    pub height: u32,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -95,10 +101,6 @@ pub struct PassPngArgs {
     /// Output path prefix; files are named <prefix>_000.png, <prefix>_001.png, ...
     #[arg(short = 'o', long)]
     pub output: std::path::PathBuf,
-    #[arg(short = 'W', long, default_value_t = 800)]
-    pub width: u32,
-    #[arg(short = 'H', long, default_value_t = 600)]
-    pub height: u32,
 }
 
 fn main() -> iced::Result {

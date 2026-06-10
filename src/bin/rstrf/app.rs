@@ -152,6 +152,8 @@ impl AppModel {
         };
         tasks.push(Task::done(Message::UpdateConfig(config)));
 
+        let window_size = Some(iced::Size::new(flags.width as f32, flags.height as f32));
+
         match flags.command {
             Some(Command::Plot(args)) => {
                 tasks.push(
@@ -162,7 +164,7 @@ impl AppModel {
                         }),
                 );
                 tasks
-                    .push(Self::open_window(None).map(move |id| {
+                    .push(Self::open_window(window_size).map(move |id| {
                         Message::WindowOpenedRFPlotWith(id, Box::new(args.clone()))
                     }));
             }
@@ -180,7 +182,7 @@ impl AppModel {
                         }),
                 );
                 tasks.push(
-                    Self::open_window(Some(iced::Size::new(args.width as f32, args.height as f32)))
+                    Self::open_window(window_size)
                         .map(move |id| Message::WindowOpenedPassPng(id, Box::new(args.clone()))),
                 );
             }
