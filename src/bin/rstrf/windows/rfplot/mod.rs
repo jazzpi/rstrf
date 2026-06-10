@@ -331,7 +331,6 @@ impl Window<Message> for RFPlot {
                         right: 8.0,
                         top: 4.0,
                         bottom: 4.0,
-                        ..Default::default()
                     })
                     .height(Length::Shrink)
                     .width(Length::Shrink),

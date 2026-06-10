@@ -21,6 +21,7 @@ struct PassJob {
     path: PathBuf,
 }
 
+#[allow(clippy::enum_variant_names)]
 enum State {
     WaitingForRFPlot,
     WaitingForPredictions,
@@ -174,7 +175,7 @@ impl PassPngMode {
                             .iter()
                             .enumerate()
                             .map(|(tx_idx, f)| (transmitters[tx_idx], f))
-                            .map(move |(tx_freq, f)| {
+                            .filter_map(move |(tx_freq, f)| {
                                 let (f_lo, f_hi) = minmax(f);
                                 if f_hi < spec_bounds.freq_range.start.into()
                                     || f_lo > spec_bounds.freq_range.end.into()
@@ -205,7 +206,6 @@ impl PassPngMode {
                                     )),
                                 })
                             })
-                            .flatten()
                     })
                     .collect();
 

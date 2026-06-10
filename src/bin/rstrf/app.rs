@@ -13,7 +13,7 @@ use iced::window::settings::PlatformSpecific;
 use iced::{Daemon, window};
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::menu::{MenuItem, view_menu};
-use rstrf::orbit::{Satellite, Site};
+use rstrf::orbit::{Satellite, Site, Transmitters};
 use rstrf::spectrogram::SpectrogramBounds;
 use space_track::SpaceTrack;
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ pub struct AppShared {
     /// Site determined from site_id & STRF's sites.txt
     strf_site: Option<Site>,
     pub satellites: Vec<(Satellite, bool)>,
-    pub frequencies: HashMap<u64, Vec<f64>>,
+    pub frequencies: Transmitters,
     /// Site ID for saving signals (set from --site-id/-C CLI arg).
     ///
     /// Also used for location if `config.follow_strf_site` is true.
@@ -96,11 +96,11 @@ pub enum Message {
     WindowOpenedPassPng(window::Id, Box<PassPngArgs>),
     CatalogLoaded {
         satellites: Vec<(Satellite, bool)>,
-        frequencies: HashMap<u64, Vec<f64>>,
+        frequencies: Transmitters,
     },
     SatellitesChanged(Vec<(Satellite, bool)>),
     SatelliteChanged(usize, Box<(Satellite, bool)>),
-    FrequenciesChanged(HashMap<u64, Vec<f64>>),
+    FrequenciesChanged(Transmitters),
     RFPlotReady(window::Id, SpectrogramBounds),
     PassPng(pass_png::Message),
     ScreenshotSaved(PathBuf),
@@ -169,14 +169,13 @@ impl AppModel {
                     }));
             }
             Some(Command::PassPng(args)) => {
-                let norad_id = args.norad_id as u64;
-                let frequencies = HashMap::from([(norad_id, args.freq.clone())]);
+                let frequencies = HashMap::from([(args.norad_id, args.freq.clone())]);
                 tasks.push(
                     Self::load_catalog(Some(args.catalog.clone()), args.freqs.clone(), frequencies)
                         .map(move |(satellites, frequencies)| Message::CatalogLoaded {
                             satellites: satellites
                                 .into_iter()
-                                .filter(|(sat, _)| sat.norad_id() == norad_id)
+                                .filter(|(sat, _)| sat.norad_id() == args.norad_id)
                                 .collect(),
                             frequencies,
                         }),
@@ -561,8 +560,8 @@ impl AppModel {
     fn load_catalog(
         catalog: Option<PathBuf>,
         freqs: Option<PathBuf>,
-        initial_freqs: HashMap<u64, Vec<f64>>,
-    ) -> Task<(Vec<(Satellite, bool)>, HashMap<u64, Vec<f64>>)> {
+        initial_freqs: Transmitters,
+    ) -> Task<(Vec<(Satellite, bool)>, Transmitters)> {
         if catalog.is_none() && freqs.is_none() {
             return Task::none();
         }

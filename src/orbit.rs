@@ -13,8 +13,10 @@ use crate::util::pred_ranges;
 
 use super::util::minmax;
 
+pub type Transmitters = HashMap<u64, Vec<f64>>;
+
 /// Loads frequencies from a strf-style frequencies.txt file
-pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashMap<u64, Vec<f64>>> {
+pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<Transmitters> {
     let file = tokio::fs::File::open(path).await?;
     let reader = tokio::io::BufReader::new(file);
     let mut freqs = HashMap::new();
@@ -49,7 +51,7 @@ pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<HashM
 /// Parses 2LE, and 3LE with an optional initial 0 in the title line.
 pub async fn load_tles(
     path: &std::path::PathBuf,
-    tx_freqs: HashMap<u64, Vec<f64>>,
+    tx_freqs: Transmitters,
 ) -> anyhow::Result<Vec<Satellite>> {
     enum ParseState {
         AwaitLine1OrTitle,
@@ -175,7 +177,7 @@ impl Satellite {
         title: Option<String>,
         line1: &str,
         line2: &str,
-        tx_freqs: &HashMap<u64, Vec<f64>>,
+        tx_freqs: &Transmitters,
     ) -> anyhow::Result<Self> {
         let elements = sgp4::Elements::from_tle(title, line1.as_bytes(), line2.as_bytes())
             .context("Failed to parse TLE")?;

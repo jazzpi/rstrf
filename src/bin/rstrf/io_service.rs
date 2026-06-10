@@ -55,5 +55,5 @@ pub fn load_subscription(
     paths: Vec<PathBuf>,
     freq_range: Option<(u64, u64)>,
 ) -> Subscription<Event> {
-    Subscription::run_with((paths, freq_range), |(p, f)| load_worker(&p, *f))
+    Subscription::run_with((paths, freq_range), |(p, f)| load_worker(p, *f))
 }
