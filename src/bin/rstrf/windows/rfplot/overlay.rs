@@ -346,14 +346,25 @@ impl Overlay {
             )];
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
                 * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
+            let crosshair_text = if self.absolute_axes {
+                let t = spectrogram.start_time() + Duration::seconds(crosshair.0.x as i64);
+                format!(
+                    "t = {}\nf = {:.01} kHz\nP = {:.01} dB",
+                    t.format("%Y-%m-%d %H:%M:%S"),
+                    (crosshair.0.y + spectrogram.freq) / 1000.0,
+                    power
+                )
+            } else {
+                format!(
+                    "t = {:.01} s\nf = {:.01} kHz\nP = {:.01} dB",
+                    crosshair.0.x,
+                    crosshair.0.y / 1000.0,
+                    power
+                )
+            };
             chart
                 .draw_series(vec![Text::new(
-                    format!(
-                        "t = {:.01} s\nf = {:.01} kHz\nP = {:.01} dB",
-                        crosshair.0.x,
-                        crosshair.0.y / 1e3,
-                        power
-                    ),
+                    crosshair_text,
                     crosshair_pos.into(),
                     ("sans-serif", 12).into_font().color(&WHITE),
                 )])
