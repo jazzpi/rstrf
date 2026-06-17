@@ -24,8 +24,8 @@ use plotters::prelude::*;
 use plotters_iced2::Chart;
 use rstrf::{
     coord::{
-        DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
-        ScreenToPlotArea, data_absolute, plot_area, screen,
+        DataAbsoluteToDataNormalized, DataAbsoluteToScreen, DataNormalizedToDataAbsolute,
+        PlotAreaToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
     },
     orbit::{self, Site},
     signal,
@@ -73,12 +73,17 @@ fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey
     })
 }
 
+/// Maximum cursor-to-mark distance (in screen pixels) for a right-click to delete a mark. Marks
+/// render as radius-5 circles, so this gives a comfortable grab radius around them.
+const DELETE_TOLERANCE_PX: f32 = 15.0;
+
 #[derive(Debug, Clone)]
 pub enum Message {
     MarkTrackpoints,
     MarkSignals,
     AddTrackPoint(data_absolute::Point),
     AddSignal(data_absolute::Point),
+    DeleteMark(MarkAction, data_absolute::Point),
     ClearAll,
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
@@ -543,6 +548,27 @@ impl Overlay {
                         return (Status::Captured, None);
                     }
                 }
+                mouse::Event::ButtonPressed(mouse::Button::Right) => {
+                    if cursor.is_over(bounds)
+                        && let Some(spectrogram) = &shared.spectrogram
+                        && let Some((action, point)) = closest_mark(
+                            pos,
+                            &DataAbsoluteToScreen::new(
+                                &screen::Size(bounds.size()),
+                                &shared.controls.bounds(),
+                                &spectrogram.bounds(),
+                            ),
+                            &self.track_points,
+                            &self.signals,
+                        )
+                    {
+                        return (
+                            Status::Captured,
+                            Some(Message::DeleteMark(action, point).into()),
+                        );
+                    }
+                    return (Status::Captured, None);
+                }
                 mouse::Event::CursorMoved { position: _ } => {
                     if cursor.is_over(bounds) {
                         return (
@@ -832,6 +858,17 @@ impl Overlay {
                 self.signals.push(pos);
                 Task::none()
             }
+            Message::DeleteMark(action, point) => {
+                log::debug!("Deleting {:?} mark at position: {:?}", action, point);
+                let collection = match action {
+                    MarkAction::Trackpoint => &mut self.track_points,
+                    MarkAction::Signal => &mut self.signals,
+                };
+                if let Some(idx) = collection.iter().position(|p| *p == point) {
+                    collection.remove(idx);
+                }
+                Task::none()
+            }
             Message::ClearAll => {
                 self.track_points.clear();
                 self.signals.clear();
@@ -1001,6 +1038,29 @@ fn signals_filename(
     ))
 }
 
+/// Finds the mark (track point or signal) nearest to `pos`, measured in screen pixels via
+/// `da_to_screen`, and returns it tagged with which collection it belongs to. Returns `None` if
+/// there are no marks, or the nearest is farther than [`DELETE_TOLERANCE_PX`].
+fn closest_mark(
+    pos: screen::Point,
+    da_to_screen: &DataAbsoluteToScreen,
+    track_points: &[data_absolute::Point],
+    signals: &[data_absolute::Point],
+) -> Option<(MarkAction, data_absolute::Point)> {
+    track_points
+        .iter()
+        .map(|p| (MarkAction::Trackpoint, p))
+        .chain(signals.iter().map(|p| (MarkAction::Signal, p)))
+        .map(|(action, &point)| {
+            let offset = point * *da_to_screen - pos;
+            let dist = offset.0.x.hypot(offset.0.y);
+            (action, point, dist)
+        })
+        .filter(|(_, _, dist)| *dist <= DELETE_TOLERANCE_PX)
+        .min_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
+        .map(|(action, point, _)| (action, point))
+}
+
 impl PartialEq for Overlay {
     fn eq(&self, other: &Self) -> bool {
         self.track_points == other.track_points
@@ -1078,10 +1138,29 @@ impl Chart<super::Message> for RFPlot {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use rstrf::coord::data_absolute;
+    use rstrf::coord::{data_absolute, data_normalized};
 
     fn pt(x: f32, y: f32) -> data_absolute::Point {
         data_absolute::Point::new(x, y)
+    }
+
+    /// A `DataAbsoluteToScreen` transform that maps data-absolute coordinates 1:1 onto screen
+    /// pixels, so marks in these tests can be positioned directly in pixel space.
+    fn identity_da_to_screen() -> DataAbsoluteToScreen {
+        DataAbsoluteToScreen::new(
+            &screen::Size::new(100.0, 100.0),
+            &data_normalized::Rectangle::new(
+                data_normalized::Point::new(0.0, 0.0),
+                data_normalized::Size::new(1.0, 1.0),
+            ),
+            // y is flipped (screen y grows downward) so an identity x/y mapping needs a
+            // negative-height bounds anchored at the top.
+            &data_absolute::Rectangle::new(pt(0.0, 100.0), data_absolute::Size::new(100.0, -100.0)),
+        )
+    }
+
+    fn sp(x: f32, y: f32) -> screen::Point {
+        screen::Point::new(x, y)
     }
 
     fn utc(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {
@@ -1131,5 +1210,67 @@ mod tests {
         // Negative offset: center 437.525 MHz, −525 Hz → 437524.475 kHz → 437524k
         let name = signals_filename(utc(2024, 1, 1, 0, 0), 437_525_000.0, &[pt(0.0, -525.0)]);
         assert_eq!(name.as_deref(), Some("2024-01-01T00:00_437524k.dat"));
+    }
+
+    #[test]
+    fn identity_transform_maps_data_to_pixels() {
+        // Sanity check that the test fixture really is an identity x/y mapping.
+        let screen = pt(30.0, 40.0) * identity_da_to_screen();
+        assert!((screen.0.x - 30.0).abs() < 1e-3, "x = {}", screen.0.x);
+        assert!((screen.0.y - 40.0).abs() < 1e-3, "y = {}", screen.0.y);
+    }
+
+    #[test]
+    fn closest_mark_none_when_no_marks() {
+        assert_eq!(
+            closest_mark(sp(50.0, 50.0), &identity_da_to_screen(), &[], &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn closest_mark_returns_nearest_track_point() {
+        let track_points = [pt(10.0, 10.0), pt(50.0, 50.0)];
+        // Cursor 5 px from the second point, far from the first.
+        assert_eq!(
+            closest_mark(sp(53.0, 54.0), &identity_da_to_screen(), &track_points, &[]),
+            Some((MarkAction::Trackpoint, pt(50.0, 50.0)))
+        );
+    }
+
+    #[test]
+    fn closest_mark_picks_nearest_across_collections() {
+        let track_points = [pt(10.0, 10.0)];
+        let signals = [pt(12.0, 12.0)];
+        // Cursor nearer the signal than the track point.
+        assert_eq!(
+            closest_mark(
+                sp(13.0, 13.0),
+                &identity_da_to_screen(),
+                &track_points,
+                &signals
+            ),
+            Some((MarkAction::Signal, pt(12.0, 12.0)))
+        );
+    }
+
+    #[test]
+    fn closest_mark_none_when_all_outside_tolerance() {
+        let track_points = [pt(0.0, 0.0)];
+        // ~70 px away, well beyond DELETE_TOLERANCE_PX.
+        assert_eq!(
+            closest_mark(sp(50.0, 50.0), &identity_da_to_screen(), &track_points, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn closest_mark_tolerance_is_inclusive() {
+        let signals = [pt(DELETE_TOLERANCE_PX, 0.0)];
+        // Exactly DELETE_TOLERANCE_PX away → still deleted.
+        assert_eq!(
+            closest_mark(sp(0.0, 0.0), &identity_da_to_screen(), &[], &signals),
+            Some((MarkAction::Signal, pt(DELETE_TOLERANCE_PX, 0.0)))
+        );
     }
 }

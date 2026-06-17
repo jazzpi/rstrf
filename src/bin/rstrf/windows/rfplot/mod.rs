@@ -63,7 +63,7 @@ pub enum RectAction {
     Zoom,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkAction {
     Trackpoint,
     Signal,
