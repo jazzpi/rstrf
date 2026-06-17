@@ -943,9 +943,11 @@ impl Overlay {
                     log::error!("No site configured, cannot save signals");
                     return Task::none();
                 };
-                let start_mjd =
-                    spectrogram.start_time().timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
+                let start_time = spectrogram.start_time();
+                let start_mjd = start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
+                let suggested = signals_filename(start_time, center_freq, &self.signals)
+                    .unwrap_or_else(|| "out.dat".to_owned());
                 let mut output = String::new();
                 for sig in &self.signals {
                     let mjd = start_mjd + sig.0.x as f64 / 86400.0;
@@ -954,7 +956,7 @@ impl Overlay {
                 }
                 Task::future(async move {
                     let path = AsyncFileDialog::new()
-                        .set_file_name("out.dat")
+                        .set_file_name(suggested.as_str())
                         .save_file()
                         .await
                         .map(|f| f.path().to_path_buf());
@@ -975,6 +977,28 @@ impl Overlay {
         let cache_task = self.check_cache(shared, app);
         Task::batch([cache_task, msg_task])
     }
+}
+
+/// Suggests a save filename for a signal set: `YYYY-MM-DDTHH:MM_FREQ.dat`.
+///
+/// Returns `None` when `signals` is empty (no mean is defined).
+fn signals_filename(
+    start_time: DateTime<Utc>,
+    center_freq: f64,
+    signals: &[data_absolute::Point],
+) -> Option<String> {
+    if signals.is_empty() {
+        return None;
+    }
+    let n = signals.len() as f64;
+    let mean_secs = signals.iter().map(|s| s.0.x as f64).sum::<f64>() / n;
+    let mean_freq = center_freq + signals.iter().map(|s| s.0.y as f64).sum::<f64>() / n;
+    let mean_time = start_time + Duration::milliseconds((mean_secs * 1000.0) as i64);
+    Some(format!(
+        "{}_{:.0}k.dat",
+        mean_time.format("%Y-%m-%dT%H:%M"),
+        mean_freq / 1e3,
+    ))
 }
 
 impl PartialEq for Overlay {
@@ -1047,5 +1071,65 @@ impl Chart<super::Message> for RFPlot {
         } else {
             mouse::Interaction::Idle
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use rstrf::coord::data_absolute;
+
+    fn pt(x: f32, y: f32) -> data_absolute::Point {
+        data_absolute::Point::new(x, y)
+    }
+
+    fn utc(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, hour, min, 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn empty_signals_returns_none() {
+        assert_eq!(
+            signals_filename(utc(2024, 1, 1, 0, 0), 437_000_000.0, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn single_signal_at_center() {
+        // One signal exactly at the center: mean time = start, mean freq = center_freq
+        let name = signals_filename(utc(2024, 6, 15, 12, 30), 145_900_000.0, &[pt(0.0, 0.0)]);
+        assert_eq!(name.as_deref(), Some("2024-06-15T12:30_145900k.dat"));
+    }
+
+    #[test]
+    fn single_signal_with_offsets() {
+        // 60 s into the observation, +1000 Hz from center → 145901 kHz
+        let name = signals_filename(utc(2024, 6, 15, 12, 30), 145_900_000.0, &[pt(60.0, 1000.0)]);
+        assert_eq!(name.as_deref(), Some("2024-06-15T12:31_145901k.dat"));
+    }
+
+    #[test]
+    fn mean_of_multiple_signals() {
+        // Two signals 120 s apart → mean at +60 s → :31; freqs +0 and +200 → mean +100 Hz → 145900 kHz
+        let signals = [pt(0.0, 0.0), pt(120.0, 200.0)];
+        let name = signals_filename(utc(2024, 6, 15, 12, 30), 145_900_000.0, &signals);
+        assert_eq!(name.as_deref(), Some("2024-06-15T12:31_145900k.dat"));
+    }
+
+    #[test]
+    fn minute_boundary_rollover() {
+        // Start at 12:59; 61 s offset rolls over to 13:00
+        let name = signals_filename(utc(2024, 6, 15, 12, 59), 437_525_000.0, &[pt(61.0, 0.0)]);
+        assert_eq!(name.as_deref(), Some("2024-06-15T13:00_437525k.dat"));
+    }
+
+    #[test]
+    fn negative_freq_offset() {
+        // Negative offset: center 437.525 MHz, −525 Hz → 437524.475 kHz → 437524k
+        let name = signals_filename(utc(2024, 1, 1, 0, 0), 437_525_000.0, &[pt(0.0, -525.0)]);
+        assert_eq!(name.as_deref(), Some("2024-01-01T00:00_437524k.dat"));
     }
 }
