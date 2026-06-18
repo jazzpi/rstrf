@@ -7,10 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```sh
 cargo build --release
 cargo run --release [-- <WORKSPACE_FILE>]
+cargo run --release -- pass-png --help   # batch pass-PNG subcommand
 cargo run --bin rsmedfilt -- --help
 cargo clippy
 cargo test
 ```
+
+Notable CLI flags (most are global across subcommands): `-v`/`--verbose` (repeatable), `--freq-range MIN MAX` (skip channels outside range at load time), `-W`/`-H` (window size).
 
 System dependencies (Ubuntu): `build-essential libssl-dev pkg-config fontconfig libfontconfig1-dev libopenblas-dev`
 
@@ -25,7 +28,7 @@ rSTRF is a GPU-accelerated satellite radio waterfall spectrogram viewer — a Ru
 - `src/bin/rsmedfilt.rs` — CLI median-filter preprocessor for `.bin` files
 
 **Library crate** (`src/lib.rs` re-exports):
-- `spectrogram.rs` — async load/save of STRF `.bin` and `.rstrf` files; `load` routes `.bin` files through direct decode (no resampling) and `.rstrf` files through the constant-rate format, then concatenates
+- `spectrogram.rs` — async load/save of STRF `.bin` files; `load_single` loads one file, `load` concatenates multiple with bounded concurrency (`buffer_unordered(8)`); both accept an optional `freq_range: Option<(u64, u64)>` to skip out-of-range channels at load time
 - `orbit.rs` — TLE parsing, SGP4 propagation, Doppler prediction, GMST-based site coordinates; each `Satellite` carries a `transmitters: Vec<f64>` for multiple frequencies; predictions are split per pass
 - `signal.rs` — `FitTrace` signal detection (frequency peaks above sigma threshold)
 - `coord.rs` — type-stated coordinate transforms using `glam::Mat4` + `duplicate` macro (see below)
@@ -37,14 +40,17 @@ rSTRF is a GPU-accelerated satellite radio waterfall spectrogram viewer — a Ru
 ```
 AppModel
   ├── shared_state: AppShared — satellites, frequencies, config, Space-Track client
-  └── windows: HashMap<window::Id, AnyWindow>
-        ├── RFPlot window (windows/rfplot/)
-        │     ├── Controls, Spectrogram
-        │     ├── Overlay (overlay.rs) — axes, satellite curves, crosshair
-        │     └── shader::Program (shader.rs + shader.wgsl) — wgpu GPU render
-        ├── SatManager window (windows/sat_manager.rs) — TLE loading, frequency editing, Space-Track sync
-        └── preferences::Window (windows/preferences.rs) — Config editing (theme, site coords, credentials)
+  ├── windows: HashMap<window::Id, AnyWindow>
+  │     ├── RFPlot window (windows/rfplot/)
+  │     │     ├── Controls, Spectrogram
+  │     │     ├── Overlay (overlay.rs) — axes, satellite curves, crosshair, marks
+  │     │     └── shader::Program (shader.rs + shader.wgsl) — wgpu GPU render
+  │     ├── SatManager window (windows/sat_manager.rs) — TLE loading, frequency editing, Space-Track sync
+  │     └── preferences::Window (windows/preferences.rs) — Config editing (theme, site coords, credentials)
+  └── pass_png: Option<PassPngMode> (pass_png.rs) — headless batch screenshot generator for satellite passes
 ```
+
+**Loading pipeline:** `io_service.rs` wraps `load_single` in an `iced::Subscription` that streams `Progress { loaded, total }` events as files complete, then a final `Done` event — enabling the progress indicator in the UI.
 
 **Message routing:** `app::Message` → `windows::Message` → window-specific. `windows::Message` has variants `RFPlot(rfplot::Message)`, `SatManager(sat_manager::Message)`, `Preferences(preferences::Message)`, and `ToApp(Box<app::Message>)`.
 
@@ -54,7 +60,9 @@ AppModel
 
 **RFPlot rendering is a two-layer stack:**
 1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers with offscreen culling; colormap lookup in fragment shader (`shader.wgsl`)
-2. `ChartWidget` (plotters-iced2) — draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout
+2. `ChartWidget` (plotters-iced2) — draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
+
+**Marks:** Track points and signals are stored as `data_absolute::Point` slices. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `overlay.rs`.
 
 ## Key Patterns
 
