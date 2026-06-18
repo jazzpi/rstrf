@@ -1,3 +1,23 @@
+# v0.3.0
+
+## New features
+- **Right-click to delete marks**. Only works when you click near a signal.
+- **Smart filename suggestion** when saving signals based on time & frequency of
+  the signals (e.g. 2026-06-18T14:30_401250kHz.dat).
+- **Frequency range filter:** pass `--freq-range FMIN FMAX` for loading only a
+  part of the dataset to reduce memory usage & loading time on large recordings.
+
+## Bug fixes
+- Crosshair tooltip respects absolute axes setting.
+
+## Other changes
+- Marks are now cleared on view reset.
+- Snap axis ticks & label to grid, so the numbers don't change all the time
+  while you scroll.
+- `-W/-H` flags are now global, so you can also use them for `rstrf plot`.
+- Github CI now builds & pushes the Nix package to
+  [`rstrf.cachix.org`](https://rstrf.cachix.org).
+
 # v0.2.1
 
 This is a patch release fixing two bugs that Ben noticed.
