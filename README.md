@@ -37,22 +37,8 @@ This repository includes a flake, so you can just
 nix run github:jazzpi/rstrf
 ```
 
-Alternatively, install these packages:
-
-```
-libxkbcommon
-wayland
-mesa
-libGL
-libglvnd
-vulkan-loader
-udev
-openblas
-dbus
-pkg-config
-openssl
-fontconfig
-```
+There is also a Cachix cache at [`rstrf.cachix.org`](https://rstrf.cachix.org)
+that is built from the CI of this repository.
 
 ### Windows
 
