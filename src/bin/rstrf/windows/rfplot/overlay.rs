@@ -253,7 +253,10 @@ impl Overlay {
             frame = frame
                 .x_label_formatter(&x_formatter)
                 .y_label_formatter(&y_formatter)
-                .x_desc(format!("Time - {} [HH:MM]", start_time.format("%Y-%m-%d")))
+                .x_desc(format!(
+                    "Time - {} [HH:MM]",
+                    (start_time + Duration::seconds(x.start as i64)).format("%Y-%m-%d")
+                ))
                 .y_desc(format!(
                     "Frequency - {:.1} [kHz]",
                     (spectrogram.freq + plot_center_freq) / 1000.0
