@@ -1,3 +1,15 @@
+# v0.3.1
+
+## New features
+- **`pass-png` wrapper script**. This script will take a bunch of spectrograms and match them to the
+  closest historic TLE from a `.tle` file (generated e.g. via Space-Track's ELSET Search). It will
+  then run `pass-png` for each recording separately with the appropriate TLE. Useful if you want to
+  run `pass-png` over many days' worth of observations.
+
+## Bug fixes
+- X axis label (in absolute axes mode) now shows the date of the start of the current zoomed-in
+  window instead of the overall start date of the loaded spectrograms.
+
 # v0.3.0
 
 ## New features
