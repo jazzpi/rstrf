@@ -186,8 +186,8 @@ impl Overlay {
         let Some(spectrogram) = &shared.spectrogram else {
             return Err("No spectrogram loaded".to_string());
         };
-        let bounds =
-            shared.controls.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
+        let view_norm = shared.controls.bounds();
+        let bounds = view_norm * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
 
@@ -271,6 +271,34 @@ impl Overlay {
         frame
             .draw()
             .map_err(|e| format!("Failed to draw mesh: {:?}", e))?;
+
+        // Thicken the plot border on any side where the view has hit the edge of the data, so
+        // panning/zooming limits are visible at a glance.
+        const EDGE_EPS: f32 = 1e-4;
+        const THICK_STROKE: u32 = 3;
+        let at_left = view_norm.0.x <= EDGE_EPS;
+        let at_right = view_norm.0.x + view_norm.0.width >= 1.0 - EDGE_EPS;
+        let at_bottom = view_norm.0.y <= EDGE_EPS;
+        let at_top = view_norm.0.y + view_norm.0.height >= 1.0 - EDGE_EPS;
+        for (at_edge, from, to) in [
+            (at_left, (x.start, y.start), (x.start, y.end)),
+            (at_right, (x.end, y.start), (x.end, y.end)),
+            (at_bottom, (x.start, y.start), (x.end, y.start)),
+            (at_top, (x.start, y.end), (x.end, y.end)),
+        ] {
+            if at_edge {
+                chart
+                    .draw_series(LineSeries::new(
+                        [from, to],
+                        ShapeStyle {
+                            color: WHITE.into(),
+                            filled: true,
+                            stroke_width: THICK_STROKE,
+                        },
+                    ))
+                    .map_err(|e| format!("Failed to draw edge indicator: {:?}", e))?;
+            }
+        }
 
         if self.show_predictions
             && let Some((_, predictions)) = self.prediction_cache.get_stored()

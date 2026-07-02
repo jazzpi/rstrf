@@ -3,6 +3,8 @@
 ## New features
 - **Lock pan to one axis**. Hold `SHIFT`/`CTRL` while panning to only pan horizontally/vertically,
   similar to holding the modifiers while zooming.
+- **Edge indicator**. When reaching the edge of the waterfall, the respective edge of the plot is
+  highlighted.
 
 ## Bug fixes
 - update crosshair in all mouse states (e.g. when marking points with `SHIFT`+`d`)
