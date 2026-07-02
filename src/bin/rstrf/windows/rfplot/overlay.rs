@@ -590,8 +590,14 @@ impl Overlay {
                     self.mouse_state.set(MouseState::Idle);
                 }
                 mouse::Event::CursorMoved { position: _ } => {
-                    let delta = plot_pos - prev_pos;
+                    let mut delta = plot_pos - prev_pos;
                     self.mouse_state.set(MouseState::Panning(plot_pos));
+                    if modifiers.shift() {
+                        delta.0.y = 0.0;
+                    }
+                    if modifiers.control() {
+                        delta.0.x = 0.0;
+                    }
                     return (Status::Captured, Some(CMessage::PanningDelta(delta).into()));
                 }
                 _ => {}

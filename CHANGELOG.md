@@ -1,7 +1,11 @@
 # v0.3.2
 
+## New features
+- **Lock pan to one axis**. Hold `SHIFT`/`CTRL` while panning to only pan horizontally/vertically,
+  similar to holding the modifiers while zooming.
+
 ## Bug fixes
-- update crosshair in all mouse states (e.g. when marking points with `Shift`+`d`)
+- update crosshair in all mouse states (e.g. when marking points with `SHIFT`+`d`)
 
 # v0.3.1
 
