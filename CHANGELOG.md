@@ -1,3 +1,8 @@
+# v0.3.2
+
+## Bug fixes
+- update crosshair in all mouse states (e.g. when marking points with `Shift`+`d`)
+
 # v0.3.1
 
 ## New features

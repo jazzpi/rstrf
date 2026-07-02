@@ -79,6 +79,8 @@ const DELETE_TOLERANCE_PX: f32 = 15.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// No-op to force a redraw
+    Refresh,
     MarkTrackpoints,
     MarkSignals,
     AddTrackPoint(data_absolute::Point),
@@ -87,7 +89,6 @@ pub enum Message {
     ClearAll,
     FindSignals,
     FoundSignals(Vec<data_absolute::Point>),
-    UpdateCrosshair(Option<plot_area::Point>),
     SpectrogramUpdated,
     /// Force a prediction cache check without any other side effects.
     RefreshCache,
@@ -98,7 +99,6 @@ pub enum Message {
     ToggleCrosshair,
     ToggleAbsoluteAxes,
     DeleteInRect(data_absolute::Rectangle),
-    UpdateRectPreview(Option<plot_area::Point>),
     SaveSignals,
     WriteSignals(String, Option<std::path::PathBuf>),
 }
@@ -125,9 +125,7 @@ pub(super) struct Overlay {
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
     #[serde(skip)]
-    crosshair: Option<data_absolute::Point>,
-    #[serde(skip)]
-    rect_preview: Option<plot_area::Point>,
+    crosshair: Cell<Option<data_absolute::Point>>,
     #[serde(skip)]
     mouse_state: Cell<MouseState>,
     #[serde(skip)]
@@ -145,7 +143,6 @@ impl Default for Overlay {
             track_points: Default::default(),
             signals: Default::default(),
             crosshair: Default::default(),
-            rect_preview: Default::default(),
             mouse_state: Cell::new(MouseState::Idle),
             modifiers: Cell::new(keyboard::Modifiers::default()),
         }
@@ -382,7 +379,7 @@ impl Overlay {
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
         if self.show_crosshair
-            && let Some(crosshair) = &self.crosshair
+            && let Some(crosshair) = &self.crosshair.get()
             && bounds.contains(*crosshair)
         {
             let style = ShapeStyle {
@@ -543,6 +540,20 @@ impl Overlay {
             }
         }
 
+        let update_crosshair =
+            matches!(event, mouse::Event::CursorMoved { .. }) && self.show_crosshair;
+        if update_crosshair {
+            if cursor.is_over(bounds)
+                && let Some(spectrogram) = &shared.spectrogram
+            {
+                let pos = plot_pos
+                    * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
+                self.crosshair.set(Some(pos));
+            } else {
+                self.crosshair.set(None);
+            }
+        }
+
         match self.mouse_state.get() {
             MouseState::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
@@ -572,19 +583,6 @@ impl Overlay {
                     }
                     return (Status::Captured, None);
                 }
-                mouse::Event::CursorMoved { position: _ } => {
-                    if cursor.is_over(bounds) {
-                        return (
-                            Status::Captured,
-                            Some(Message::UpdateCrosshair(Some(plot_pos)).into()),
-                        );
-                    } else {
-                        return (
-                            Status::Captured,
-                            Some(Message::UpdateCrosshair(None).into()),
-                        );
-                    }
-                }
                 _ => {}
             },
             MouseState::Panning(prev_pos) => match event {
@@ -607,10 +605,7 @@ impl Overlay {
                         corner1,
                         corner2: plot_pos,
                     });
-                    return (
-                        Status::Captured,
-                        Some(Message::UpdateRectPreview(Some(plot_pos)).into()),
-                    );
+                    return (Status::Captured, Some(Message::Refresh.into()));
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     self.mouse_state.set(MouseState::Idle);
@@ -667,7 +662,12 @@ impl Overlay {
             }
         };
 
-        (Status::Captured, None)
+        let msg = if update_crosshair {
+            Some(Message::Refresh.into())
+        } else {
+            None
+        };
+        (Status::Captured, msg)
     }
 
     fn handle_keyboard(
@@ -694,10 +694,7 @@ impl Overlay {
                 MouseState::Panning(_) => (),
                 MouseState::DrawingRect { .. } => {
                     self.mouse_state.set(MouseState::Idle);
-                    return (
-                        Status::Captured,
-                        Some(Message::UpdateRectPreview(None).into()),
-                    );
+                    return (Status::Captured, Some(Message::Refresh.into()));
                 }
                 MouseState::Marking(_) => self.mouse_state.set(MouseState::Idle),
             },
@@ -831,6 +828,7 @@ impl Overlay {
         app: &AppShared,
     ) -> Task<Message> {
         let msg_task = match message {
+            Message::Refresh => Task::none(),
             Message::MarkTrackpoints => {
                 if matches!(self.mouse_state.get(), MouseState::Idle) {
                     self.mouse_state
@@ -918,21 +916,10 @@ impl Overlay {
                 self.signals = signals;
                 Task::none()
             }
-            Message::UpdateCrosshair(plot_pos) => {
-                self.crosshair = shared.spectrogram.as_ref().and_then(|spectrogram| {
-                    plot_pos.map(|p| {
-                        p * PlotAreaToDataAbsolute::new(
-                            &shared.controls.bounds(),
-                            &spectrogram.bounds(),
-                        )
-                    })
-                });
-                Task::none()
-            }
             Message::SpectrogramUpdated => {
                 self.track_points.clear();
                 self.signals.clear();
-                self.crosshair = None;
+                self.crosshair.set(None);
                 Task::none()
             }
             Message::RefreshCache => {
@@ -965,13 +952,8 @@ impl Overlay {
                 Task::none()
             }
             Message::DeleteInRect(rect) => {
-                self.rect_preview = None;
                 self.track_points.retain(|p| !rect.contains(*p));
                 self.signals.retain(|p| !rect.contains(*p));
-                Task::none()
-            }
-            Message::UpdateRectPreview(corner2) => {
-                self.rect_preview = corner2;
                 Task::none()
             }
             Message::SaveSignals => {
@@ -1069,7 +1051,6 @@ impl PartialEq for Overlay {
         self.track_points == other.track_points
             && self.signals == other.signals
             && self.crosshair == other.crosshair
-            && self.rect_preview == other.rect_preview
             && self.absolute_axes == other.absolute_axes
     }
 }
