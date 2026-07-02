@@ -17,7 +17,9 @@ Notable CLI flags (most are global across subcommands): `-v`/`--verbose` (repeat
 
 System dependencies (Ubuntu): `build-essential libssl-dev pkg-config fontconfig libfontconfig1-dev libopenblas-dev`
 
-A Nix flake is provided for reproducible builds.
+A Nix flake is provided for reproducible builds; a Cachix cache at `rstrf.cachix.org` (built from CI) is available so rstrf does not need to be built locally.
+
+`scripts/pass_png_historic.py` batches the `pass-png` subcommand over many days of spectrograms, grouping `.bin` files by recording session (rffft or rsmedfilt naming) and selecting the closest-epoch TLE per group from a historic TLE archive.
 
 ## Architecture
 
@@ -75,3 +77,5 @@ AppModel
 **Async I/O:** All file loading and Space-Track API calls use `Task::future(async { ... })`. CPU-intensive work uses `tokio::task::spawn_blocking`.
 
 **Clippy allow:** `filter_map_bool_then` is suppressed globally in `Cargo.toml`.
+
+**Mouse/interaction state via `Cell` (`overlay.rs`):** Transient per-frame UI state that only the view needs (crosshair position, mouse drag state, keyboard modifiers) is stored in `Cell<T>` fields on `Overlay` and mutated directly from `mouse_interaction`/event handlers, rather than round-tripped through `Message` variants. A `Message::Refresh` no-op is dispatched to trigger a redraw after such a `Cell` mutation.
