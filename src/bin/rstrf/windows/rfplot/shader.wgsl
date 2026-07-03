@@ -6,6 +6,7 @@ struct Uniforms {
     viewport_width: f32,
     nslices: u32,
     nchan: u32,
+    average: u32,
 }
 
 @group(0) @binding(0) var<storage, read> color_map: array<vec4f>;
@@ -66,12 +67,20 @@ fn fs_main(in: VertexOut) -> FragOut {
 fn get_value(u: u32, v: f32) -> f32 {
     let time_idx = clamp(u, 0u, uniforms.nslices - 1u);
     let freq_idx = v * f32(uniforms.nchan);
-    var value = uniforms.power_bounds.x;
     let n_y = u32(ceil(uniforms.pixel_height));
+    var value = select(uniforms.power_bounds.x, 0.0, uniforms.average != 0u);
     for (var f = 0u; f < n_y; f++) {
         let freq_idx = clamp(u32(freq_idx) + f, 0u, uniforms.nchan - 1u);
         let idx = time_idx * uniforms.nchan + freq_idx;
-        value = max(value, spec_data[idx]);
+        if uniforms.average != 0u {
+            value += spec_data[idx];
+        } else {
+
+            value = max(value, spec_data[idx]);
+        }
+    }
+    if uniforms.average != 0u {
+        value /= f32(n_y);
     }
     return value;
 }

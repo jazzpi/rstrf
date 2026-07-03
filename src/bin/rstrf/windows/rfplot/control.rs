@@ -50,6 +50,7 @@ pub struct Controls {
     track_bw: f32,
     show_controls: bool,
     colormap: Colormap,
+    average_plotting: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,7 @@ pub enum Message {
     UpdateTrackBW(f32),
     SetControlsVisible(bool),
     UpdateColormap(Colormap),
+    UpdateAveragePlotting(bool),
 }
 
 impl Controls {
@@ -138,6 +140,10 @@ impl Controls {
 
     pub fn colormap(&self) -> Colormap {
         self.colormap
+    }
+
+    pub fn average_plotting(&self) -> bool {
+        self.average_plotting
     }
 
     fn control<'a>(
@@ -375,6 +381,7 @@ impl Controls {
             }
             Message::SetControlsVisible(visible) => self.show_controls = visible,
             Message::UpdateColormap(colormap) => self.colormap = colormap,
+            Message::UpdateAveragePlotting(average) => self.average_plotting = average,
         }
         self.snap_to_bounds();
         Task::none()
@@ -442,6 +449,7 @@ impl Default for Controls {
             track_bw: 10e3,
             show_controls: true,
             colormap: Default::default(),
+            average_plotting: false,
             zoom_max: Vec2::splat(ZOOM_MAX),
         }
     }

@@ -1,3 +1,10 @@
+# vNext
+
+## New features
+- **Average plotting**. By default, rSTRF plots in "max-hold" mode: if multiple spectrogram bins
+  render to the same pixel, the pixel is displayed with the highest power of all the bins. Now,
+  there is an alternative "average" mode that averages the bins together instead.
+
 # v0.3.2
 
 ## New features

@@ -74,6 +74,7 @@ pub struct Config {
     pub site: Option<Site>,
     pub theme: BuiltinTheme,
     pub default_colormap: Colormap,
+    pub average_plotting: bool,
 }
 
 impl Default for Config {
@@ -85,6 +86,7 @@ impl Default for Config {
             site: None,
             theme: BuiltinTheme::default(),
             default_colormap: Colormap::Viridis,
+            average_plotting: false,
         }
     }
 }

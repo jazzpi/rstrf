@@ -33,6 +33,7 @@ pub enum Message {
     SiteAltitude(f64),
     ThemeSelected(BuiltinTheme),
     ColormapSelected(Colormap),
+    AveragePlotting(bool),
     FollowStrfSite(bool),
     Submit,
 }
@@ -263,6 +264,11 @@ impl Window {
                     Colormap::VARIANTS,
                     Message::ColormapSelected
                 ),
+                Self::checkbox_field(
+                    "Average Plotting",
+                    self.working_copy.average_plotting,
+                    Some(Message::AveragePlotting)
+                ),
             ],
         )
     }
@@ -379,6 +385,10 @@ impl super::Window<Message> for Window {
             }
             Message::ColormapSelected(colormap) => {
                 self.working_copy.default_colormap = colormap;
+                Task::none()
+            }
+            Message::AveragePlotting(average) => {
+                self.working_copy.average_plotting = average;
                 Task::none()
             }
             Message::FollowStrfSite(enable) => {

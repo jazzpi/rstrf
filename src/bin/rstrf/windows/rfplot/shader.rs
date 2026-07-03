@@ -24,7 +24,11 @@ pub struct Uniforms {
     viewport_width: f32,
     nslices: u32,
     nchan: u32,
+    average: u32,
+    _padding: u32,
 }
+
+const _: () = assert!(std::mem::size_of::<Uniforms>() % std::mem::size_of::<Vec2>() == 0);
 
 struct SpectrogramChunk {
     uniform: wgpu::Buffer,
@@ -146,6 +150,8 @@ impl Pipeline {
                 nchan: spectrogram.nchan as u32,
                 pixel_height,
                 viewport_width: viewport_bounds.width,
+                average: primitive.controls.average_plotting() as u32,
+                _padding: 0,
             };
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
         }

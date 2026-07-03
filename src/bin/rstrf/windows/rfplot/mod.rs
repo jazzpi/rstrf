@@ -195,12 +195,24 @@ impl RFPlot {
     }
 
     // TODO
-    pub fn app_event(&mut self, _event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
+    pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
+        let config_task = if matches!(event, AppEvent::ConfigUpdated) {
+            self.shared
+                .controls
+                .update(control::Message::UpdateAveragePlotting(
+                    app.config.average_plotting,
+                ))
+                .map(WindowOut::Msg)
+        } else {
+            Task::none()
+        };
         // Trigger a prediction cache check
-        self.overlay
+        let cache_task = self
+            .overlay
             .update(overlay::Message::RefreshCache, &self.shared, app)
             .map(Message::Overlay)
-            .map(WindowOut::Msg)
+            .map(WindowOut::Msg);
+        Task::batch(vec![config_task, cache_task])
     }
 }
 
@@ -235,6 +247,13 @@ impl Window<Message> for RFPlot {
                 app.config.default_colormap,
             ))
             .map(WindowOut::Msg);
+        let average_task = self
+            .shared
+            .controls
+            .update(control::Message::UpdateAveragePlotting(
+                app.config.average_plotting,
+            ))
+            .map(WindowOut::Msg);
         let spec_task = if self.shared.spectrogram_files.is_empty() {
             Task::none()
         } else {
@@ -244,7 +263,7 @@ impl Window<Message> for RFPlot {
                 app,
             )
         };
-        Task::batch(vec![cmap_task, spec_task])
+        Task::batch(vec![cmap_task, average_task, spec_task])
     }
 
     fn menu_bar(&self) -> Vec<MenuItem<WindowOut<Message>>> {
