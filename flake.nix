@@ -97,7 +97,12 @@
             rustup
             rustPlatform.bindgenHook
             pkg-config
-            (python3.withPackages (ps: with ps; [ numpy skyfield ]))
+            (python3.withPackages (
+              ps: with ps; [
+                numpy
+                skyfield
+              ]
+            ))
           ];
           inherit buildInputs;
           RUSTC_VERSION = "stable";
