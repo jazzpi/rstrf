@@ -149,14 +149,13 @@ pub async fn load_omm_json(path: &PathBuf) -> anyhow::Result<Vec<sgp4::Elements>
 /// Loads orbital elements from an OMM file in CSV format
 pub async fn load_omm_csv(path: &PathBuf) -> anyhow::Result<Vec<sgp4::Elements>> {
     let file = tokio::fs::File::open(path).await?;
-    // let mut reader = tokio::io::BufReader::new(file);
     let mut rdr = csv_async::AsyncReaderBuilder::new()
         .has_headers(true)
         .create_deserializer(file);
     let mut elements = Vec::new();
     let mut records = rdr.deserialize();
     while let Some(result) = records.next().await {
-        let record: sgp4::Elements = result.context("Failed to deserialize OMM CSV record")?;
+        let record: sgp4::Elements = result.context("Failed to parse OMM CSV")?;
         elements.push(record);
     }
     Ok(elements)
