@@ -45,7 +45,7 @@
           default = rstrf;
           rstrf = rustPlatform.buildRustPackage {
             pname = "rstrf";
-            version = "0.3.1";
+            version = "0.3.3";
             src = ./.;
 
             nativeBuildInputs = [

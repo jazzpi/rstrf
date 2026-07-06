@@ -1,4 +1,4 @@
-# vNext
+# v0.3.3
 
 ## New features
 - **Average plotting**. By default, rSTRF plots in "max-hold" mode: if multiple spectrogram bins
