@@ -12,6 +12,10 @@
   or `*.txt` extensions to be parsed correctly.
 - `pass_png_historic.py` now skips spectrograms with no passes in them.
 
+## Bug fixes
+- rSTRF now correctly passes `sites.txt` entries with negative altitudes when *Follow STRF site* is
+  set.
+
 # v0.3.2
 
 ## New features

@@ -166,7 +166,7 @@ pub async fn load_omm_csv(path: &PathBuf) -> anyhow::Result<Vec<sgp4::Elements>>
 pub async fn load_strf_sites(path: &PathBuf) -> anyhow::Result<HashMap<i32, Site>> {
     let file = tokio::fs::File::open(path).await?;
 
-    let pattern = Regex::new(r"^(\d+)\s+\w+\s+([0-9.+\-]+)\s+([0-9.+\-]+)\s+([0-9]+).*$")?;
+    let pattern = Regex::new(r"^(\d+)\s+\w+\s+([0-9.+\-]+)\s+([0-9.+\-]+)\s+([0-9.+\-]+).*$")?;
 
     let reader = tokio::io::BufReader::new(file);
     let mut lines = reader.lines();
