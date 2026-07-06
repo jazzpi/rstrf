@@ -15,6 +15,13 @@ For each group the TLE whose epoch most closely matches the start time of the
 first spectrogram is selected from the historic TLE archive, written to a
 temporary file, and passed to pass-png.
 
+Before invoking pass-png, the selected TLE is propagated (via skyfield) to check
+whether the satellite rises above --min-elevation at the observer site during the
+group's recording window. Groups with no pass are skipped, avoiding the expensive
+spectrogram load. The observer site is read from rstrf's config.json (overridable
+with --lat/--lon/--alt); pass --no-pass-filter to disable this and process every
+group.
+
 Usage example:
   scripts/pass_png_historic.py \\
       --tle 58340.tle -i 58340 -o out/pass \\
@@ -23,6 +30,8 @@ Usage example:
 """
 
 import argparse
+import json
+import math
 import os
 import re
 import subprocess
@@ -34,6 +43,9 @@ from pathlib import Path
 HEADER_SIZE = 256
 # rffft output: YYYY-MM-DDTHH:MM:SS_NNNNNN.bin — group by the datetime prefix.
 RFFFT_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})_\d+\.bin$")
+# Sampling step (seconds) when scanning a recording window for a pass. Passes
+# last minutes, so this is fine-grained enough to never miss one.
+PASS_STEP_S = 30
 
 
 # ---------------------------------------------------------------------------
@@ -41,21 +53,49 @@ RFFFT_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})_\d+\.bin$")
 # ---------------------------------------------------------------------------
 
 
-def read_first_start_time(path: Path) -> datetime:
-    """Return UTC_START from the first spectrum header in a .bin file."""
-    with path.open("rb") as f:
-        header_bytes = f.read(HEADER_SIZE)
-    header = header_bytes.decode("ascii", errors="replace")
-    m = re.search(r"UTC_START\s+(\S+)", header)
-    if not m:
-        raise ValueError(f"No UTC_START in first header of {path}")
-    ts = m.group(1).rstrip("Z")
+def _parse_utc(ts: str, path: Path) -> datetime:
+    ts = ts.rstrip("Z")
     for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
         try:
             return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
     raise ValueError(f"Cannot parse UTC_START {ts!r} in {path}")
+
+
+def read_header(path: Path) -> dict:
+    """Parse the first 256-byte header of a .bin file.
+
+    Returns a dict with keys ``utc_start`` (datetime), ``length`` (float seconds
+    per sub-integration or None) and ``nsub`` (int or None).
+    """
+    with path.open("rb") as f:
+        header_bytes = f.read(HEADER_SIZE)
+    header = header_bytes.decode("ascii", errors="replace")
+    m = re.search(r"UTC_START\s+(\S+)", header)
+    if not m:
+        raise ValueError(f"No UTC_START in first header of {path}")
+    length = re.search(r"LENGTH\s+([0-9.]+)", header)
+    nsub = re.search(r"NSUB\s+(\d+)", header)
+    return {
+        "utc_start": _parse_utc(m.group(1), path),
+        "length": float(length.group(1)) if length else None,
+        "nsub": int(nsub.group(1)) if nsub else None,
+    }
+
+
+def group_time_window(files_sorted: list[Path]) -> tuple[datetime, datetime]:
+    """Return (start, end) UTC covering the group's recording.
+
+    ``start`` is the first file's UTC_START; ``end`` is the last file's UTC_START
+    plus its NSUB * LENGTH duration when those fields are present.
+    """
+    start = read_header(files_sorted[0])["utc_start"]
+    last = read_header(files_sorted[-1])
+    end = last["utc_start"]
+    if last["nsub"] is not None and last["length"] is not None:
+        end = end + timedelta(seconds=last["nsub"] * last["length"])
+    return start, max(start, end)
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +158,82 @@ def best_tle_for(
         return abs((parse_tle_epoch(tle[1]) - target).total_seconds())
 
     return min(tles, key=delta)
+
+
+# ---------------------------------------------------------------------------
+# Observer site & pass prediction
+# ---------------------------------------------------------------------------
+
+
+def default_config_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return Path(base) / "rstrf" / "config.json"
+
+
+def resolve_site(args) -> dict:
+    """Resolve observer lat/lon (degrees) and altitude (metres).
+
+    Reads rstrf's config.json (site stored as radians / km) and applies any
+    --lat/--lon/--alt overrides (degrees / metres).
+    """
+    lat = lon = alt = None
+    config_path = args.config or default_config_path()
+    try:
+        cfg = json.loads(Path(config_path).read_text())
+        site = cfg.get("site")
+        if site:
+            lat = math.degrees(site["latitude"])
+            lon = math.degrees(site["longitude"])
+            alt = site["altitude"] * 1000.0  # km -> m
+    except FileNotFoundError:
+        if args.config is not None:
+            raise
+    except (KeyError, ValueError, TypeError) as exc:
+        print(
+            f"WARNING: Could not read site from {config_path}: {exc}", file=sys.stderr
+        )
+
+    if args.lat is not None:
+        lat = args.lat
+    if args.lon is not None:
+        lon = args.lon
+    if args.alt is not None:
+        alt = args.alt
+
+    if lat is None or lon is None:
+        raise SystemExit(
+            "ERROR: No observer site available. Provide --lat/--lon (and --alt), "
+            f"or set 'site' in {config_path}."
+        )
+    return {"lat": lat, "lon": lon, "alt": alt if alt is not None else 0.0}
+
+
+def has_pass(
+    tle: tuple[str, str, str],
+    site: dict,
+    start: datetime,
+    end: datetime,
+    min_elevation: float,
+) -> tuple[bool, float]:
+    """Return (has_pass, max_elevation_deg) over [start, end] using skyfield.
+
+    Raises ImportError if skyfield is not installed.
+    """
+    from skyfield.api import EarthSatellite, load, wgs84
+
+    ts = load.timescale()
+    sat = EarthSatellite(tle[1], tle[2], tle[0], ts)
+    observer = wgs84.latlon(site["lat"], site["lon"], elevation_m=site["alt"])
+
+    n = int((end - start).total_seconds() // PASS_STEP_S) + 1
+    samples = [start + timedelta(seconds=i * PASS_STEP_S) for i in range(n)]
+    if samples[-1] < end:
+        samples.append(end)
+
+    t = ts.from_datetimes(samples)
+    alt, _az, _dist = (sat - observer).at(t).altaz()
+    max_elev = float(alt.degrees.max())
+    return max_elev >= min_elevation, max_elev
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +310,35 @@ def main() -> None:
         action="store_true",
         help="Print commands without executing them",
     )
+    parser.add_argument(
+        "--min-elevation",
+        type=float,
+        default=0.0,
+        metavar="DEG",
+        help="Minimum elevation (deg) for a pass to count [default: 0]",
+    )
+    parser.add_argument(
+        "--no-pass-filter",
+        action="store_true",
+        help="Disable pass prediction; process every group",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="rstrf config.json to read site from "
+        "[default: $XDG_CONFIG_HOME/rstrf/config.json]",
+    )
+    parser.add_argument(
+        "--lat", type=float, default=None, help="Observer latitude override (deg)"
+    )
+    parser.add_argument(
+        "--lon", type=float, default=None, help="Observer longitude override (deg)"
+    )
+    parser.add_argument(
+        "--alt", type=float, default=None, help="Observer altitude override (m)"
+    )
 
     args = parser.parse_args(our_argv)
 
@@ -203,18 +348,27 @@ def main() -> None:
         sys.exit(1)
     print(f"Loaded {len(tles)} TLE(s) from {args.tle}")
 
+    site = None
+    if not args.no_pass_filter:
+        site = resolve_site(args)
+        print(
+            f"Observer site: lat={site['lat']:.4f}° lon={site['lon']:.4f}° "
+            f"alt={site['alt']:.0f} m  (min elevation {args.min_elevation:.1f}°)"
+        )
+
     groups = group_files(args.spectrograms)
     print(f"Found {len(groups)} group(s) from {len(args.spectrograms)} file(s)")
 
     tmpdir = tempfile.mkdtemp(prefix="pass_png_historic_")
     try:
         exit_code = 0
+        processed = 0
+        skipped = 0
         for group_key, files in sorted(groups.items()):
             files_sorted = sorted(files)
-            first_file = files_sorted[0]
 
             try:
-                start_time = read_first_start_time(first_file)
+                start_time, end_time = group_time_window(files_sorted)
             except Exception as exc:
                 print(
                     f"\nWARNING: Skipping group {group_key!r}: {exc}", file=sys.stderr
@@ -231,9 +385,37 @@ def main() -> None:
 
             print(
                 f"\nGroup {group_key.lstrip(chr(0))!r}: {len(files)} file(s), "
-                f"start={start_time.isoformat()}"
+                f"{start_time.isoformat()} → {end_time.isoformat()}"
             )
             print(f"  TLE epoch : {tle_epoch.isoformat()}  (Δ={delta_h:+.1f} h)")
+
+            if site is not None:
+                try:
+                    keep, max_elev = has_pass(
+                        tle, site, start_time, end_time, args.min_elevation
+                    )
+                except ImportError:
+                    print(
+                        "ERROR: skyfield not installed. Run 'pip install skyfield' "
+                        "or pass --no-pass-filter.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                except Exception as exc:
+                    print(
+                        f"  WARNING: pass prediction failed ({exc}); "
+                        "processing group anyway",
+                        file=sys.stderr,
+                    )
+                    keep, max_elev = True, None
+                if max_elev is not None:
+                    print(f"  Max elev  : {max_elev:.1f}°")
+                if not keep:
+                    print("  SKIP: no pass in recording window")
+                    skipped += 1
+                    continue
+
+            processed += 1
             print(f"  Output    : {output_prefix}_NNN.png")
 
             tle_path = os.path.join(tmpdir, f"{safe_key}.tle")
@@ -272,6 +454,10 @@ def main() -> None:
 
         shutil.rmtree(tmpdir, ignore_errors=True)
 
+    print(
+        f"\nDone: {processed} processed, {skipped} skipped (no pass) "
+        f"of {len(groups)} group(s)"
+    )
     sys.exit(exit_code)
 
 
