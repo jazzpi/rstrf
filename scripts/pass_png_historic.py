@@ -343,10 +343,20 @@ def main() -> None:
     args = parser.parse_args(our_argv)
 
     tles = parse_tles(args.tle)
+    unfiltered_tles = len(tles)
+
+    def norad_id(tle: tuple[str, str, str]) -> int:
+        field = tle[1].split(None, 3)[1].strip()
+        return int(field.rstrip("UCS"))
+
+    tles = list(filter(lambda tle: norad_id(tle) == int(args.norad_id), tles))
+    print(f"Loaded {len(tles)}/{unfiltered_tles} TLE(s) from {args.tle}")
     if not tles:
-        print(f"ERROR: No TLEs found in {args.tle}", file=sys.stderr)
+        print(
+            f"ERROR: No TLEs found for NORAD ID {args.norad_id} in {args.tle}",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    print(f"Loaded {len(tles)} TLE(s) from {args.tle}")
 
     site = None
     if not args.no_pass_filter:
