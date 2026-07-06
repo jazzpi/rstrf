@@ -398,6 +398,14 @@ impl Window<Message> for RFPlot {
                     app::Message::ScreenshotSaved(path),
                 )));
             }
+            Message::LoadSpectrogram(paths) => {
+                let total = paths.len();
+                self.pending_paths = paths;
+                self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
+                return Task::done(WindowOut::Effect(WindowEffect::ToApp(
+                    app::Message::ReloadCatalog,
+                )));
+            }
             _ => (),
         };
         let result = match message {
@@ -406,12 +414,6 @@ impl Window<Message> for RFPlot {
                 .overlay
                 .update(message, &self.shared, app)
                 .map(Message::Overlay),
-            Message::LoadSpectrogram(paths) => {
-                let total = paths.len();
-                self.pending_paths = paths;
-                self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
-                Task::none()
-            }
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
                 Task::none()
@@ -492,7 +494,9 @@ impl Window<Message> for RFPlot {
                 .update(control::Message::ZoomToRect(rect)),
             Message::Nop => Task::none(),
             // Handled by the outer match
-            Message::GpuUploadDone | Message::SaveScreenshot(_, _) => unreachable!(),
+            Message::GpuUploadDone
+            | Message::SaveScreenshot(_, _)
+            | Message::LoadSpectrogram(_) => unreachable!(),
         };
         result.map(WindowOut::Msg)
     }

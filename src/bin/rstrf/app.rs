@@ -40,6 +40,9 @@ pub struct AppShared {
     pub site_id: Option<i32>,
     /// Frequency range to load in Hz (channels outside this range are skipped)
     pub freq_range: Option<(u64, u64)>,
+
+    pub catalog_path: Option<PathBuf>,
+    pub freqs_path: Option<PathBuf>,
 }
 
 impl AppShared {
@@ -94,6 +97,7 @@ pub enum Message {
     Event(AppEvent),
     WindowOpenedRFPlotWith(window::Id, Box<PlotArgs>),
     WindowOpenedPassPng(window::Id, Box<PassPngArgs>),
+    ReloadCatalog,
     CatalogLoaded {
         satellites: Vec<(Satellite, bool)>,
         frequencies: Transmitters,
@@ -154,19 +158,15 @@ impl AppModel {
 
         let window_size = Some(iced::Size::new(flags.width as f32, flags.height as f32));
 
-        match flags.command {
+        let (catalog_path, freqs_path) = match flags.command {
             Some(Command::Plot(args)) => {
+                tasks.push(Task::done(Message::ReloadCatalog));
+                let a = args.clone();
                 tasks.push(
-                    Self::load_catalog(args.catalog.clone(), args.freqs.clone(), HashMap::new())
-                        .map(|(satellites, frequencies)| Message::CatalogLoaded {
-                            satellites,
-                            frequencies,
-                        }),
+                    Self::open_window(window_size)
+                        .map(move |id| Message::WindowOpenedRFPlotWith(id, Box::new(a.clone()))),
                 );
-                tasks
-                    .push(Self::open_window(window_size).map(move |id| {
-                        Message::WindowOpenedRFPlotWith(id, Box::new(args.clone()))
-                    }));
+                (args.catalog.clone(), args.freqs.clone())
             }
             Some(Command::PassPng(args)) => {
                 let frequencies = HashMap::from([(args.norad_id, args.freq.clone())]);
@@ -180,15 +180,18 @@ impl AppModel {
                             frequencies,
                         }),
                 );
+                let a = args.clone();
                 tasks.push(
                     Self::open_window(window_size)
-                        .map(move |id| Message::WindowOpenedPassPng(id, Box::new(args.clone()))),
+                        .map(move |id| Message::WindowOpenedPassPng(id, Box::new(a.clone()))),
                 );
+                (Some(args.catalog.clone()), args.freqs.clone())
             }
             None => {
                 tasks.push(Task::done(Message::OpenRFPlot));
+                (None, None)
             }
-        }
+        };
 
         let app = AppModel {
             config_path,
@@ -196,6 +199,8 @@ impl AppModel {
                 freq_range: flags
                     .freq_range
                     .map(|v| (v[0].round() as u64, v[1].round() as u64)),
+                catalog_path,
+                freqs_path,
                 ..Default::default()
             },
             windows: HashMap::default(),
@@ -317,6 +322,15 @@ impl AppModel {
                 self.pass_png = Some(PassPngMode::new(id, *args));
                 task
             }
+            Message::ReloadCatalog => Self::load_catalog(
+                self.shared_state.catalog_path.clone(),
+                self.shared_state.freqs_path.clone(),
+                HashMap::new(),
+            )
+            .map(|(satellites, frequencies)| Message::CatalogLoaded {
+                satellites,
+                frequencies,
+            }),
             Message::CatalogLoaded {
                 satellites,
                 frequencies,
