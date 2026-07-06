@@ -590,7 +590,7 @@ impl AppModel {
                 }
             }
             let satellites = if let Some(p) = catalog {
-                match rstrf::orbit::load_tles(&p, frequencies.clone()).await {
+                match rstrf::orbit::load_catalog(&p, frequencies.clone()).await {
                     Ok(sats) => sats.into_iter().map(|s| (s, true)).collect(),
                     Err(e) => {
                         log::error!("Failed to load catalog: {e:?}");

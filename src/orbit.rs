@@ -2,12 +2,13 @@ use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use futures_util::StreamExt;
 use ndarray::{Array1, ArrayView1, Zip, arr1, s};
 use ndarray_linalg::Norm;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
-use tokio::io::AsyncBufReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 use crate::util::pred_ranges;
 
@@ -46,13 +47,45 @@ pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<Trans
     Ok(freqs)
 }
 
+/// Loads orbital elements from the given file
+///
+/// Parses `.tle` and `.txt` files as 2LE or 3LE, `.json` as OMM JSON and `.csv` as OMM CSV.
+pub async fn load_catalog(
+    path: &PathBuf,
+    tx_freqs: Transmitters,
+) -> anyhow::Result<Vec<Satellite>> {
+    let elements = match path.extension().and_then(|ext| ext.to_str()) {
+        Some("tle") | Some("txt") => load_tles(path).await,
+        Some("json") => load_omm_json(path).await,
+        Some("csv") => load_omm_csv(path).await,
+        _ => Err(anyhow::anyhow!(
+            "Unsupported file extension for catalog: {:?}",
+            path
+        )),
+    };
+
+    elements?
+        .into_iter()
+        .map(|elements| {
+            let transmitters = tx_freqs
+                .get(&elements.norad_id)
+                .cloned()
+                .unwrap_or_default();
+            let constants = sgp4::Constants::from_elements(&elements)
+                .context("Failed to derive SGP4 constants")?;
+            Ok(Satellite {
+                elements,
+                constants,
+                transmitters,
+            })
+        })
+        .collect()
+}
+
 /// Loads TLEs from the given file
 ///
 /// Parses 2LE, and 3LE with an optional initial 0 in the title line.
-pub async fn load_tles(
-    path: &std::path::PathBuf,
-    tx_freqs: Transmitters,
-) -> anyhow::Result<Vec<Satellite>> {
+pub async fn load_tles(path: &std::path::PathBuf) -> anyhow::Result<Vec<sgp4::Elements>> {
     enum ParseState {
         AwaitLine1OrTitle,
         AwaitLine1(String),
@@ -85,7 +118,7 @@ pub async fn load_tles(
             }
             ParseState::AwaitLine2(title, line1) => {
                 if line.starts_with("2 ") {
-                    let sat = Satellite::from_tle(title, &line1, &line, &tx_freqs);
+                    let sat = sgp4::Elements::from_tle(title, line1.as_bytes(), line.as_bytes());
                     match sat {
                         Ok(sat) => elements.push(sat),
                         Err(e) => {
@@ -98,6 +131,33 @@ pub async fn load_tles(
                 ParseState::AwaitLine1OrTitle
             }
         };
+    }
+    Ok(elements)
+}
+
+/// Loads orbital elements from an OMM file in JSON format
+pub async fn load_omm_json(path: &PathBuf) -> anyhow::Result<Vec<sgp4::Elements>> {
+    let file = tokio::fs::File::open(path).await?;
+    let mut reader = tokio::io::BufReader::new(file);
+    let mut text = String::new();
+    reader.read_to_string(&mut text).await?;
+    let satellites: Vec<sgp4::Elements> =
+        serde_json::from_str(&text).context("Failed to parse OMM JSON")?;
+    Ok(satellites)
+}
+
+/// Loads orbital elements from an OMM file in CSV format
+pub async fn load_omm_csv(path: &PathBuf) -> anyhow::Result<Vec<sgp4::Elements>> {
+    let file = tokio::fs::File::open(path).await?;
+    // let mut reader = tokio::io::BufReader::new(file);
+    let mut rdr = csv_async::AsyncReaderBuilder::new()
+        .has_headers(true)
+        .create_deserializer(file);
+    let mut elements = Vec::new();
+    let mut records = rdr.deserialize();
+    while let Some(result) = records.next().await {
+        let record: sgp4::Elements = result.context("Failed to deserialize OMM CSV record")?;
+        elements.push(record);
     }
     Ok(elements)
 }

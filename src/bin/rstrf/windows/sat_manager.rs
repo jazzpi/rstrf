@@ -31,9 +31,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum Message {
     Nop,
-    LoadTLEs,
+    LoadCatalog,
     LoadFrequencies,
-    DoLoadTLEs(PathBuf),
+    DoLoadCatalog(PathBuf),
     DoLoadFrequencies(PathBuf),
     SatelliteToggled(usize, bool),
     ToggleAllSatellites,
@@ -237,8 +237,8 @@ impl Window<Message> for SatManager {
             msg: Some(Message::Nop.into()),
             items: vec![
                 MenuItem::Button {
-                    label: "Load TLEs".to_string(),
-                    msg: Some(Message::LoadTLEs.into()),
+                    label: "Load elements (TLE/OMM)".to_string(),
+                    msg: Some(Message::LoadCatalog.into()),
                 },
                 MenuItem::Button {
                     label: "Load frequencies".to_string(),
@@ -253,7 +253,7 @@ impl Window<Message> for SatManager {
             let head: Element<'_, WindowOut<Message>> = text("TIP").into();
             let content: Element<'_, WindowOut<Message>> = column![
                 text("You don't have any satellites loaded yet. Try loading some TLEs from the File menu or the button below."),
-                button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadTLEs.into())
+                button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadCatalog.into())
             ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
             Some(card(head, content).style(iced_aw::style::card::info))
         } else if app
@@ -408,15 +408,20 @@ impl Window<Message> for SatManager {
     ) -> Task<WindowOut<Message>> {
         match message {
             Message::Nop => Task::none(),
-            Message::LoadTLEs => Task::future(pick_file(&[("TLEs", &["tle", "txt"])]))
-                .and_then(|p| Task::done(WindowOut::Msg(Message::DoLoadTLEs(p)))),
+            Message::LoadCatalog => Task::future(pick_file(&[
+                ("Supported formats", &["tle", "txt", "json", "csv"]),
+                ("TLEs", &["tle", "txt"]),
+                ("OMM CSV", &["csv"]),
+                ("OMM JSON", &["json"]),
+            ]))
+            .and_then(|p| Task::done(WindowOut::Msg(Message::DoLoadCatalog(p)))),
             Message::LoadFrequencies => Task::future(pick_file(&[("Frequencies", &["txt"])]))
                 .and_then(|p| Task::done(WindowOut::Msg(Message::DoLoadFrequencies(p)))),
-            Message::DoLoadTLEs(path) => {
+            Message::DoLoadCatalog(path) => {
                 let frequencies = app.frequencies.clone();
                 Task::future(async move {
                     let satellites: anyhow::Result<_> =
-                        rstrf::orbit::load_tles(&path, frequencies).await;
+                        rstrf::orbit::load_catalog(&path, frequencies).await;
                     satellites.map_err(|e| format!("{e:?}"))
                 })
                 .then(|result| match result {

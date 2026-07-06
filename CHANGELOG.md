@@ -7,6 +7,9 @@
 - **Reload catalog when loading new spectrograms**. When loading new spectrograms via the *File* ->
   *Load spectrograms* file picker, rSTRF now re-reads the `-c` TLE catalog & `-F` frequencies.txt
   files.
+- **Support OMM JSON & CSV formats**. The `-c` argument now treats `*.csv` and `*.json` files as
+  their respective OMM formats and parses them appropriately. TLE files (2LE/3LE) must use `*.tle`
+  or `*.txt` extensions to be parsed correctly.
 - `pass_png_historic.py` now skips spectrograms with no passes in them.
 
 # v0.3.2

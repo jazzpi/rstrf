@@ -44,7 +44,7 @@ pub struct PlotArgs {
     /// Spectrogram files to display
     #[arg(value_name = "SPECTROGRAMS", required = true)]
     pub spectrograms: Vec<PathBuf>,
-    /// TLE catalog file
+    /// Catalog file (TLE, OMM JSON or OMM CSV)
     #[arg(short = 'c', long)]
     pub catalog: Option<PathBuf>,
     /// Path to frequencies.txt
@@ -80,7 +80,7 @@ pub struct PassPngArgs {
     /// Spectrogram files to display
     #[arg(value_name = "SPECTROGRAMS", required = true)]
     pub spectrograms: Vec<PathBuf>,
-    /// TLE catalog file
+    /// Catalog file (TLE, OMM JSON or OMM CSV)
     #[arg(short = 'c', long)]
     pub catalog: PathBuf,
     /// Satellite to generate pass images for
