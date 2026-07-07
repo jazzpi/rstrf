@@ -259,7 +259,7 @@ impl Controls {
                         slider(ZOOM_MIN..=self.zoom_max.x, self.log_scale.x, |z| {
                             Message::UpdateZoomX(z).into()
                         })
-                        .step(0.01)
+                        .step(0.01f32)
                         .width(Length::Fill),
                         format!("{:.0} s", bounds.0.width),
                     ),
@@ -268,7 +268,7 @@ impl Controls {
                         slider(ZOOM_MIN..=self.zoom_max.y, self.log_scale.y, |z| {
                             Message::UpdateZoomY(z).into()
                         })
-                        .step(0.01)
+                        .step(0.01f32)
                         .width(Length::Fill),
                         format!("{:.0} kHz", bounds.0.height / 1000.0),
                     ),
@@ -279,7 +279,7 @@ impl Controls {
                             self.power_range.0,
                             |p| Message::UpdateMinPower(p).into(),
                         )
-                        .step(0.1)
+                        .step(0.1f32)
                         .width(Length::Fill),
                         format!("{:.1} dB", self.power_range.0),
                     ),
@@ -290,7 +290,7 @@ impl Controls {
                             self.power_range.1,
                             |p| Message::UpdateMaxPower(p).into(),
                         )
-                        .step(0.1)
+                        .step(0.1f32)
                         .width(Length::Fill),
                         format!("{:.1} dB", self.power_range.1),
                     ),
@@ -299,7 +299,7 @@ impl Controls {
                         slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, |s| {
                             Message::UpdateSignalSigma(s).into()
                         })
-                        .step(0.1)
+                        .step(0.1f32)
                         .width(Length::Fill),
                         format!("{:.1}", self.signal_sigma),
                     ),
@@ -308,7 +308,7 @@ impl Controls {
                         slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, |b| {
                             Message::UpdateTrackBW(b).into()
                         })
-                        .step(100.0)
+                        .step(100.0f32)
                         .width(Length::Fill),
                         format!("{:.1} kHz", self.track_bw / 1000.0),
                     ),
