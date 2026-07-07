@@ -198,29 +198,39 @@ impl SatManager {
                 ))
                 .predicate(Predicate {
                     field: GeneralPerturbationField::Epoch,
-                    value: ">now-10".to_string()
+                    value: ">now-10".to_string(),
                 })
                 .predicate(Predicate {
                     field: GeneralPerturbationField::DecayDate,
-                    value: "null-val".to_string()
+                    value: "null-val".to_string(),
                 });
             space_track.gp(cfg).await
-        }).then(move |result| match result {
+        })
+        .then(move |result| match result {
             Ok(sats) => {
                 for sat in sats {
                     let Some(elements) = spacetrack_to_sgp4(&sat) else {
-                        log::error!("Failed to convert Space-Track data to SGP4 elements for satellite with NORAD ID {}", sat.norad_cat_id);
+                        log::error!(
+                            "Failed to convert Space-Track data to SGP4 elements for satellite \
+                             with NORAD ID {}",
+                            sat.norad_cat_id
+                        );
                         continue;
                     };
                     let Some(idx) = id_to_idx.get(&(sat.norad_cat_id as u32)) else {
-                        log::error!("Got Space-Track data for NORAD ID {} which is not in the current satellite list", sat.norad_cat_id);
+                        log::error!(
+                            "Got Space-Track data for NORAD ID {} which is not in the current \
+                             satellite list",
+                            sat.norad_cat_id
+                        );
                         continue;
                     };
                     satellites[*idx].0.elements = elements;
                 }
-                Task::done(WindowOut::Effect(WindowEffect::SetSatellites(satellites.clone())
-                ))
-            },
+                Task::done(WindowOut::Effect(WindowEffect::SetSatellites(
+                    satellites.clone(),
+                )))
+            }
             Err(err) => {
                 log::error!("Failed to fetch data from Space-Track: {err}");
                 Task::none()
@@ -251,9 +261,19 @@ impl Window<Message> for SatManager {
         let onboarding = if app.satellites.is_empty() {
             let head: Element<'_, WindowOut<Message>> = text("TIP").into();
             let content: Element<'_, WindowOut<Message>> = column![
-                text("You don't have any satellites loaded yet. Try loading some TLEs from the File menu or the button below."),
-                button(text("Load TLEs")).style(button::primary).width(200.0).on_press(Message::LoadCatalog.into())
-            ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
+                text(
+                    "You don't have any satellites loaded yet. Try loading some TLEs from the \
+                     File menu or the button below."
+                ),
+                button(text("Load TLEs"))
+                    .style(button::primary)
+                    .width(200.0)
+                    .on_press(Message::LoadCatalog.into())
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_x(Horizontal::Center)
+            .into();
             Some(card(head, content).style(iced_aw::style::card::info))
         } else if app
             .satellites
@@ -262,9 +282,20 @@ impl Window<Message> for SatManager {
         {
             let head: Element<'_, WindowOut<Message>> = text("TIP").into();
             let content: Element<'_, WindowOut<Message>> = column![
-                text("You don't have any transmit frequencies set for the satellites. Try editing the frequency fields, or loading an STRF frequencies.txt file from the File menu or the button below."),
-                button(text("Load Frequencies")).style(button::primary).width(200.0).on_press(Message::LoadFrequencies.into())
-            ].spacing(10).width(Length::Fill).align_x(Horizontal::Center).into();
+                text(
+                    "You don't have any transmit frequencies set for the satellites. Try editing \
+                     the frequency fields, or loading an STRF frequencies.txt file from the File \
+                     menu or the button below."
+                ),
+                button(text("Load Frequencies"))
+                    .style(button::primary)
+                    .width(200.0)
+                    .on_press(Message::LoadFrequencies.into())
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_x(Horizontal::Center)
+            .into();
             Some(card(head, content).style(iced_aw::style::card::info))
         } else {
             None
@@ -369,21 +400,26 @@ impl Window<Message> for SatManager {
                             .width(Length::Fill),
                     ]
                     .padding([0, 50])
-                    .spacing(6)
+                    .spacing(6),
                 )
                 .center_x(Length::Fill)
                 .into(),
-                None =>
-                    card(
-                        "Missing Credentials", column![
-                            text("To fetch orbital elements from Space-Track, please set your credentials in the Preferences window."),
-                            button("Open Preferences").style(button::primary).on_press(WindowOut::Effect(WindowEffect::OpenPreferences))
-                        ]
-                        .spacing(10)
-                        .width(Length::Fill)
-                    )
-                    .style(iced_aw::style::card::warning)
-                    .into()
+                None => card(
+                    "Missing Credentials",
+                    column![
+                        text(
+                            "To fetch orbital elements from Space-Track, please set your \
+                             credentials in the Preferences window."
+                        ),
+                        button("Open Preferences")
+                            .style(button::primary)
+                            .on_press(WindowOut::Effect(WindowEffect::OpenPreferences))
+                    ]
+                    .spacing(10)
+                    .width(Length::Fill),
+                )
+                .style(iced_aw::style::card::warning)
+                .into(),
             };
             controls = controls.push(space_track);
         }

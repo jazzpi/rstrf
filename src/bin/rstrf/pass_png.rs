@@ -182,7 +182,7 @@ impl PassPngMode {
                                 {
                                     log::info!(
                                         "pass-png: skipping pass {pass_idx} transmitter {tx_freq} \
-                                        at [{f_lo}, {f_hi}] Hz (out of spectrogram bounds)"
+                                         at [{f_lo}, {f_hi}] Hz (out of spectrogram bounds)"
                                     );
                                     return None;
                                 }

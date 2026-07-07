@@ -1233,7 +1233,8 @@ mod tests {
 
     #[test]
     fn mean_of_multiple_signals() {
-        // Two signals 120 s apart → mean at +60 s → :31; freqs +0 and +200 → mean +100 Hz → 145900 kHz
+        // Two signals 120 s apart → mean at +60 s → :31
+        // freqs +0 and +200 → mean +100 Hz → 145900 kHz
         let signals = [pt(0.0, 0.0), pt(120.0, 200.0)];
         let name = signals_filename(utc(2024, 6, 15, 12, 30), 145_900_000.0, &signals);
         assert_eq!(name.as_deref(), Some("2024-06-15T12:31_145900k.dat"));

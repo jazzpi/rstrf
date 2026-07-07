@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use crate::coord::data_absolute;
 
-static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END").unwrap()
-});
+#[rustfmt::skip]
+static _HEADER_RE_STR: &str = r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END";
+static HEADER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(_HEADER_RE_STR).unwrap());
 
 /// Raw spectrum read from a strf `.bin` file, including its per-spectrum timestamp.
 pub struct RawStrfSpectrum {

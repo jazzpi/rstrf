@@ -95,7 +95,8 @@ impl From<Icon> for svg::Handle {
             }
             Icon::Screenshot => {
                 include_bytes!(
-                    "../../../../resources/icons/material-symbols--screenshot-monitor-outline-rounded.svg"
+                    "../../../../resources/icons/\
+                     material-symbols--screenshot-monitor-outline-rounded.svg"
                 )
             }
             Icon::Colormap(colormap) => match colormap {

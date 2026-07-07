@@ -48,7 +48,8 @@ impl From<WindowOut<preferences::Message>> for Message {
     }
 }
 
-/// A cross-cutting effect that escapes a window's own message type and must be handled by the parent.
+/// A cross-cutting effect that escapes a window's own message type and must be handled by the
+/// parent.
 #[derive(Debug, Clone)]
 pub enum WindowEffect {
     OpenPreferences,
@@ -61,7 +62,8 @@ pub enum WindowEffect {
     ScreenshotSaved(PathBuf),
 }
 
-/// Return type for window update functions: either a window-local continuation or an escaped effect.
+/// Return type for window update functions: either a window-local continuation or an escaped
+/// effect.
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum WindowOut<M> {

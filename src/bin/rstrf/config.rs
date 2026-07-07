@@ -5,10 +5,18 @@ use std::fmt::Debug;
 use iced::Theme;
 use rstrf::{colormap::Colormap, orbit::Site};
 use serde::{Deserialize, Serialize};
-use strum::Display;
 
 #[derive(
-    Debug, Display, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, strum::VariantArray,
+    Debug,
+    strum::Display,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Default,
+    strum::VariantArray,
 )]
 pub enum BuiltinTheme {
     Light,
