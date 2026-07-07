@@ -395,8 +395,8 @@ impl super::Window<Message> for Window {
                 self.working_copy.follow_strf_site = enable;
                 Task::none()
             }
-            Message::Submit => Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                crate::app::Message::UpdateConfig(self.working_copy.clone()),
+            Message::Submit => Task::done(WindowOut::Effect(WindowEffect::UpdateConfig(
+                self.working_copy.clone(),
             ))),
         }
     }

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    app::{self, AppEvent, AppShared},
+    app::{AppEvent, AppShared},
     io_service,
     windows::{Window, WindowEffect, WindowOut, rfplot::control::Controls},
 };
@@ -378,15 +378,16 @@ impl Window<Message> for RFPlot {
         message: Message,
         app: &AppShared,
     ) -> Task<WindowOut<Message>> {
-        // Handle messages that (can) trigger ToApp effects first
+        // Handle messages that (can) trigger WindowEffect effects first
         match message {
             Message::GpuUploadDone => {
                 self.loading_state = LoadingState::Idle;
                 self.gpu_watcher = None;
                 self.gpu_notify = None;
                 if let Some(spec) = &self.shared.spectrogram {
-                    return Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                        app::Message::RFPlotReady(id, spec.absolute_bounds()),
+                    return Task::done(WindowOut::Effect(WindowEffect::PlotReady(
+                        id,
+                        spec.absolute_bounds(),
                     )));
                 }
             }
@@ -395,17 +396,13 @@ impl Window<Message> for RFPlot {
                     Ok(_) => log::info!("Saved screenshot to {path:?}"),
                     Err(e) => log::error!("Failed to save screenshot to {path:?}: {e}"),
                 }
-                return Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::ScreenshotSaved(path),
-                )));
+                return Task::done(WindowOut::Effect(WindowEffect::ScreenshotSaved(path)));
             }
             Message::LoadSpectrogram(paths) => {
                 let total = paths.len();
                 self.pending_paths = paths;
                 self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
-                return Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::ReloadCatalog,
-                )));
+                return Task::done(WindowOut::Effect(WindowEffect::ReloadCatalog));
             }
             _ => (),
         };

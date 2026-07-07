@@ -23,7 +23,7 @@ use strum::{EnumIter, IntoEnumIterator};
 use tokio::sync::Mutex;
 
 use crate::{
-    app::{self, AppShared},
+    app::AppShared,
     widgets::{Icon, ToolbarButton, form::number_input, toolbar},
     windows::{Window, WindowEffect, WindowOut},
 };
@@ -218,9 +218,8 @@ impl SatManager {
                     };
                     satellites[*idx].0.elements = elements;
                 }
-                Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::SatellitesChanged(satellites.clone()),
-                )))
+                Task::done(WindowOut::Effect(WindowEffect::SetSatellites(satellites.clone())
+                ))
             },
             Err(err) => {
                 log::error!("Failed to fetch data from Space-Track: {err}");
@@ -378,7 +377,7 @@ impl Window<Message> for SatManager {
                     card(
                         "Missing Credentials", column![
                             text("To fetch orbital elements from Space-Track, please set your credentials in the Preferences window."),
-                            button("Open Preferences").style(button::primary).on_press(WindowOut::Effect(WindowEffect::ToApp(app::Message::OpenPreferences)))
+                            button("Open Preferences").style(button::primary).on_press(WindowOut::Effect(WindowEffect::OpenPreferences))
                         ]
                         .spacing(10)
                         .width(Length::Fill)
@@ -427,10 +426,8 @@ impl Window<Message> for SatManager {
                 .then(|result| match result {
                     Ok(sats) => {
                         log::info!("Loaded {} satellites", sats.len());
-                        Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                            app::Message::SatellitesChanged(
-                                sats.into_iter().map(|sat| (sat, true)).collect(),
-                            ),
+                        Task::done(WindowOut::Effect(WindowEffect::SetSatellites(
+                            sats.into_iter().map(|sat| (sat, true)).collect(),
                         )))
                     }
                     Err(err) => {
@@ -447,9 +444,7 @@ impl Window<Message> for SatManager {
             .then(|result| match result {
                 Ok(freqs) => {
                     log::info!("Loaded frequencies for {} satellites", freqs.len());
-                    Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                        app::Message::FrequenciesChanged(freqs),
-                    )))
+                    Task::done(WindowOut::Effect(WindowEffect::SetFrequencies(freqs)))
                 }
                 Err(err) => {
                     log::error!("Failed to load frequencies: {}", err);
@@ -457,8 +452,9 @@ impl Window<Message> for SatManager {
                 }
             }),
             Message::SatelliteToggled(idx, active) => match app.satellites.get(idx) {
-                Some((sat, _)) => Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::SatelliteChanged(idx, Box::new((sat.clone(), active))),
+                Some((sat, _)) => Task::done(WindowOut::Effect(WindowEffect::SetSatellite(
+                    idx,
+                    Box::new((sat.clone(), active)),
                 ))),
                 None => {
                     log::error!("Got SatelliteToggle for non-existend index {}", idx);
@@ -467,13 +463,11 @@ impl Window<Message> for SatManager {
             },
             Message::ToggleAllSatellites => {
                 self.show_all = !self.show_all;
-                Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::SatellitesChanged(
-                        app.satellites
-                            .iter()
-                            .map(|(sat, _)| (sat.clone(), self.show_all))
-                            .collect(),
-                    ),
+                Task::done(WindowOut::Effect(WindowEffect::SetSatellites(
+                    app.satellites
+                        .iter()
+                        .map(|(sat, _)| (sat.clone(), self.show_all))
+                        .collect(),
                 )))
             }
             Message::SatelliteEdited(id, sat) => {
@@ -482,11 +476,9 @@ impl Window<Message> for SatManager {
             }
             Message::SatelliteEditCommited(idx) => {
                 match (self.sat_buffer.remove(&idx), app.satellites.get(idx)) {
-                    (Some(buf_data), Some(old_data)) => {
-                        Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                            app::Message::SatelliteChanged(idx, Box::new((buf_data, old_data.1))),
-                        )))
-                    }
+                    (Some(buf_data), Some(old_data)) => Task::done(WindowOut::Effect(
+                        WindowEffect::SetSatellite(idx, Box::new((buf_data, old_data.1))),
+                    )),
                     _ => Task::none(),
                 }
             }
@@ -496,8 +488,9 @@ impl Window<Message> for SatManager {
                 };
                 let mut sat = self.sat_buffer.remove(&idx).unwrap_or_else(|| sat.clone());
                 sat.transmitters.push(0.0);
-                Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::SatelliteChanged(idx, Box::new((sat, *active))),
+                Task::done(WindowOut::Effect(WindowEffect::SetSatellite(
+                    idx,
+                    Box::new((sat, *active)),
                 )))
             }
             Message::TransmitterRemoved(idx, tx_idx) => {
@@ -508,8 +501,9 @@ impl Window<Message> for SatManager {
                 if tx_idx < sat.transmitters.len() {
                     sat.transmitters.remove(tx_idx);
                 }
-                Task::done(WindowOut::Effect(WindowEffect::ToApp(
-                    app::Message::SatelliteChanged(idx, Box::new((sat, *active))),
+                Task::done(WindowOut::Effect(WindowEffect::SetSatellite(
+                    idx,
+                    Box::new((sat, *active)),
                 )))
             }
             Message::ToggleColumnControls => {

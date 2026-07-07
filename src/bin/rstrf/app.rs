@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::pass_png::{self, PassPngMode};
 use crate::windows::rfplot::{InitialView, RFPlot};
 use crate::windows::sat_manager::SatManager;
-use crate::windows::{self, AnyWindow};
+use crate::windows::{self, AnyWindow, WindowEffect};
 use crate::{CliArgs, Command, PassPngArgs, PlotArgs};
 use anyhow::Context;
 use iced::widget::{self, space};
@@ -14,7 +14,6 @@ use iced::{Daemon, window};
 use iced::{Element, Program, Subscription, Task, Theme};
 use rstrf::menu::{MenuItem, view_menu};
 use rstrf::orbit::{Satellite, Site, Transmitters};
-use rstrf::spectrogram::SpectrogramBounds;
 use space_track::SpaceTrack;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -103,12 +102,7 @@ pub enum Message {
         satellites: Vec<(Satellite, bool)>,
         frequencies: Transmitters,
     },
-    SatellitesChanged(Vec<(Satellite, bool)>),
-    SatelliteChanged(usize, Box<(Satellite, bool)>),
-    FrequenciesChanged(Transmitters),
-    RFPlotReady(window::Id, SpectrogramBounds),
     PassPng(pass_png::Message),
-    ScreenshotSaved(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -341,22 +335,14 @@ impl AppModel {
                 self.pass_png = Some(PassPngMode::new(id, *args));
                 task
             }
-            Message::ReloadCatalog => Self::load_catalog(
-                self.shared_state.catalog_path.clone(),
-                self.shared_state.freqs_path.clone(),
-                self.shared_state.initial_freqs.clone(),
-            )
-            .map(|(satellites, frequencies)| Message::CatalogLoaded {
-                satellites,
-                frequencies,
-            }),
+            Message::ReloadCatalog => self.reload_catalog(),
             Message::CatalogLoaded {
                 satellites,
                 frequencies,
-            } => Task::batch([
-                Task::done(Message::SatellitesChanged(satellites)),
-                Task::done(Message::FrequenciesChanged(frequencies)),
-            ]),
+            } => {
+                self.set_satellites(satellites);
+                Task::done(self.set_frequencies(frequencies))
+            }
             Message::OpenSatManager => Self::open_window(None).map(Message::WindowOpenedSatManager),
             Message::WindowOpenedSatManager(id) => {
                 self.windows
@@ -384,7 +370,48 @@ impl AppModel {
                 }
             }
             Message::WindowMessage(id, message) => match message {
-                windows::Message::ToApp(message) => self.update(*message),
+                windows::Message::Effect(effect) => match effect {
+                    WindowEffect::OpenPreferences => Task::done(Message::OpenPreferences),
+                    WindowEffect::UpdateConfig(config) => self.update_config(config),
+                    WindowEffect::SetSatellite(idx, data) => {
+                        log::debug!("SatelliteChanged({}, {:?})", idx, data);
+                        match self.shared_state.satellites.get_mut(idx) {
+                            Some(sat) => *sat = *data,
+                            None => {
+                                log::error!("Got SatelliteChanged for non-existent index {}", idx)
+                            }
+                        };
+                        Task::done(Message::Event(AppEvent::SatellitesChanged))
+                    }
+                    WindowEffect::SetSatellites(sats) => Task::done(self.set_satellites(sats)),
+                    WindowEffect::SetFrequencies(freqs) => {
+                        self.shared_state
+                            .satellites
+                            .iter_mut()
+                            .for_each(|(sat, _)| {
+                                if let Some(freq) = freqs.get(&sat.norad_id()) {
+                                    sat.transmitters = freq.clone();
+                                }
+                            });
+                        self.shared_state.frequencies = freqs;
+                        Task::done(Message::Event(AppEvent::SatellitesChanged))
+                    }
+                    WindowEffect::ReloadCatalog => self.reload_catalog(),
+                    WindowEffect::PlotReady(window_id, spec_bounds) => {
+                        let Some(mode) = &mut self.pass_png else {
+                            return Task::none();
+                        };
+                        mode.update(
+                            pass_png::Message::RFPlotReady(window_id, spec_bounds),
+                            &self.shared_state,
+                        )
+                    }
+                    WindowEffect::ScreenshotSaved(path) => match &mut self.pass_png {
+                        Some(mode) => mode
+                            .update(pass_png::Message::ScreenshotSaved(path), &self.shared_state),
+                        None => Task::none(),
+                    },
+                },
                 _ => match self.windows.get_mut(&id) {
                     Some(window) => window
                         .update(id, message, &self.shared_state)
@@ -408,45 +435,6 @@ impl AppModel {
                 });
                 Task::batch(tasks)
             }
-            Message::SatellitesChanged(sats) => {
-                self.shared_state.satellites = sats;
-                Task::done(Message::Event(AppEvent::SatellitesChanged))
-            }
-            Message::SatelliteChanged(idx, data) => {
-                log::debug!("SatelliteChanged({}, {:?})", idx, data);
-                match self.shared_state.satellites.get_mut(idx) {
-                    Some(sat) => *sat = *data,
-                    None => log::error!("Got SatelliteChanged for non-existent index {}", idx),
-                };
-                Task::done(Message::Event(AppEvent::SatellitesChanged))
-            }
-            Message::FrequenciesChanged(freqs) => {
-                self.shared_state
-                    .satellites
-                    .iter_mut()
-                    .for_each(|(sat, _)| {
-                        if let Some(freq) = freqs.get(&sat.norad_id()) {
-                            sat.transmitters = freq.clone();
-                        }
-                    });
-                self.shared_state.frequencies = freqs;
-                Task::done(Message::Event(AppEvent::SatellitesChanged))
-            }
-            Message::RFPlotReady(window_id, spec_bounds) => {
-                let Some(mode) = &mut self.pass_png else {
-                    return Task::none();
-                };
-                mode.update(
-                    pass_png::Message::RFPlotReady(window_id, spec_bounds),
-                    &self.shared_state,
-                )
-            }
-            Message::ScreenshotSaved(path) => match &mut self.pass_png {
-                Some(mode) => {
-                    mode.update(pass_png::Message::ScreenshotSaved(path), &self.shared_state)
-                }
-                None => Task::none(),
-            },
             Message::PassPng(msg) => match &mut self.pass_png {
                 Some(mode) => mode.update(msg, &self.shared_state),
                 None => Task::none(),
@@ -620,6 +608,28 @@ impl AppModel {
                 Vec::new()
             };
             (satellites, frequencies)
+        })
+    }
+
+    fn set_satellites(&mut self, satellites: Vec<(Satellite, bool)>) -> Message {
+        self.shared_state.satellites = satellites;
+        Message::Event(AppEvent::SatellitesChanged)
+    }
+
+    fn set_frequencies(&mut self, frequencies: Transmitters) -> Message {
+        self.shared_state.frequencies = frequencies;
+        Message::Event(AppEvent::SatellitesChanged)
+    }
+
+    fn reload_catalog(&mut self) -> Task<Message> {
+        Self::load_catalog(
+            self.shared_state.catalog_path.clone(),
+            self.shared_state.freqs_path.clone(),
+            self.shared_state.initial_freqs.clone(),
+        )
+        .map(|(satellites, frequencies)| Message::CatalogLoaded {
+            satellites,
+            frequencies,
         })
     }
 }

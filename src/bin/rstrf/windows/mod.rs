@@ -1,8 +1,11 @@
+use std::{collections::HashMap, path::PathBuf};
+
 use iced::{Element, Subscription, Task, window};
-use rstrf::menu::MenuItem;
+use rstrf::{menu::MenuItem, spectrogram::SpectrogramBounds};
 
 use crate::{
-    app::{self, AppEvent, AppShared},
+    app::{AppEvent, AppShared},
+    config::Config,
     windows::{rfplot::RFPlot, sat_manager::SatManager},
 };
 
@@ -12,7 +15,7 @@ pub mod sat_manager;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    ToApp(Box<app::Message>),
+    Effect(WindowEffect),
     RFPlot(rfplot::Message),
     SatManager(sat_manager::Message),
     Preferences(preferences::Message),
@@ -22,9 +25,7 @@ impl From<WindowOut<rfplot::Message>> for Message {
     fn from(out: WindowOut<rfplot::Message>) -> Self {
         match out {
             WindowOut::Msg(msg) => Message::RFPlot(msg),
-            WindowOut::Effect(effect) => match effect {
-                WindowEffect::ToApp(app_msg) => Message::ToApp(Box::new(app_msg)),
-            },
+            WindowOut::Effect(effect) => Message::Effect(effect),
         }
     }
 }
@@ -33,9 +34,7 @@ impl From<WindowOut<sat_manager::Message>> for Message {
     fn from(out: WindowOut<sat_manager::Message>) -> Self {
         match out {
             WindowOut::Msg(msg) => Message::SatManager(msg),
-            WindowOut::Effect(effect) => match effect {
-                WindowEffect::ToApp(app_msg) => Message::ToApp(Box::new(app_msg)),
-            },
+            WindowOut::Effect(effect) => Message::Effect(effect),
         }
     }
 }
@@ -44,9 +43,7 @@ impl From<WindowOut<preferences::Message>> for Message {
     fn from(out: WindowOut<preferences::Message>) -> Self {
         match out {
             WindowOut::Msg(msg) => Message::Preferences(msg),
-            WindowOut::Effect(effect) => match effect {
-                WindowEffect::ToApp(app_msg) => Message::ToApp(Box::new(app_msg)),
-            },
+            WindowOut::Effect(effect) => Message::Effect(effect),
         }
     }
 }
@@ -54,7 +51,14 @@ impl From<WindowOut<preferences::Message>> for Message {
 /// A cross-cutting effect that escapes a window's own message type and must be handled by the parent.
 #[derive(Debug, Clone)]
 pub enum WindowEffect {
-    ToApp(app::Message),
+    OpenPreferences,
+    UpdateConfig(Config),
+    SetSatellite(usize, Box<(rstrf::orbit::Satellite, bool)>),
+    SetSatellites(Vec<(rstrf::orbit::Satellite, bool)>),
+    SetFrequencies(HashMap<u64, Vec<f64>>),
+    ReloadCatalog,
+    PlotReady(window::Id, SpectrogramBounds),
+    ScreenshotSaved(PathBuf),
 }
 
 /// Return type for window update functions: either a window-local continuation or an escaped effect.
