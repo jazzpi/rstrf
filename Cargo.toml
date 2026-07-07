@@ -6,6 +6,7 @@ license = "GPL-3.0-or-later"
 description = "strf but rewrite it in rust"
 repository = "https://github.com/jazzpi/rstrf"
 default-run = "rstrf"
+rust-version = "1.96.1"
 
 [dependencies]
 anyhow = "1.0"
