@@ -733,7 +733,9 @@ mod tests {
         let path = dir.path().join("test.bin");
         save_strf(&spec, &path).await.unwrap();
 
-        let loaded = load(&[path], Some((436_950_000, 437_000_000))).await.unwrap();
+        let loaded = load(&[path], Some((436_950_000, 437_000_000)))
+            .await
+            .unwrap();
 
         assert_eq!(loaded.nchan, 8);
         assert!((loaded.bw - 50_000.0).abs() < 1.0);
@@ -753,7 +755,9 @@ mod tests {
         save_strf(&spec, &path).await.unwrap();
 
         let full = load(&[path.clone()], None).await.unwrap();
-        let filtered = load(&[path], Some((436_950_000, 437_000_000))).await.unwrap();
+        let filtered = load(&[path], Some((436_950_000, 437_000_000)))
+            .await
+            .unwrap();
 
         let full_data = full.data();
         let filt_data = filtered.data();
@@ -761,7 +765,10 @@ mod tests {
             for ch in 0..8 {
                 let expected = full_data[[row, ch]];
                 let got = filt_data[[row, ch]];
-                assert!((expected - got).abs() < 0.01, "row={row} ch={ch}: {expected} vs {got}");
+                assert!(
+                    (expected - got).abs() < 0.01,
+                    "row={row} ch={ch}: {expected} vs {got}"
+                );
             }
         }
     }
