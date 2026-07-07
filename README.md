@@ -117,6 +117,7 @@ tooltip. Additionally, you can use the following hotkeys:
 - `s` -> Add trackpoint
 - `f` -> Find signals around trackpoints ([see below](#signal-export))
 - `D` -> Manually mark a signal ([see below](#signal-export))
+- `C` -> Mark a signal at centroid of the rectangle ([see below](#signal-export))
 - Arrow keys -> Pan (full plot width/height)
 - `SHIFT` + arrow keys -> Pan (half plot width/height)
 

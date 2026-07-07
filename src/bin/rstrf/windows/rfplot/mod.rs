@@ -61,6 +61,7 @@ impl From<overlay::Message> for Message {
 pub enum RectAction {
     Delete,
     Zoom,
+    MarkCentroid,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -99,6 +99,7 @@ pub enum Message {
     ToggleCrosshair,
     ToggleAbsoluteAxes,
     DeleteInRect(data_absolute::Rectangle),
+    MarkCentroid(data_absolute::Rectangle),
     SaveSignals,
     WriteSignals(String, Option<std::path::PathBuf>),
 }
@@ -486,6 +487,7 @@ impl Overlay {
             let (fill_color, border_color) = match action {
                 RectAction::Delete => (RED.mix(0.25), RED.mix(1.0)),
                 RectAction::Zoom => (CYAN.mix(0.15), CYAN.mix(1.0)),
+                RectAction::MarkCentroid => (YELLOW.mix(0.15), YELLOW.mix(1.0)),
             };
             chart
                 .draw_series(std::iter::once(plotters::element::Rectangle::new(
@@ -663,6 +665,7 @@ impl Overlay {
                                 rect * DataAbsoluteToDataNormalized::new(&spectrogram.bounds()),
                             )
                             .into(),
+                            RectAction::MarkCentroid => Message::MarkCentroid(rect).into(),
                         };
                         return (Status::Captured, Some(msg));
                     }
@@ -802,6 +805,18 @@ impl Overlay {
             {
                 self.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Zoom,
+                    corner1: plot_pos,
+                    corner2: plot_pos,
+                });
+                (Status::Captured, None)
+            }
+            keyboard::Key::Character("c")
+                if modifiers.shift()
+                    && matches!(self.mouse_state.get(), MouseState::Idle)
+                    && shared.spectrogram.is_some() =>
+            {
+                self.mouse_state.set(MouseState::DrawingRect {
+                    action: RectAction::MarkCentroid,
                     corner1: plot_pos,
                     corner2: plot_pos,
                 });
@@ -988,6 +1003,15 @@ impl Overlay {
             Message::DeleteInRect(rect) => {
                 self.track_points.retain(|p| !rect.contains(*p));
                 self.signals.retain(|p| !rect.contains(*p));
+                Task::none()
+            }
+            Message::MarkCentroid(rect) => {
+                self.signals.extend(
+                    shared
+                        .spectrogram
+                        .as_ref()
+                        .and_then(|spec| signal::centroid(spec, rect)),
+                );
                 Task::none()
             }
             Message::SaveSignals => {

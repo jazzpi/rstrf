@@ -1,3 +1,9 @@
+# vNext
+
+## New features
+- **Mark signal at centroid**. Press `SHIFT`+`c` and draw a rectangle around a signal, then click.
+  rSTRF will compute the weighted centroid of the rectangle and mark a signal there.
+
 # v0.3.3
 
 ## New features
