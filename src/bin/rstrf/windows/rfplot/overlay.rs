@@ -810,9 +810,8 @@ impl Overlay {
                 });
                 (Status::Captured, None)
             }
-            keyboard::Key::Character("c")
-                if modifiers.shift()
-                    && matches!(self.mouse_state.get(), MouseState::Idle)
+            keyboard::Key::Character("m")
+                if matches!(self.mouse_state.get(), MouseState::Idle)
                     && shared.spectrogram.is_some() =>
             {
                 self.mouse_state.set(MouseState::DrawingRect {
