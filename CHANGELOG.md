@@ -4,6 +4,9 @@
 - **Mark signal at centroid**. Press `SHIFT`+`c` and draw a rectangle around a signal, then click.
   rSTRF will compute the weighted centroid of the rectangle and mark a signal there.
 
+## Bug fixes
+- restore `-f` flag functionality for the `pass-png` command.
+
 # v0.3.3
 
 ## New features

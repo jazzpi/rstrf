@@ -43,6 +43,7 @@ pub struct AppShared {
 
     pub catalog_path: Option<PathBuf>,
     pub freqs_path: Option<PathBuf>,
+    pub initial_freqs: HashMap<u64, Vec<f64>>,
 }
 
 impl AppShared {
@@ -158,7 +159,7 @@ impl AppModel {
 
         let window_size = Some(iced::Size::new(flags.width as f32, flags.height as f32));
 
-        let (catalog_path, freqs_path, site_id) = match flags.command {
+        let (catalog_path, freqs_path, initial_freqs, site_id) = match flags.command {
             Some(Command::Plot(args)) => {
                 tasks.push(Task::done(Message::ReloadCatalog));
                 let a = args.clone();
@@ -166,30 +167,46 @@ impl AppModel {
                     Self::open_window(window_size)
                         .map(move |id| Message::WindowOpenedRFPlotWith(id, Box::new(a.clone()))),
                 );
-                (args.catalog.clone(), args.freqs.clone(), args.site_id)
+                (
+                    args.catalog.clone(),
+                    args.freqs.clone(),
+                    HashMap::new(),
+                    args.site_id,
+                )
             }
             Some(Command::PassPng(args)) => {
                 let frequencies = HashMap::from([(args.norad_id, args.freq.clone())]);
                 tasks.push(
-                    Self::load_catalog(Some(args.catalog.clone()), args.freqs.clone(), frequencies)
-                        .map(move |(satellites, frequencies)| Message::CatalogLoaded {
+                    Self::load_catalog(
+                        Some(args.catalog.clone()),
+                        args.freqs.clone(),
+                        frequencies.clone(),
+                    )
+                    .map(move |(satellites, frequencies)| {
+                        Message::CatalogLoaded {
                             satellites: satellites
                                 .into_iter()
                                 .filter(|(sat, _)| sat.norad_id() == args.norad_id)
                                 .collect(),
                             frequencies,
-                        }),
+                        }
+                    }),
                 );
                 let a = args.clone();
                 tasks.push(
                     Self::open_window(window_size)
                         .map(move |id| Message::WindowOpenedPassPng(id, Box::new(a.clone()))),
                 );
-                (Some(args.catalog.clone()), args.freqs.clone(), None)
+                (
+                    Some(args.catalog.clone()),
+                    args.freqs.clone(),
+                    frequencies,
+                    None,
+                )
             }
             None => {
                 tasks.push(Task::done(Message::OpenRFPlot));
-                (None, None, None)
+                (None, None, HashMap::new(), None)
             }
         };
 
@@ -201,6 +218,7 @@ impl AppModel {
                     .map(|v| (v[0].round() as u64, v[1].round() as u64)),
                 catalog_path,
                 freqs_path,
+                initial_freqs,
                 site_id,
                 ..Default::default()
             },
@@ -326,7 +344,7 @@ impl AppModel {
             Message::ReloadCatalog => Self::load_catalog(
                 self.shared_state.catalog_path.clone(),
                 self.shared_state.freqs_path.clone(),
-                HashMap::new(),
+                self.shared_state.initial_freqs.clone(),
             )
             .map(|(satellites, frequencies)| Message::CatalogLoaded {
                 satellites,
