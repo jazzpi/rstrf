@@ -1,4 +1,6 @@
+use chrono::Duration;
 use copy_range::CopyRange;
+use plotters::prelude::*;
 
 pub enum ReferenceMode {
     Start,
@@ -40,6 +42,20 @@ impl ReferencedTicks {
             ReferenceMode::End => (abs_hi / delta).floor() * delta - offset,
         };
     }
+}
+
+pub fn datetime_referenced_ticks(
+    range: CopyRange<f32>,
+    offset: chrono::DateTime<chrono::Utc>,
+    num_ticks: usize,
+) -> Vec<f32> {
+    let range = (offset + Duration::milliseconds((range.start * 1000.0).round() as i64))
+        ..(offset + Duration::milliseconds((range.end * 1000.0).round() as i64));
+    RangedDateTime::from(range)
+        .key_points(num_ticks)
+        .into_iter()
+        .map(|dt| (dt - offset).as_seconds_f32())
+        .collect()
 }
 
 #[cfg(test)]

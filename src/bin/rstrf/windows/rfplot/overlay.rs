@@ -23,7 +23,7 @@ use plotters::coord::{
 use plotters::prelude::*;
 use plotters_iced2::Chart;
 use rstrf::{
-    chart::{ReferenceMode, ReferencedTicks},
+    chart::{ReferenceMode, ReferencedTicks, datetime_referenced_ticks},
     coord::{
         DataAbsoluteToDataNormalized, DataAbsoluteToScreen, DataNormalizedToDataAbsolute,
         PlotAreaToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
@@ -198,6 +198,7 @@ impl Overlay {
 
         // Let plotters pick some nice numbers for the ticks
         const NUM_TICKS: usize = 11;
+        let x_ticks = datetime_referenced_ticks(x, spectrogram.start_time(), NUM_TICKS);
         let mut y_ticks = ReferencedTicks {
             ticks: RangedCoordf32::from(y.into_std()).key_points(NUM_TICKS),
             reference: bounds.0.y + bounds.0.height / 2.0,
@@ -211,7 +212,7 @@ impl Overlay {
             .x_label_area_size(shared.plot_area_margin)
             .y_label_area_size(shared.plot_area_margin)
             .build_cartesian_2d(
-                x.into_std(),
+                FmtWithKeyPoints(x.into_std().with_key_points(x_ticks)),
                 FmtWithKeyPoints(y.into_std().with_key_points(y_ticks.ticks)),
             )
             .map_err(|e| format!("Failed to build chart: {:?}", e))?;
@@ -225,7 +226,7 @@ impl Overlay {
 
         let start_time = spectrogram.start_time();
         let x_formatter = |v: &f32| {
-            let t = start_time + Duration::seconds(*v as i64);
+            let t = start_time + Duration::milliseconds((v * 1000.0).round() as i64);
             format!("{}", t.format("%H:%M"))
         };
         let y_formatter = |v: &f32| format!("{:.1}", (v - y_ticks.reference) / 1000.0);
