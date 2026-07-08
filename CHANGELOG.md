@@ -3,8 +3,15 @@
 ## New features
 - **Mark signal at centroid**. Press `m` and draw a rectangle around a signal, then click. rSTRF
   will compute the weighted centroid of the rectangle and mark a signal there.
+- **Filter satellites outside of frequency range** for predictions. This should significantly speed
+  up predictions.
+- **Use multithreading for predictions**.
+- **Show nicer numbers on time axis** in absolute axis mode.
+- **Show days on time axis** when the plot spans multiple days in absolute axis mode.
 
 ## Bug fixes
+- **Reduce flickering when zoomed out**. The same fix should also help signals stand out more when
+  zoomed out.
 - restore `-f` flag functionality for the `pass-png` command.
 
 # v0.3.3
