@@ -23,6 +23,7 @@ use plotters::coord::{
 use plotters::prelude::*;
 use plotters_iced2::Chart;
 use rstrf::{
+    chart::{ReferenceMode, ReferencedTicks},
     coord::{
         DataAbsoluteToDataNormalized, DataAbsoluteToScreen, DataNormalizedToDataAbsolute,
         PlotAreaToDataAbsolute, ScreenToPlotArea, data_absolute, plot_area, screen,
@@ -195,45 +196,23 @@ impl Overlay {
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
 
-        let view_center_freq = bounds.0.y + bounds.0.height / 2.0;
         // Let plotters pick some nice numbers for the ticks
         const NUM_TICKS: usize = 11;
-        let default_ticks = RangedCoordf32::from(y.into_std()).key_points(NUM_TICKS);
-        let (y_ticks, plot_center_freq) = match (self.absolute_axes, default_ticks.as_slice()) {
-            (true, [first, second, ..]) => {
-                // In absolute mode the y labels are drawn as offsets from the view's center
-                // frequency. If that reference moved continuously with the view, every tick label
-                // changes on every scroll. That results in not-nice numbers. Instead, we snap the
-                // tick labels (and center reference) to a fixed grid.
-                //
-                // The grid is laid out in *absolute* frequency, so the center reference is a nice
-                // number too.
-
-                // Use plotters' nice numbers to derive tick spacing
-                let dy = (second - first) as f64;
-                let freq = spectrogram.freq as f64;
-                let abs_lo = freq + bounds.0.y as f64;
-                let abs_hi = abs_lo + bounds.0.height as f64;
-                // Ticks at every multiple of `dy` (in absolute frequency) within the view, stored
-                // back in the chart's offset coordinate.
-                let ticks =
-                    std::iter::successors(Some((abs_lo / dy).ceil() * dy), |t| Some(t + dy))
-                        .take_while(|t| *t <= abs_hi)
-                        .map(|t| (t - freq) as f32)
-                        .collect();
-                // Snap the center reference to the same absolute grid.
-                let center = ((freq + view_center_freq as f64) / dy).round() * dy - freq;
-                (ticks, center as f32)
-            }
-            _ => (default_ticks, view_center_freq),
+        let mut y_ticks = ReferencedTicks {
+            ticks: RangedCoordf32::from(y.into_std()).key_points(NUM_TICKS),
+            reference: bounds.0.y + bounds.0.height / 2.0,
+            mode: ReferenceMode::Center,
         };
+        if self.absolute_axes {
+            y_ticks.snap(y, spectrogram.freq);
+        }
 
         let mut chart = chart
             .x_label_area_size(shared.plot_area_margin)
             .y_label_area_size(shared.plot_area_margin)
             .build_cartesian_2d(
                 x.into_std(),
-                FmtWithKeyPoints(y.into_std().with_key_points(y_ticks)),
+                FmtWithKeyPoints(y.into_std().with_key_points(y_ticks.ticks)),
             )
             .map_err(|e| format!("Failed to build chart: {:?}", e))?;
 
@@ -249,7 +228,7 @@ impl Overlay {
             let t = start_time + Duration::seconds(*v as i64);
             format!("{}", t.format("%H:%M"))
         };
-        let y_formatter = |v: &f32| format!("{:.1}", (v - plot_center_freq) / 1000.0);
+        let y_formatter = |v: &f32| format!("{:.1}", (v - y_ticks.reference) / 1000.0);
         if self.absolute_axes {
             frame = frame
                 .x_label_formatter(&x_formatter)
@@ -260,7 +239,7 @@ impl Overlay {
                 ))
                 .y_desc(format!(
                     "Frequency - {:.1} [kHz]",
-                    (spectrogram.freq + plot_center_freq) / 1000.0
+                    (spectrogram.freq + y_ticks.reference) / 1000.0
                 ));
         } else {
             frame = frame
