@@ -225,9 +225,18 @@ impl Overlay {
             .bold_line_style(WHITE.mix(0.4));
 
         let start_time = spectrogram.start_time();
+        let duration = sec_to_duration(x.end - x.start);
+        let (x_tick_format, x_axis_date_format, x_axis_label) = if duration > Duration::days(1)
+            || (start_time + sec_to_duration(x.start)).date_naive()
+                != (start_time + sec_to_duration(x.end)).date_naive()
+        {
+            ("%d %H:%M", "%Y-%m", "DD HH:MM")
+        } else {
+            ("%H:%M", "%Y-%m-%d", "HH:MM")
+        };
         let x_formatter = |v: &f32| {
-            format!("{}", t.format("%H:%M"))
             let t = start_time + sec_to_duration(*v);
+            format!("{}", t.format(x_tick_format))
         };
         let y_formatter = |v: &f32| format!("{:.1}", (v - y_ticks.reference) / 1000.0);
         if self.absolute_axes {
@@ -235,8 +244,9 @@ impl Overlay {
                 .x_label_formatter(&x_formatter)
                 .y_label_formatter(&y_formatter)
                 .x_desc(format!(
-                    "Time - {} [HH:MM]",
-                    (start_time + sec_to_duration(x.start)).format("%Y-%m-%d"),
+                    "Time - {} [{}]",
+                    (start_time + sec_to_duration(x.start)).format(x_axis_date_format),
+                    x_axis_label
                 ))
                 .y_desc(format!(
                     "Frequency - {:.1} [kHz]",
