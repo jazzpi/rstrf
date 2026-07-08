@@ -28,7 +28,7 @@ pub struct Uniforms {
     _padding: u32,
 }
 
-const _: () = assert!(std::mem::size_of::<Uniforms>().is_multiple_of(std::mem::size_of::<Vec2>()));
+const _: () = assert!(std::mem::size_of::<Uniforms>() % std::mem::size_of::<Vec2>() == 0);
 
 struct SpectrogramChunk {
     uniform: wgpu::Buffer,
