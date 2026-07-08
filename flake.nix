@@ -91,7 +91,7 @@
           };
         };
         # Adapted from https://wiki.nixos.org/wiki/Rust#Installation_via_rustup
-        devShells.default = mkShell rec {
+        devShells.default = mkShell {
           strictDeps = true;
           nativeBuildInputs = [
             rustup
