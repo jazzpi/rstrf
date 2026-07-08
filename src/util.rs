@@ -126,6 +126,13 @@ pub fn is_modifier(key: &Key) -> bool {
     )
 }
 
+pub fn sec_to_duration<T>(fsec: T) -> chrono::Duration
+where
+    T: Into<f64>,
+{
+    chrono::Duration::milliseconds((fsec.into() * 1000.0).round() as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

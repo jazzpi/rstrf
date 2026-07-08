@@ -15,7 +15,7 @@ use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
-use crate::coord::data_absolute;
+use crate::{coord::data_absolute, util::sec_to_duration};
 
 #[rustfmt::skip]
 static _HEADER_RE_STR: &str = r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END";
@@ -383,7 +383,7 @@ impl Spectrogram {
 
     pub fn end_time(&self) -> DateTime<Utc> {
         let last = self.timestamps.len() - 1;
-        self.timestamps[last] + Duration::milliseconds((self.lengths[last] * 1000.0) as i64)
+        self.timestamps[last] + sec_to_duration(self.lengths[last])
     }
 
     pub fn bounds(&self) -> data_absolute::Rectangle {
@@ -478,7 +478,7 @@ mod tests {
             power_bounds: (min, max),
             data: data.into(),
             timestamps: (0..nslices)
-                .map(|i| start + Duration::milliseconds((1.0 * 1000.0) as i64 * i as i64))
+                .map(|i| start + sec_to_duration(i as f64))
                 .collect(),
             lengths: vec![1.0; nslices],
         }

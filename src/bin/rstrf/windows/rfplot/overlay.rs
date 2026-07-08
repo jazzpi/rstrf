@@ -30,7 +30,7 @@ use rstrf::{
     },
     orbit::{self, Site},
     signal,
-    util::{clip_line, is_modifier},
+    util::{clip_line, is_modifier, sec_to_duration},
 };
 use serde::{Deserialize, Serialize};
 
@@ -226,8 +226,8 @@ impl Overlay {
 
         let start_time = spectrogram.start_time();
         let x_formatter = |v: &f32| {
-            let t = start_time + Duration::milliseconds((v * 1000.0).round() as i64);
             format!("{}", t.format("%H:%M"))
+            let t = start_time + sec_to_duration(*v);
         };
         let y_formatter = |v: &f32| format!("{:.1}", (v - y_ticks.reference) / 1000.0);
         if self.absolute_axes {
@@ -236,7 +236,7 @@ impl Overlay {
                 .y_label_formatter(&y_formatter)
                 .x_desc(format!(
                     "Time - {} [HH:MM]",
-                    (start_time + Duration::seconds(x.start as i64)).format("%Y-%m-%d")
+                    (start_time + sec_to_duration(x.start)).format("%Y-%m-%d"),
                 ))
                 .y_desc(format!(
                     "Frequency - {:.1} [kHz]",
@@ -433,7 +433,7 @@ impl Overlay {
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
                 * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
             let crosshair_text = if self.absolute_axes {
-                let t = spectrogram.start_time() + Duration::seconds(crosshair.0.x as i64);
+                let t = spectrogram.start_time() + sec_to_duration(crosshair.0.x);
                 format!(
                     "t = {}\nf = {:.01} kHz\nP = {:.01} dB",
                     t.format("%Y-%m-%d %H:%M:%S"),
@@ -1056,7 +1056,7 @@ fn signals_filename(
     let n = signals.len() as f64;
     let mean_secs = signals.iter().map(|s| s.0.x as f64).sum::<f64>() / n;
     let mean_freq = center_freq + signals.iter().map(|s| s.0.y as f64).sum::<f64>() / n;
-    let mean_time = start_time + Duration::milliseconds((mean_secs * 1000.0) as i64);
+    let mean_time = start_time + sec_to_duration(mean_secs);
     Some(format!(
         "{}_{:.0}k.dat",
         mean_time.format("%Y-%m-%dT%H:%M"),

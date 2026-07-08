@@ -165,8 +165,10 @@ pub fn centroid(
 
 #[cfg(test)]
 mod tests {
+    use crate::util::sec_to_duration;
+
     use super::*;
-    use chrono::{DateTime, Duration, NaiveDate, Utc};
+    use chrono::{DateTime, NaiveDate, Utc};
     use ndarray::{Array2, arr1};
     use uuid::Uuid;
 
@@ -197,7 +199,7 @@ mod tests {
             power_bounds,
             data: data_db.into(),
             timestamps: (0..nslices)
-                .map(|i| test_start() + Duration::milliseconds(1000 * i as i64))
+                .map(|i| test_start() + sec_to_duration(i as f64))
                 .collect(),
             lengths: vec![1.0; nslices],
         }

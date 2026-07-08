@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
-use crate::util::pred_ranges;
+use crate::util::{pred_ranges, sec_to_duration};
 
 use super::util::minmax;
 
@@ -282,8 +282,7 @@ impl Satellite {
             .and(&mut range_rates)
             .and(&mut angles)
             .for_each(|&t, rr, angle| {
-                let t = (start + chrono::Duration::milliseconds((t * 1000.0).round() as i64))
-                    .naive_utc();
+                let t = (start + sec_to_duration(t)).naive_utc();
                 let prediction = match self.predict(&t) {
                     Ok(prediction) => prediction,
                     Err(e) => {
