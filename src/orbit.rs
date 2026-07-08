@@ -5,11 +5,11 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use futures_util::StreamExt;
 use ndarray::{Array1, ArrayView1, Zip, arr1, s};
 use ndarray_linalg::Norm;
+use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-use rayon::prelude::*;
 
 use crate::util::pred_ranges;
 
