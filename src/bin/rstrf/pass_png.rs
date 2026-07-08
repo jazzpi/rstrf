@@ -101,10 +101,12 @@ impl PassPngMode {
                     return iced::exit();
                 };
                 let time_range = spec_bounds.time_range.clone();
+                let freq_range = spec_bounds.freq_range.clone();
+                let freq_range = (freq_range.start as f64)..(freq_range.end as f64);
                 let transmitters = satellite.transmitters.clone();
                 let predict_task = Task::future(async move {
                     tokio::task::spawn_blocking(move || {
-                        predict_satellites(&[satellite], time_range, &site)
+                        predict_satellites(&[satellite], time_range, freq_range, &site)
                     })
                     .await
                 })

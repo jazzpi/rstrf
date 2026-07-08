@@ -195,6 +195,7 @@ pub async fn load_strf_sites(path: &PathBuf) -> anyhow::Result<HashMap<i32, Site
 
 const RADIUS_EARTH: f64 = 6378.137; // km
 const SPEED_OF_LIGHT: f64 = 299792.458; // km/s
+const MAX_RANGE_RATE: f64 = 8.0; // km/s
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Satellite {
@@ -333,6 +334,15 @@ impl Satellite {
     pub fn norad_id(&self) -> u64 {
         self.elements.norad_id
     }
+
+    pub fn has_transmitter_in_range(&self, freq_range: std::ops::Range<f64>) -> bool {
+        self.transmitters.iter().any(|&freq| {
+            let shifted_down = freq * (1.0 - MAX_RANGE_RATE / SPEED_OF_LIGHT);
+            let shifted_up = freq * (1.0 + MAX_RANGE_RATE / SPEED_OF_LIGHT);
+            let shifted_range = shifted_down..shifted_up;
+            freq_range.start < shifted_range.end && freq_range.end > shifted_range.start
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -413,6 +423,7 @@ pub fn gmst_deriv_days(time: &NaiveDateTime) -> f64 {
 pub fn predict_satellites(
     satellites: &[Satellite],
     time_range: std::ops::Range<DateTime<Utc>>,
+    freq_range: std::ops::Range<f64>,
     site: &Site,
 ) -> Predictions {
     let length_s = time_range
@@ -423,7 +434,7 @@ pub fn predict_satellites(
     // TODO: Parallelize predictions?
     let passes = satellites
         .iter()
-        .filter(|sat| !sat.transmitters.is_empty())
+        .filter(move |sat| sat.has_transmitter_in_range(freq_range.clone()))
         .map(|sat| {
             let id = sat.norad_id();
             let passes = sat.predict_passes(time_range.start, times.view(), site);
@@ -549,6 +560,7 @@ mod tests {
         let predictions = predict_satellites(
             &[],
             Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            f64::NEG_INFINITY..f64::INFINITY,
             &Site::default(),
         );
         assert_eq!(predictions.n_satellites(), 0);
@@ -569,6 +581,7 @@ mod tests {
         let predictions = predict_satellites(
             &[sat],
             Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            f64::NEG_INFINITY..f64::INFINITY,
             &Site::default(),
         );
         assert_eq!(predictions.n_satellites(), 0);
@@ -579,6 +592,7 @@ mod tests {
         let predictions = predict_satellites(
             &[],
             Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            f64::NEG_INFINITY..f64::INFINITY,
             &Site::default(),
         );
         assert!(predictions.for_id(99999).is_empty());
@@ -597,6 +611,7 @@ mod tests {
         let predictions = predict_satellites(
             &[sat],
             Utc::now()..Utc::now() + chrono::Duration::seconds(7200),
+            f64::NEG_INFINITY..f64::INFINITY,
             &Site::default(),
         );
         assert_eq!(predictions.n_satellites(), 1);
@@ -628,8 +643,12 @@ mod tests {
         // Use the TLE epoch as start so SGP4 is in its valid range
         use chrono::TimeZone;
         let start = Utc.with_ymd_and_hms(2008, 9, 20, 12, 25, 40).unwrap();
-        let predictions =
-            predict_satellites(&[sat], start..start + chrono::Duration::days(1), &site);
+        let predictions = predict_satellites(
+            &[sat],
+            start..start + chrono::Duration::days(1),
+            f64::NEG_INFINITY..f64::INFINITY,
+            &site,
+        );
         let passes = predictions.for_id(25544);
         assert!(passes.len() >= 3);
         // Passes must not overlap and must be strictly ordered
@@ -654,6 +673,7 @@ mod tests {
         let predictions = predict_satellites(
             &[sat],
             Utc::now()..Utc::now() + chrono::Duration::hours(2),
+            f64::NEG_INFINITY..f64::INFINITY,
             &Site::default(),
         );
         for (id, passes) in predictions.iter_satellites() {
@@ -686,5 +706,96 @@ mod tests {
         let sat =
             Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap();
         assert_eq!(sat.transmitters, vec![108.03e6, 109.025e6]);
+    }
+
+    /// Build a VANGUARD 1 satellite with the given transmitter frequencies.
+    fn sat_with_transmitters(transmitters: Vec<f64>) -> Satellite {
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        let mut freqs = HashMap::new();
+        freqs.insert(5u64, transmitters);
+        Satellite::from_tle(Some("VANGUARD 1".to_string()), line1, line2, &freqs).unwrap()
+    }
+
+    #[test]
+    fn has_transmitter_in_range_empty_is_false() {
+        // A satellite with no transmitters is never in range, even an unbounded one.
+        let sat = sat_with_transmitters(vec![]);
+        assert!(!sat.has_transmitter_in_range(f64::NEG_INFINITY..f64::INFINITY));
+    }
+
+    #[test]
+    fn has_transmitter_in_range_inside_is_true() {
+        let sat = sat_with_transmitters(vec![400.0e6]);
+        assert!(sat.has_transmitter_in_range(399.0e6..401.0e6));
+    }
+
+    #[test]
+    fn has_transmitter_in_range_far_outside_is_false() {
+        let sat = sat_with_transmitters(vec![400.0e6]);
+        assert!(!sat.has_transmitter_in_range(145.0e6..146.0e6));
+        assert!(!sat.has_transmitter_in_range(1200.0e6..1300.0e6));
+    }
+
+    #[test]
+    fn has_transmitter_in_range_widened_by_doppler() {
+        // The Doppler window for a 400 MHz carrier is ±(8/c)*f ≈ ±10.67 kHz.
+        let sat = sat_with_transmitters(vec![400.0e6]);
+        // A range that sits just above the carrier but within the up-shifted edge
+        // (400e6..400_010_674 Hz) must count as in range even though the carrier
+        // frequency itself lies below `start`.
+        assert!(sat.has_transmitter_in_range(400_005_000.0..400_008_000.0));
+        // A range that starts beyond the Doppler edge must not.
+        assert!(!sat.has_transmitter_in_range(400_050_000.0..400_100_000.0));
+    }
+
+    #[test]
+    fn has_transmitter_in_range_any_transmitter_matches() {
+        // Only the second transmitter is in range; `any` should still match.
+        let sat = sat_with_transmitters(vec![137.0e6, 435.0e6]);
+        assert!(sat.has_transmitter_in_range(434.0e6..436.0e6));
+    }
+
+    #[test]
+    fn predict_satellites_keeps_in_range_transmitter() {
+        let sat = sat_with_transmitters(vec![108.03e6]);
+        let predictions = predict_satellites(
+            &[sat],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            108.0e6..108.1e6,
+            &Site::default(),
+        );
+        assert_eq!(predictions.n_satellites(), 1);
+    }
+
+    #[test]
+    fn predict_satellites_drops_out_of_range_transmitter() {
+        // Satellite has a transmitter, but it falls outside the requested band.
+        let sat = sat_with_transmitters(vec![108.03e6]);
+        let predictions = predict_satellites(
+            &[sat],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            200.0e6..300.0e6,
+            &Site::default(),
+        );
+        assert_eq!(predictions.n_satellites(), 0);
+    }
+
+    #[test]
+    fn predict_satellites_filters_per_satellite_by_frequency() {
+        // Two satellites with different transmitters; only the one whose transmitter
+        // lies in the band survives the filter.
+        let mut in_band = sat_with_transmitters(vec![435.0e6]);
+        in_band.elements.norad_id = 5;
+        let mut out_of_band = sat_with_transmitters(vec![145.0e6]);
+        out_of_band.elements.norad_id = 6;
+        let predictions = predict_satellites(
+            &[in_band, out_of_band],
+            Utc::now()..Utc::now() + chrono::Duration::seconds(10),
+            434.0e6..436.0e6,
+            &Site::default(),
+        );
+        let ids: Vec<u64> = predictions.iter_satellites().map(|(id, _)| id).collect();
+        assert_eq!(ids, vec![5]);
     }
 }

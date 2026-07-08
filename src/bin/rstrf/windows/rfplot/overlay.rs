@@ -56,6 +56,7 @@ use super::{MouseState, RFPlot, RectAction, SharedState, control};
 pub(crate) struct PredictionKey {
     satellites: Vec<u64>,
     time_range: std::ops::Range<DateTime<Utc>>,
+    freq_range: std::ops::Range<f32>,
     site: Site,
 }
 
@@ -66,9 +67,11 @@ fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey
     if satellites.is_empty() {
         return None;
     }
+    let bounds = spectrogram.absolute_bounds();
     Some(PredictionKey {
         satellites,
-        time_range: spectrogram.absolute_bounds().time_range,
+        time_range: bounds.time_range,
+        freq_range: bounds.freq_range,
         site,
     })
 }
@@ -855,7 +858,8 @@ impl Overlay {
             Task::future(async move {
                 let key_for_msg = key.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    orbit::predict_satellites(&satellites, key.time_range, &key.site)
+                    let freq_range = (key.freq_range.start as f64)..(key.freq_range.end as f64);
+                    orbit::predict_satellites(&satellites, key.time_range, freq_range, &key.site)
                 })
                 .await;
                 match result {
