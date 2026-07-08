@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use glam::{Vec2, vec2};
 use iced::{
-    Rectangle, mouse,
+    Rectangle, Size, mouse,
     wgpu::{self, util::DeviceExt},
     widget::shader,
 };
@@ -30,6 +30,13 @@ pub struct Uniforms {
 
 const _: () = assert!(std::mem::size_of::<Uniforms>() % std::mem::size_of::<Vec2>() == 0);
 
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+struct DepthTarget {
+    view: wgpu::TextureView,
+    size: Size<u32>,
+}
+
 struct SpectrogramChunk {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
@@ -49,6 +56,7 @@ struct PrimitiveData {
     buffers: Buffers,
     spectrogram_id: Uuid,
     colormap: Colormap,
+    depth: DepthTarget,
 }
 
 pub struct Pipeline {
@@ -86,7 +94,13 @@ impl shader::Pipeline for Pipeline {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -116,6 +130,7 @@ impl Pipeline {
         queue: &wgpu::Queue,
         primitive: &Primitive,
         viewport_bounds: &Rectangle,
+        physical_size: Size<u32>,
     ) {
         let Some(spectrogram) = &primitive.spectrogram else {
             return;
@@ -130,6 +145,7 @@ impl Pipeline {
                 id,
                 spectrogram,
                 primitive.controls.colormap(),
+                physical_size,
             )
         });
 
@@ -170,6 +186,13 @@ impl Pipeline {
                 notify.notify_one();
             }
         }
+        if primitive_data.depth.size != physical_size {
+            primitive_data.depth = Self::create_depth_target(
+                device,
+                physical_size,
+                &format!("spectrogram.{}", primitive.id),
+            );
+        }
 
         if primitive_data.colormap != primitive.controls.colormap() {
             queue.write_buffer(
@@ -188,6 +211,7 @@ impl Pipeline {
         id: &Uuid,
         spectrogram: &Spectrogram,
         colormap: Colormap,
+        physical_size: Size<u32>,
     ) -> PrimitiveData {
         let prefix = format!("spectrogram.{}", id);
         let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -217,6 +241,7 @@ impl Pipeline {
             },
             spectrogram_id,
             colormap,
+            depth: Self::create_depth_target(device, physical_size, &prefix),
         }
     }
 
@@ -344,6 +369,29 @@ impl Pipeline {
         .collect()
     }
 
+    fn create_depth_target(
+        device: &wgpu::Device,
+        size: Size<u32>,
+        name_prefix: &str,
+    ) -> DepthTarget {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("{}.depth", name_prefix)),
+            size: wgpu::Extent3d {
+                width: size.width.max(1),
+                height: size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        DepthTarget { view, size }
+    }
+
     fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -354,6 +402,7 @@ impl Pipeline {
         let Some(primitive_data) = self.instances.get(id) else {
             return;
         };
+        let depth = &primitive_data.depth;
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(format!("spectrogram.pipeline.pass.{}", id).as_str()),
@@ -366,7 +415,14 @@ impl Pipeline {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &depth.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+                stencil_ops: None,
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
         });
@@ -427,9 +483,9 @@ impl shader::Primitive for Primitive {
         device: &iced::wgpu::Device,
         queue: &iced::wgpu::Queue,
         bounds: &Rectangle,
-        _viewport: &shader::Viewport,
+        viewport: &shader::Viewport,
     ) {
-        pipeline.update_buffers(device, queue, self, bounds);
+        pipeline.update_buffers(device, queue, self, bounds, viewport.physical_size());
     }
 
     fn render(
