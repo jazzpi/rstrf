@@ -9,6 +9,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sgp4::Prediction;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use rayon::prelude::*;
 
 use crate::util::pred_ranges;
 
@@ -433,7 +434,7 @@ pub fn predict_satellites(
     let times = ndarray::Array1::linspace(0.0, length_s, length_s.round() as usize);
     // TODO: Parallelize predictions?
     let passes = satellites
-        .iter()
+        .par_iter()
         .filter(move |sat| sat.has_transmitter_in_range(freq_range.clone()))
         .map(|sat| {
             let id = sat.norad_id();
