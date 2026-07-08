@@ -9,6 +9,7 @@ cargo build --release
 cargo run --release [-- <WORKSPACE_FILE>]
 cargo run --release -- pass-png --help   # batch pass-PNG subcommand
 cargo run --bin rsmedfilt -- --help
+cargo +nightly fmt --all  # Always use nightly rustfmt
 cargo clippy
 cargo test
 ```
