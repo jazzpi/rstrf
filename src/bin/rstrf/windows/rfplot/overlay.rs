@@ -198,15 +198,17 @@ impl Overlay {
 
         // Let plotters pick some nice numbers for the ticks
         const NUM_TICKS: usize = 11;
-        let x_ticks = datetime_referenced_ticks(x, spectrogram.start_time(), NUM_TICKS);
         let mut y_ticks = ReferencedTicks {
             ticks: RangedCoordf32::from(y.into_std()).key_points(NUM_TICKS),
             reference: bounds.0.y + bounds.0.height / 2.0,
             mode: ReferenceMode::Center,
         };
-        if self.absolute_axes {
+        let x_ticks = if self.absolute_axes {
             y_ticks.snap(y, spectrogram.freq);
-        }
+            datetime_referenced_ticks(x, spectrogram.start_time(), NUM_TICKS)
+        } else {
+            RangedCoordf32::from(x.into_std()).key_points(NUM_TICKS)
+        };
 
         let mut chart = chart
             .x_label_area_size(shared.plot_area_margin)
