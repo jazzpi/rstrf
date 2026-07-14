@@ -13,6 +13,7 @@
 - **Reduce flickering when zoomed out**. The same fix should also help signals stand out more when
   zoomed out.
 - restore `-f` flag functionality for the `pass-png` command.
+- Parse Alpha-5 TLEs in `pass_png_historic.py`
 
 # v0.3.3
 

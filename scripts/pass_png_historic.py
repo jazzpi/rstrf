@@ -347,7 +347,22 @@ def main() -> None:
 
     def norad_id(tle: tuple[str, str, str]) -> int:
         field = tle[1].split(None, 3)[1].strip()
-        return int(field.rstrip("UCS"))
+        text = field.rstrip("UCS")
+        init = ord(text[0])
+        rest = text[1:]
+        if ord("0") <= init <= ord("9"):
+            init = int(text[0])
+        elif ord("A") <= init <= ord("H"):
+            init = 10 + (init - ord("A"))
+        elif ord("J") <= init <= ord("N"):
+            init = 18 + (init - ord("J"))
+        elif ord("P") <= init <= ord("Z"):
+            init = 23 + (init - ord("P"))
+        else:
+            raise ValueError(f"Invalid NORAD ID character {text[0]!r} in {tle[0]!r}")
+        if not rest.isdigit():
+            raise ValueError(f"Invalid NORAD ID {text!r} in {tle[0]!r}")
+        return init * 10000 + int(rest)
 
     tles = list(filter(lambda tle: norad_id(tle) == int(args.norad_id), tles))
     print(f"Loaded {len(tles)}/{unfiltered_tles} TLE(s) from {args.tle}")
