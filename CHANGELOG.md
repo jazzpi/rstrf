@@ -1,4 +1,4 @@
-# vNext
+# v0.3.4
 
 ## New features
 - **Mark signal at centroid**. Press `m` and draw a rectangle around a signal, then click. rSTRF
