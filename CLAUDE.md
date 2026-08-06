@@ -62,7 +62,7 @@ AppModel
 **Window effect escaping:** When a window needs to emit something outside its own message type, it returns `WindowOut::Effect(WindowEffect::ToApp(...))` instead of `WindowOut::Msg(...)`. The `From<WindowOut<M>> for windows::Message` impls map these to `Message::ToApp`.
 
 **RFPlot rendering is a two-layer stack:**
-1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers with offscreen culling; colormap lookup in fragment shader (`shader.wgsl`)
+1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers; colormap lookup in fragment shader (`shader.wgsl`)
 2. `ChartWidget` (plotters-iced2) — draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
 
 **Marks:** Track points and signals are stored as `data_absolute::Point` slices. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `overlay.rs`.

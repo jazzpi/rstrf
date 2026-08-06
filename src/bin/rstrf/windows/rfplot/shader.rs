@@ -43,7 +43,6 @@ struct SpectrogramChunk {
     instances: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     nslices: u32,
-    visible: bool,
 }
 
 struct Buffers {
@@ -363,7 +362,6 @@ impl Pipeline {
                 instances: instance_buffer,
                 bind_group,
                 nslices: nslices as u32,
-                visible: true,
             }
         })
         .collect()
@@ -439,9 +437,6 @@ impl Pipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &primitive_data.buffers.colormap_bind, &[]);
         for chunk in &primitive_data.buffers.spectrogram {
-            if !chunk.visible {
-                continue;
-            }
             pass.set_vertex_buffer(0, chunk.vertices.slice(..));
             pass.set_vertex_buffer(1, chunk.instances.slice(..));
             pass.set_bind_group(1, &chunk.bind_group, &[]);
