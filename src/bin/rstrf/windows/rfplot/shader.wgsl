@@ -30,26 +30,32 @@ struct FragOut {
     @location(0) color: vec4f,
 }
 
+fn unmix(range: vec2f, value: f32) -> f32 {
+    return (value - range.x) / (range.y - range.x);
+}
+
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
     let x_range = x_ranges[in.time_idx];
     let x = mix(x_range.x, x_range.y, in.corner.x);
-    let x_normalized = (x - uniforms.time_bounds.x) / (uniforms.time_bounds.y - uniforms.time_bounds.x);
-    // Snap left edges down, right edges up
+    let x_normalized = unmix(uniforms.time_bounds, x);
+    // Avoid gaps by snapping left edges down, right edges up
     let px = x_normalized * uniforms.viewport_width;
     let px_snapped = select(floor(px), ceil(px), in.corner.x > 0.5);
 
     let x_snapped = px_snapped / uniforms.viewport_width;
-    let pos = vec2f(x_snapped, in.corner.y) * 2.0 - 1.0;
-    let v = mix(uniforms.freq_bounds.x, uniforms.freq_bounds.y, in.corner.y);
-    return VertexOut(vec4f(pos, 0.0, 1.0), in.time_idx, v);
+
+    let y = unmix(uniforms.freq_bounds, in.corner.y);
+    // Gaps can only happen in time, not frequency, so no need to snap y
+    let pos = vec2f(x_snapped, y) * 2.0 - 1.0;
+    return VertexOut(vec4f(pos, 0.0, 1.0), in.time_idx, in.corner.y);
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> FragOut {
     let value = get_value(in.u, in.v);
 
-    let normalized = clamp((value - uniforms.power_bounds.x) / (uniforms.power_bounds.y - uniforms.power_bounds.x), 0.0, 1.0);
+    let normalized = clamp(unmix(uniforms.power_bounds, value), 0.0, 1.0);
 
     let color_index = normalized * 255.0;
     let lower_idx = u32(floor(color_index));
