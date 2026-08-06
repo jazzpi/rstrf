@@ -1,5 +1,48 @@
 //! This module contains the WGPU shader implementation for the RFPlot widget. The shader is
 //! responsible for rendering the spectrogram itself.
+//!
+//! The shader code is in [shader.wgsl](shader.wgsl).
+//!
+//! The shader uses four buffers:
+//! - `color_map`: storage buffer containing the colormap
+//! - `uniforms`: uniform buffer containing bounds, viewport information, buffer sizes etc.
+//! - `spec_data`: storage buffer containing the spectrogram data itself (`array<f32>`)
+//! - `x_ranges`: storage buffer containing the x coordinates of each slice (`array<vec2<f32>>`, for
+//!   left and right edge)
+//!
+//! The spectrogram data is chunked to not exceed `max_storage_buffer_binding_size` (128MiB by
+//! default, which iced currently leaves it at). There are two binding groups:
+//! - `bind_group(0)`: contains the colormap buffer and is switched per primitive (i.e. per RFPlot)
+//! - `bind_group(1)`: contains the other three buffers and is switched per spectrogram chunk.
+//!
+//! # Vertex shader
+//! Each slice is rendered as a quad (i.e. two triangles). This allows rendering each slice at the
+//! correct position & length, and properly rendering gaps in the recording (although sub-pixel gaps
+//! are eliminated via pixel snapping).
+//!
+//! The vertex shader gets the corner coordinates ([01], [01]). It transforms the coordinates to the
+//! correct slice position using the `x_ranges` buffer & view bounds, and sets the u/v coordinates
+//! for texture mapping.
+//!
+//! The transformation can leave slices off-screen, which should then be clipped before the fragment
+//! shader ever runs.
+//!
+//! # Fragment shader
+//! The fragment shader is essentially a custom texture sampler. Typical spectrograms can be hours
+//! long and contain tens of thousands of channels. That means that when the view is zoomed out,
+//! many samples alias to the same pixel. The fragment shader is designed to avoid aliasing
+//! artifacts, and also to bring out narrow-band signals.
+//!
+//! There is no mip-map. Instead, the fragment shader iterates through all frequency bins mapping to
+//! a given pixel, and determines the maximum value. That gives a max-hold effect on the y axis. To
+//! achieve the same on the x axis (where each slice is its own quad), the fragment shader has a
+//! depth output and renders pixels from slices with higher power over lower-power pixels.
+//!
+//! Depending on the recording setup, there can be many narrow-band noise signals that are not
+//! interesting, but visually clutter a zoomed out max-hold plot. To avoid this, there is also an
+//! "average" plotting mode, where the fragment shader computes the average over its samples instead
+//! of the maximum. There is still max-hold on the x axis, but typically there is less aliasing
+//! there.
 use std::{collections::HashMap, sync::Arc};
 
 use glam::{Vec2, vec2};

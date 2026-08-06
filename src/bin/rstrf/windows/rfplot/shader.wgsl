@@ -21,6 +21,8 @@ struct VertexIn {
 
 struct VertexOut {
     @builtin(position) position: vec4f,
+    // Each vertex covers one slice, so `u` is just the slice index and it
+    // shouldn't be interpolated.
     @location(0) @interpolate(flat) u: u32,
     @location(1) v: f32,
 }
