@@ -142,6 +142,8 @@ struct SpectrogramChunk {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
     instances: wgpu::Buffer,
+    /// Retained so the mode toggle can patch mipmap levels in place.
+    spectrogram: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     nslices: u32,
 }
@@ -156,6 +158,7 @@ struct PrimitiveData {
     buffers: Buffers,
     spectrogram_id: Uuid,
     colormap: Colormap,
+    average: bool,
     depth: DepthTarget,
 }
 
@@ -309,6 +312,7 @@ impl Pipeline {
                 primitive.controls.average_plotting(),
             );
             primitive_data.spectrogram_id = spectrogram.id;
+            primitive_data.average = primitive.controls.average_plotting();
             if let Some(notify) = &primitive.gpu_notify {
                 notify.notify_one();
             }
@@ -328,6 +332,18 @@ impl Pipeline {
                 bytemuck::cast_slice(primitive.controls.colormap().buffer()),
             );
             primitive_data.colormap = primitive.controls.colormap();
+        }
+
+        let average = primitive.controls.average_plotting();
+        if primitive_data.average != average {
+            Self::repatch_mipmaps_cpu(
+                device,
+                queue,
+                spectrogram,
+                &primitive_data.buffers.spectrogram,
+                average,
+            );
+            primitive_data.average = average;
         }
     }
 
@@ -370,6 +386,7 @@ impl Pipeline {
             },
             spectrogram_id,
             colormap,
+            average,
             depth: Self::create_depth_target(device, physical_size, &prefix),
         }
     }
@@ -492,6 +509,7 @@ impl Pipeline {
                 uniform: uniform_buffer,
                 vertices: vertex_buffer,
                 instances: instance_buffer,
+                spectrogram: spectrogram_buffer,
                 bind_group,
                 nslices: nslices as u32,
             }
@@ -593,6 +611,35 @@ impl Pipeline {
             nchan_in /= stride;
         }
         out
+    }
+
+    /// Recompute levels 1.. for the current plotting mode and upload them over the existing ones.
+    /// Level 0 is untouched, and the buffer objects are unchanged, so bind groups stay valid.
+    fn repatch_mipmaps_cpu(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        spectrogram: &Spectrogram,
+        chunks: &[SpectrogramChunk],
+        average: bool,
+    ) {
+        let chunk_len = chunk_len(&device.limits(), spectrogram);
+        if chunk_len == 0 {
+            return;
+        }
+        let data = spectrogram.data.as_slice().unwrap();
+        for (chunk_data, chunk) in izip!(data.chunks(chunk_len * spectrogram.nchan), chunks) {
+            let levels = Self::cpu_mipmap_levels(
+                chunk_data,
+                chunk.nslices as usize,
+                spectrogram.nchan,
+                average,
+            );
+            queue.write_buffer(
+                &chunk.spectrogram,
+                std::mem::size_of_val(chunk_data) as u64,
+                bytemuck::cast_slice(&levels),
+            );
+        }
     }
 
     fn create_depth_target(
