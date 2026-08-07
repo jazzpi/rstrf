@@ -503,7 +503,7 @@ impl Pipeline {
         device: &wgpu::Device,
         data: &[f32],
         nslices: usize,
-        mut nchan: usize,
+        nchan: usize,
         label: &str,
         average: bool,
     ) -> wgpu::Buffer {
@@ -524,54 +524,75 @@ impl Pipeline {
             let mut view = buffer.slice(..).get_mapped_range_mut();
             let floats: &mut [f32] = bytemuck::cast_slice_mut(&mut view[..]);
             floats[..data.len()].copy_from_slice(bytemuck::cast_slice(data));
-            // TODO: Can we compute the mipmaps in a compute shader instead?
-            let mut prev_mipmap = data;
-            let mut mipmap;
-            let mut mipmap_offset = data.len();
-            while nchan >= MIPMAP_FACTOR as usize {
-                log::debug!(
-                    "Computing mipmap for {} slices, {} channels (offset {})",
-                    nslices,
-                    nchan / MIPMAP_FACTOR as usize,
-                    mipmap_offset
-                );
-                // TODO: We need to recompute the mipmap if the average/max-hold mode changes...
-                mipmap = Self::compute_mipmap(prev_mipmap, nslices, nchan, average);
-                nchan /= MIPMAP_FACTOR as usize;
-                floats[mipmap_offset..(mipmap_offset + mipmap.len())].copy_from_slice(&mipmap);
-                mipmap_offset += mipmap.len();
-                prev_mipmap = &mipmap;
-            }
+            let levels = Self::cpu_mipmap_levels(data, nslices, nchan, average);
+            floats[data.len()..][..levels.len()].copy_from_slice(&levels);
         }
         buffer.unmap();
         buffer
     }
 
-    fn compute_mipmap(data: &[f32], nslices: usize, nchan_in: usize, average: bool) -> Vec<f32> {
+    fn compute_mipmap_into(
+        data: &[f32],
+        nslices: usize,
+        nchan_in: usize,
+        average: bool,
+        out: &mut [f32],
+    ) {
         let stride = MIPMAP_FACTOR as usize;
-        let mipmap_size = data.len() / stride;
-        let mut mipmap = Vec::with_capacity(mipmap_size);
         let nchan_out = nchan_in / stride;
         for x in 0..nslices {
             for y in 0..nchan_out {
-                let mut agg = if average { 0.0 } else { f32::MIN };
-                for dy in 0..stride {
-                    let y_idx = y * stride + dy;
-                    let val = data[x * nchan_in + y_idx];
-                    if average {
-                        agg += val;
-                    } else {
-                        agg = agg.max(val);
+                let src = x * nchan_in + y * stride;
+                out[x * nchan_out + y] = if average {
+                    let mut sum = 0.0;
+                    for i in 0..stride {
+                        sum += data[src + i];
                     }
-                }
-                if average {
-                    mipmap.push(agg / stride as f32);
+                    sum / stride as f32
                 } else {
-                    mipmap.push(agg);
-                }
+                    // Seed from the first sample rather than a sentinel, so no magic constant has
+                    // to stay in sync with the compute shader.
+                    let mut max = data[src];
+                    for i in 1..stride {
+                        max = max.max(data[src + i]);
+                    }
+                    max
+                };
             }
         }
-        mipmap
+    }
+
+    /// Test-only wrapper around `compute_mipmap_into` that allocates its own output buffer.
+    #[cfg(test)]
+    fn compute_mipmap(data: &[f32], nslices: usize, nchan_in: usize, average: bool) -> Vec<f32> {
+        let mut out = vec![0.0; nslices * (nchan_in / MIPMAP_FACTOR as usize)];
+        Self::compute_mipmap_into(data, nslices, nchan_in, average, &mut out);
+        out
+    }
+
+    /// Levels 1.. concatenated, laid out exactly as they sit in `spec_data` after level 0.
+    fn cpu_mipmap_levels(data: &[f32], nslices: usize, nchan: usize, average: bool) -> Vec<f32> {
+        let stride = MIPMAP_FACTOR as usize;
+        let mut out = vec![0.0; mipmap_levels_len(nslices, nchan)];
+
+        // Level 1 reads the caller's data; every level after reads the one before it out of `out`.
+        let mut nchan_in = nchan;
+        let mut src = 0..0;
+        let mut written = 0;
+        while nchan_in >= stride {
+            let len = nslices * (nchan_in / stride);
+            let (done, rest) = out.split_at_mut(written);
+            let src_data: &[f32] = if written == 0 {
+                data
+            } else {
+                &done[src.clone()]
+            };
+            Self::compute_mipmap_into(src_data, nslices, nchan_in, average, &mut rest[..len]);
+            src = written..written + len;
+            written += len;
+            nchan_in /= stride;
+        }
+        out
     }
 
     fn create_depth_target(
@@ -891,6 +912,29 @@ mod tests {
                 })
                 .collect_vec();
             assert_close(&level2, &expected);
+        }
+    }
+
+    /// Each level must land at the offset `update_buffers` will read it from, and hold exactly what
+    /// aggregating the level below it produces. `nchan = 20` so that level 2 has a partial group.
+    #[test]
+    fn cpu_mipmap_levels_places_each_level_at_its_offset() {
+        for average in [MAX_HOLD, AVERAGE] {
+            let (nslices, nchan) = (3usize, 20usize);
+            let data = ramp(nslices, nchan);
+            let levels = Pipeline::cpu_mipmap_levels(&data, nslices, nchan, average);
+
+            let mut prev = data.clone();
+            let mut nchan_in = nchan;
+            for level in 1..=mipmap_level_count(nchan) {
+                let expected = Pipeline::compute_mipmap(&prev, nslices, nchan_in, average);
+                // Offsets are absolute within the chunk; `levels` starts after level 0.
+                let start = nslices * mipmap_level_offset_chan(nchan, level) - data.len();
+                assert_close(&levels[start..start + expected.len()], &expected);
+                prev = expected;
+                nchan_in /= 4;
+            }
+            assert_eq!(levels.len(), mipmap_levels_len(nslices, nchan));
         }
     }
 }
