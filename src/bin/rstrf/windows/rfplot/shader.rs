@@ -54,6 +54,11 @@
 //! visually clutter a zoomed out max-hold plot. To avoid this, there is also an "average" plotting
 //! mode, where the fragment shader computes the average over its samples instead of the maximum.
 //! There is still max-hold on the x axis, but typically there is less aliasing there.
+//!
+//! The pyramid is built by a compute shader in [mipmap.wgsl](mipmap.wgsl), one dispatch per level,
+//! each reading the level below it. Switching between the two modes re-runs those dispatches, so
+//! no pixel data crosses the bus. On adapters without compute support the same pyramid is built on
+//! the CPU instead.
 use std::{collections::HashMap, sync::Arc};
 
 use glam::{Vec2, vec2};
@@ -466,13 +471,22 @@ impl Pipeline {
 
         let average = primitive.controls.average_plotting();
         if primitive_data.average != average {
-            Self::repatch_mipmaps_cpu(
-                device,
-                queue,
-                spectrogram,
-                &primitive_data.buffers.spectrogram,
-                average,
-            );
+            match &self.mipmap {
+                Some(compute) => Self::redispatch_mipmaps(
+                    device,
+                    queue,
+                    compute,
+                    &primitive_data.buffers.spectrogram,
+                    average,
+                ),
+                None => Self::repatch_mipmaps_cpu(
+                    device,
+                    queue,
+                    spectrogram,
+                    &primitive_data.buffers.spectrogram,
+                    average,
+                ),
+            }
             primitive_data.average = average;
         }
     }
@@ -831,6 +845,34 @@ impl Pipeline {
             pass.set_bind_group(0, &mipmap.bind_group, &[offset as u32]);
             pass.dispatch_workgroups(nchan_out.div_ceil(WORKGROUP_SIZE), chunk.nslices, 1);
         }
+    }
+
+    /// Rebuild every chunk's pyramid for a new plotting mode. `write_buffer` lands in the queue's
+    /// pending writes, which flush ahead of the command buffers in the same submit, so every
+    /// dispatch sees its new `average` flag.
+    fn redispatch_mipmaps(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &wgpu::ComputePipeline,
+        chunks: &[SpectrogramChunk],
+        average: bool,
+    ) {
+        log::debug!("recomputing mipmap on the GPU (average={average})");
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("spectrogram.mipmap.encoder.redispatch"),
+        });
+        for chunk in chunks {
+            let Some(mipmap) = &chunk.mipmap else {
+                continue;
+            };
+            queue.write_buffer(
+                &mipmap.params,
+                0,
+                &mip_params_bytes(chunk.nslices as usize, mipmap.nchan, average),
+            );
+            Self::encode_mipmap_pass(pipeline, &mut encoder, chunk);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 
     /// Recompute levels 1.. for the current plotting mode and upload them over the existing ones.
