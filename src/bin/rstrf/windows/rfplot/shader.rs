@@ -211,6 +211,8 @@ struct PrimitiveData {
 
 pub struct Pipeline {
     pipeline: wgpu::RenderPipeline,
+    /// `None` on adapters without compute support; the CPU path builds the pyramid instead.
+    mipmap: Option<wgpu::ComputePipeline>,
     instances: HashMap<Uuid, PrimitiveData>,
 }
 
@@ -266,8 +268,73 @@ impl shader::Pipeline for Pipeline {
             cache: None,
         });
 
+        // TODO: this is a proxy for the real capability. Compute support is an *adapter* downlevel
+        // flag (`DownlevelFlags::COMPUTE_SHADERS`) and iced never hands the adapter to
+        // `shader::Pipeline::new`, so we infer it from the compute limits being non-zero — they are
+        // literally 0 in wgpu's WebGL2 downlevel limit set. On native, iced requests
+        // `Limits::default()` and falls back to `downlevel_defaults()`, both of which carry
+        // non-zero compute limits, so a compute-less native adapter would fail at pipeline creation
+        // rather than fall back here.
+        let mipmap =
+            (device.limits().max_compute_workgroup_size_x >= WORKGROUP_SIZE).then(|| {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("spectrogram.mipmap.shader"),
+                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                        "mipmap.wgsl"
+                    ))),
+                });
+
+                // The layout cannot be auto-derived here: `has_dynamic_offset` has no WGSL
+                // spelling, so `layout: None` would produce a binding with dynamic offsets
+                // disabled.
+                let bind_group_layout =
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("spectrogram.mipmap.bind_group_layout"),
+                        entries: &[
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Uniform,
+                                    has_dynamic_offset: true,
+                                    min_binding_size: std::num::NonZeroU64::new(
+                                        std::mem::size_of::<MipParams>() as u64,
+                                    ),
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                        ],
+                    });
+
+                let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("spectrogram.mipmap.pipeline_layout"),
+                    bind_group_layouts: &[&bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("spectrogram.mipmap.pipeline"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("mipmap_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    cache: None,
+                })
+            });
+
         Self {
             pipeline,
+            mipmap,
             instances: HashMap::new(),
         }
     }
