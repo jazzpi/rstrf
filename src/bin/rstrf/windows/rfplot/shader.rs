@@ -115,6 +115,53 @@ fn chunk_len(limits: &wgpu::Limits, spectrogram: &Spectrogram) -> usize {
     spectrogram.nslices.min(max_buf_size / slice_size)
 }
 
+/// Invocations per workgroup in `mipmap.wgsl`. A multiple of every common SIMD width, and well
+/// under the 256 that `max_compute_invocations_per_workgroup` guarantees.
+const WORKGROUP_SIZE: u32 = 64;
+
+/// Stride between consecutive `MipParams` in the uniform buffer. Dynamic offsets must be a
+/// multiple of `min_uniform_buffer_offset_alignment`; 256 is the value in `Limits::default()`, and
+/// any device requiring less is satisfied by it too, since the requirement is always a power of
+/// two no greater than 256.
+const MIP_PARAMS_STRIDE: usize = 256;
+
+/// One dispatch's worth of parameters. Must match `struct MipParams` in `mipmap.wgsl`, including
+/// the padding: WGSL rounds uniform struct sizes up to a multiple of 16.
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct MipParams {
+    src_offset: u32,
+    dst_offset: u32,
+    nchan_in: u32,
+    nslices: u32,
+    average: u32,
+    _padding: [u32; 3],
+}
+
+const _: () = assert!(std::mem::size_of::<MipParams>() == 32);
+const _: () = assert!(std::mem::size_of::<MipParams>() <= MIP_PARAMS_STRIDE);
+
+/// Parameters for every dispatch of one chunk, laid out at `MIP_PARAMS_STRIDE` intervals so a
+/// dynamic offset can select a level.
+fn mip_params_bytes(nslices: usize, nchan: usize, average: bool) -> Vec<u8> {
+    let levels = mipmap_level_count(nchan);
+    let mut bytes = vec![0u8; levels as usize * MIP_PARAMS_STRIDE];
+    for level in 1..=levels {
+        let params = MipParams {
+            src_offset: (nslices * mipmap_level_offset_chan(nchan, level - 1)) as u32,
+            dst_offset: (nslices * mipmap_level_offset_chan(nchan, level)) as u32,
+            nchan_in: mipmap_level_nchan(nchan, level - 1) as u32,
+            nslices: nslices as u32,
+            average: average as u32,
+            _padding: [0; 3],
+        };
+        let at = (level as usize - 1) * MIP_PARAMS_STRIDE;
+        bytes[at..at + std::mem::size_of::<MipParams>()]
+            .copy_from_slice(bytemuck::bytes_of(&params));
+    }
+    bytes
+}
+
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct Uniforms {
@@ -982,6 +1029,80 @@ mod tests {
                 nchan_in /= 4;
             }
             assert_eq!(levels.len(), mipmap_levels_len(nslices, nchan));
+        }
+    }
+
+    fn params_at(bytes: &[u8], level: u32) -> MipParams {
+        let at = (level as usize - 1) * MIP_PARAMS_STRIDE;
+        // `pod_read_unaligned`, not `from_bytes`: a `Vec<u8>` carries no alignment guarantee, and
+        // `from_bytes` panics rather than reading unaligned.
+        bytemuck::pod_read_unaligned(&bytes[at..at + std::mem::size_of::<MipParams>()])
+    }
+
+    /// Each level's dispatch must read the level below it and write where `update_buffers`
+    /// expects to find it. These offsets are the same layout the CPU builder writes.
+    #[test]
+    fn mip_params_offsets_match_the_level_layout() {
+        let (nslices, nchan) = (314usize, 80000usize);
+        let bytes = mip_params_bytes(nslices, nchan, MAX_HOLD);
+
+        assert_eq!(
+            bytes.len(),
+            mipmap_level_count(nchan) as usize * MIP_PARAMS_STRIDE
+        );
+
+        for level in 1..=mipmap_level_count(nchan) {
+            let p = params_at(&bytes, level);
+            assert_eq!(
+                p.src_offset as usize,
+                nslices * mipmap_level_offset_chan(nchan, level - 1),
+                "level {} src",
+                level
+            );
+            assert_eq!(
+                p.dst_offset as usize,
+                nslices * mipmap_level_offset_chan(nchan, level),
+                "level {} dst",
+                level
+            );
+            assert_eq!(
+                p.nchan_in as usize,
+                mipmap_level_nchan(nchan, level - 1),
+                "level {} nchan_in",
+                level
+            );
+            assert_eq!(p.nslices as usize, nslices, "level {} nslices", level);
+        }
+    }
+
+    /// Level 1 reads level 0, which starts at the beginning of the chunk.
+    #[test]
+    fn mip_params_first_level_reads_from_zero() {
+        let bytes = mip_params_bytes(7, 1024, MAX_HOLD);
+        let p = params_at(&bytes, 1);
+        assert_eq!(p.src_offset, 0);
+        assert_eq!(p.dst_offset, 7 * 1024);
+        assert_eq!(p.nchan_in, 1024);
+    }
+
+    #[test]
+    fn mip_params_carries_the_plotting_mode() {
+        for average in [MAX_HOLD, AVERAGE] {
+            let bytes = mip_params_bytes(7, 1024, average);
+            for level in 1..=mipmap_level_count(1024) {
+                assert_eq!(params_at(&bytes, level).average, average as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn mip_params_is_empty_when_there_are_no_levels() {
+        for nchan in 0..4 {
+            assert!(
+                mip_params_bytes(7, nchan, MAX_HOLD).is_empty(),
+                "nchan={}",
+                nchan
+            );
         }
     }
 }
