@@ -112,7 +112,10 @@ fn chunk_len(limits: &wgpu::Limits, spectrogram: &Spectrogram) -> usize {
     let max_buf_size =
         (limits.max_storage_buffer_binding_size as u64).min(limits.max_buffer_size) as usize;
     let slice_size = mipmap_buffer_size(spectrogram.nchan * std::mem::size_of::<f32>());
-    spectrogram.nslices.min(max_buf_size / slice_size)
+    spectrogram
+        .nslices
+        .min(max_buf_size / slice_size)
+        .min(limits.max_compute_workgroups_per_dimension as usize)
 }
 
 /// Invocations per workgroup in `mipmap.wgsl`. A multiple of every common SIMD width, and well
@@ -185,6 +188,16 @@ struct DepthTarget {
     size: Size<u32>,
 }
 
+/// GPU-side mipmap state for one chunk. `None` when the CPU built the pyramid, or when the chunk
+/// has too few channels for any level.
+struct ChunkMipmap {
+    /// `MipParams` per level at `MIP_PARAMS_STRIDE` intervals, selected by dynamic offset.
+    params: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    /// Level-0 channel count, enough to re-derive every level's dispatch size.
+    nchan: usize,
+}
+
 struct SpectrogramChunk {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
@@ -192,6 +205,7 @@ struct SpectrogramChunk {
     /// Retained so the mode toggle can patch mipmap levels in place.
     spectrogram: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    mipmap: Option<ChunkMipmap>,
     nslices: u32,
 }
 
@@ -359,6 +373,7 @@ impl Pipeline {
                 device,
                 queue,
                 &self.pipeline,
+                self.mipmap.as_ref(),
                 id,
                 spectrogram,
                 primitive.controls.colormap(),
@@ -422,6 +437,7 @@ impl Pipeline {
                 device,
                 queue,
                 &self.pipeline,
+                self.mipmap.as_ref(),
                 spectrogram,
                 primitive.controls.average_plotting(),
             );
@@ -465,6 +481,7 @@ impl Pipeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pipeline: &wgpu::RenderPipeline,
+        mipmap_pipeline: Option<&wgpu::ComputePipeline>,
         id: &Uuid,
         spectrogram: &Spectrogram,
         colormap: Colormap,
@@ -489,8 +506,14 @@ impl Pipeline {
         });
 
         let spectrogram_id = spectrogram.id;
-        let spectrogram =
-            Self::create_spectrogram_buffers(device, queue, pipeline, spectrogram, average);
+        let spectrogram = Self::create_spectrogram_buffers(
+            device,
+            queue,
+            pipeline,
+            mipmap_pipeline,
+            spectrogram,
+            average,
+        );
 
         PrimitiveData {
             buffers: Buffers {
@@ -509,6 +532,7 @@ impl Pipeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pipeline: &wgpu::RenderPipeline,
+        mipmap_pipeline: Option<&wgpu::ComputePipeline>,
         spectrogram: &Spectrogram,
         average: bool,
     ) -> Vec<SpectrogramChunk> {
@@ -584,6 +608,7 @@ impl Pipeline {
                 spectrogram.nchan,
                 &format!("{prefix}.buffer.spectrogram"),
                 average,
+                mipmap_pipeline.is_some(),
             );
 
             let x_ranges_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -611,22 +636,75 @@ impl Pipeline {
                     },
                 ],
             });
-            // `create_buffer_init` parks a host-visible staging copy of `chunk` in the queue's
-            // pending writes until the next submit. Flush + wait here so that staging memory is
-            // reclaimed before we build the next chunk, capping the transient overhead at one chunk
-            // instead of holding a full second copy of the whole spectrogram in RAM until the next
-            // frame happens to be rendered.
-            queue.submit(std::iter::empty());
-            let _ = device.poll(wgpu::PollType::wait_indefinitely());
 
-            SpectrogramChunk {
+            let mipmap = mipmap_pipeline
+                .filter(|_| mipmap_level_count(spectrogram.nchan) > 0)
+                .map(|compute| {
+                    let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(format!("{prefix}.buffer.mip_params").as_str()),
+                        contents: &mip_params_bytes(nslices as usize, spectrogram.nchan, average),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let layout = compute.get_bind_group_layout(0);
+                    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(format!("{prefix}.bind_group.mipmap").as_str()),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &params,
+                                    offset: 0,
+                                    // One level's worth. The dynamic offset shifts this window, so
+                                    // binding the whole buffer would put offset+size out of bounds.
+                                    size: std::num::NonZeroU64::new(
+                                        std::mem::size_of::<MipParams>() as u64,
+                                    ),
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: spectrogram_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                    ChunkMipmap {
+                        params,
+                        bind_group,
+                        nchan: spectrogram.nchan,
+                    }
+                });
+
+            let chunk = SpectrogramChunk {
                 uniform: uniform_buffer,
                 vertices: vertex_buffer,
                 instances: instance_buffer,
                 spectrogram: spectrogram_buffer,
                 bind_group,
+                mipmap,
                 nslices: nslices as u32,
+            };
+
+            // `create_buffer_init` parks a host-visible staging copy of `chunk` in the queue's
+            // pending writes until the next submit. Flush + wait here so that staging memory is
+            // reclaimed before we build the next chunk, capping the transient overhead at one chunk
+            // instead of holding a full second copy of the whole spectrogram in RAM until the next
+            // frame happens to be rendered.
+            //
+            // The mipmap dispatch rides along in the same submit. `unmap()` inside
+            // `create_spectrogram_buffer` queued level 0 into pending writes, which flush ahead of
+            // command buffers, so level 0 is present before the first dispatch reads it.
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(format!("{prefix}.encoder.mipmap").as_str()),
+            });
+            if let Some(compute) = mipmap_pipeline {
+                log::debug!("{prefix}: computing mipmap on the GPU (average={average})");
+                Self::encode_mipmap_pass(compute, &mut encoder, &chunk);
             }
+            queue.submit(Some(encoder.finish()));
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+            chunk
         })
         .collect()
     }
@@ -638,6 +716,7 @@ impl Pipeline {
         nchan: usize,
         label: &str,
         average: bool,
+        gpu_mipmap: bool,
     ) -> wgpu::Buffer {
         let data_size = std::mem::size_of_val(data);
         let unpadded_size = mipmap_buffer_size(data_size);
@@ -656,8 +735,11 @@ impl Pipeline {
             let mut view = buffer.slice(..).get_mapped_range_mut();
             let floats: &mut [f32] = bytemuck::cast_slice_mut(&mut view[..]);
             floats[..data.len()].copy_from_slice(bytemuck::cast_slice(data));
-            let levels = Self::cpu_mipmap_levels(data, nslices, nchan, average);
-            floats[data.len()..][..levels.len()].copy_from_slice(&levels);
+            if !gpu_mipmap {
+                log::debug!("{label}: computing mipmap on the CPU (average={average})");
+                let levels = Self::cpu_mipmap_levels(data, nslices, nchan, average);
+                floats[data.len()..][..levels.len()].copy_from_slice(&levels);
+            }
         }
         buffer.unmap();
         buffer
@@ -727,6 +809,30 @@ impl Pipeline {
         out
     }
 
+    /// One dispatch per mipmap level, reading level k-1 and writing level k. wgpu inserts a memory
+    /// barrier before each dispatch because `spec_data` is bound `read_write`, which is an
+    /// exclusive usage and therefore never eligible for barrier elision.
+    fn encode_mipmap_pass(
+        pipeline: &wgpu::ComputePipeline,
+        encoder: &mut wgpu::CommandEncoder,
+        chunk: &SpectrogramChunk,
+    ) {
+        let Some(mipmap) = &chunk.mipmap else {
+            return;
+        };
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("spectrogram.mipmap.pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline);
+        for level in 1..=mipmap_level_count(mipmap.nchan) {
+            let nchan_out = mipmap_level_nchan(mipmap.nchan, level) as u32;
+            let offset = (level as usize - 1) * MIP_PARAMS_STRIDE;
+            pass.set_bind_group(0, &mipmap.bind_group, &[offset as u32]);
+            pass.dispatch_workgroups(nchan_out.div_ceil(WORKGROUP_SIZE), chunk.nslices, 1);
+        }
+    }
+
     /// Recompute levels 1.. for the current plotting mode and upload them over the existing ones.
     /// Level 0 is untouched, and the buffer objects are unchanged, so bind groups stay valid.
     fn repatch_mipmaps_cpu(
@@ -741,6 +847,10 @@ impl Pipeline {
             return;
         }
         let data = spectrogram.data.as_slice().unwrap();
+        log::debug!(
+            "spectrogram.{}: recomputing mipmap on the CPU (average={average})",
+            spectrogram.id
+        );
         for (chunk_data, chunk) in izip!(data.chunks(chunk_len * spectrogram.nchan), chunks) {
             let levels = Self::cpu_mipmap_levels(
                 chunk_data,
