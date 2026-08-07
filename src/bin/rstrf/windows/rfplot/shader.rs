@@ -73,7 +73,7 @@ use uuid::Uuid;
 
 use super::{Controls, Message, RFPlot};
 
-const MIPMAP_FACTOR: f64 = 4.0;
+const MIPMAP_FACTOR: usize = 4;
 /// Due to the mipmap, the size of the `spec_data` buffer must increase by
 /// sum(1/4^n for n=0..inf) = 4/3
 const MIPMAP_BUFFER_FACTOR: f64 = 4.0 / 3.0;
@@ -84,7 +84,7 @@ fn mipmap_buffer_size(normal_size: usize) -> usize {
 
 /// Channels per slice at `level`, where level 0 is the raw data.
 fn mipmap_level_nchan(nchan: usize, level: u32) -> usize {
-    nchan / (MIPMAP_FACTOR as usize).pow(level)
+    nchan / MIPMAP_FACTOR.pow(level)
 }
 
 /// Number of mipmap levels above level 0. The chain stops once a level would have no full group
@@ -92,8 +92,8 @@ fn mipmap_level_nchan(nchan: usize, level: u32) -> usize {
 fn mipmap_level_count(nchan: usize) -> u32 {
     let mut n = nchan;
     let mut levels = 0;
-    while n >= MIPMAP_FACTOR as usize {
-        n /= MIPMAP_FACTOR as usize;
+    while n >= MIPMAP_FACTOR {
+        n /= MIPMAP_FACTOR;
         levels += 1;
     }
     levels
@@ -398,7 +398,7 @@ impl Pipeline {
             0
         }
         .min(max_level);
-        let mipmap_stride = (MIPMAP_FACTOR as usize).pow(mipmap_level);
+        let mipmap_stride = MIPMAP_FACTOR.pow(mipmap_level);
         let nchan = mipmap_level_nchan(spectrogram.nchan, mipmap_level) as u32;
         let pixel_height = pixel_height / mipmap_stride as f32;
         log::trace!(
@@ -766,7 +766,7 @@ impl Pipeline {
         average: bool,
         out: &mut [f32],
     ) {
-        let stride = MIPMAP_FACTOR as usize;
+        let stride = MIPMAP_FACTOR;
         let nchan_out = nchan_in / stride;
         for x in 0..nslices {
             for y in 0..nchan_out {
@@ -793,14 +793,14 @@ impl Pipeline {
     /// Test-only wrapper around `compute_mipmap_into` that allocates its own output buffer.
     #[cfg(test)]
     fn compute_mipmap(data: &[f32], nslices: usize, nchan_in: usize, average: bool) -> Vec<f32> {
-        let mut out = vec![0.0; nslices * (nchan_in / MIPMAP_FACTOR as usize)];
+        let mut out = vec![0.0; nslices * (nchan_in / MIPMAP_FACTOR)];
         Self::compute_mipmap_into(data, nslices, nchan_in, average, &mut out);
         out
     }
 
     /// Levels 1.. concatenated, laid out exactly as they sit in `spec_data` after level 0.
     fn cpu_mipmap_levels(data: &[f32], nslices: usize, nchan: usize, average: bool) -> Vec<f32> {
-        let stride = MIPMAP_FACTOR as usize;
+        let stride = MIPMAP_FACTOR;
         let mut out = vec![0.0; mipmap_levels_len(nslices, nchan)];
 
         // Level 1 reads the caller's data; every level after reads the one before it out of `out`.
