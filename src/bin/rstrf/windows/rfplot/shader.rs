@@ -77,6 +77,44 @@ fn mipmap_buffer_size(normal_size: usize) -> usize {
     (normal_size as f64 * MIPMAP_BUFFER_FACTOR).ceil() as usize
 }
 
+/// Channels per slice at `level`, where level 0 is the raw data.
+fn mipmap_level_nchan(nchan: usize, level: u32) -> usize {
+    nchan / (MIPMAP_FACTOR as usize).pow(level)
+}
+
+/// Number of mipmap levels above level 0. The chain stops once a level would have no full group
+/// of `MIPMAP_FACTOR` input channels left.
+fn mipmap_level_count(nchan: usize) -> u32 {
+    let mut n = nchan;
+    let mut levels = 0;
+    while n >= MIPMAP_FACTOR as usize {
+        n /= MIPMAP_FACTOR as usize;
+        levels += 1;
+    }
+    levels
+}
+
+/// Offset of `level` within one chunk's mipmap block, in channels. Multiply by the chunk's slice
+/// count to get the offset in `f32` elements.
+fn mipmap_level_offset_chan(nchan: usize, level: u32) -> usize {
+    (0..level).map(|i| mipmap_level_nchan(nchan, i)).sum()
+}
+
+/// Total `f32` elements occupied by levels 1.. of one chunk.
+fn mipmap_levels_len(nslices: usize, nchan: usize) -> usize {
+    let past_last = mipmap_level_offset_chan(nchan, mipmap_level_count(nchan) + 1);
+    nslices * (past_last - nchan)
+}
+
+/// Slices per GPU chunk, bounded by the largest storage buffer the device will bind. Returns 0 if
+/// a single slice does not fit.
+fn chunk_len(limits: &wgpu::Limits, spectrogram: &Spectrogram) -> usize {
+    let max_buf_size =
+        (limits.max_storage_buffer_binding_size as u64).min(limits.max_buffer_size) as usize;
+    let slice_size = mipmap_buffer_size(spectrogram.nchan * std::mem::size_of::<f32>());
+    spectrogram.nslices.min(max_buf_size / slice_size)
+}
+
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct Uniforms {
@@ -223,8 +261,8 @@ impl Pipeline {
             0
         }
         .min(max_level);
-        let mipmap_stride = MIPMAP_FACTOR.powi(mipmap_level as i32) as usize;
-        let nchan = (spectrogram.nchan / mipmap_stride) as u32;
+        let mipmap_stride = (MIPMAP_FACTOR as usize).pow(mipmap_level);
+        let nchan = mipmap_level_nchan(spectrogram.nchan, mipmap_level) as u32;
         let pixel_height = pixel_height / mipmap_stride as f32;
         log::trace!(
             "Updating buffers for primitive {} (mipmap level {}, {} channels, pixel height {})",
@@ -239,10 +277,7 @@ impl Pipeline {
         let vmin = bounds.0.y;
         let vmax = bounds.0.y + bounds.0.height;
 
-        let mut buf_offset_chan = 0;
-        for i in 0..mipmap_level {
-            buf_offset_chan += spectrogram.nchan / MIPMAP_FACTOR.powi(i as i32) as usize;
-        }
+        let buf_offset_chan = mipmap_level_offset_chan(spectrogram.nchan, mipmap_level);
 
         for chunk in primitive_data.buffers.spectrogram.iter_mut() {
             let uniforms = Uniforms {
@@ -347,17 +382,13 @@ impl Pipeline {
         average: bool,
     ) -> Vec<SpectrogramChunk> {
         let limits = device.limits();
-        let max_buf_size =
-            (limits.max_storage_buffer_binding_size as u64).min(limits.max_buffer_size) as usize;
         let data = spectrogram.data.as_slice().unwrap();
-        let slice_size = mipmap_buffer_size(spectrogram.nchan * std::mem::size_of::<f32>());
-        let max_chunk_len = max_buf_size / slice_size;
-        let chunk_len = spectrogram.nslices.min(max_chunk_len);
+        let chunk_len = chunk_len(&limits, spectrogram);
         if chunk_len == 0 {
             log::error!(
                 "Spectrogram is too large to render ({} bytes per slice, max buffer size is {})",
-                slice_size,
-                max_buf_size
+                mipmap_buffer_size(spectrogram.nchan * std::mem::size_of::<f32>()),
+                (limits.max_storage_buffer_binding_size as u64).min(limits.max_buffer_size),
             );
             return Vec::new();
         }
@@ -775,6 +806,67 @@ mod tests {
             let data = ramp(2, nchan);
             let mipmap = Pipeline::compute_mipmap(&data, 2, nchan, MAX_HOLD);
             assert!(mipmap.is_empty(), "nchan={}", nchan);
+        }
+    }
+
+    /// Level offsets and level sizes must describe the same layout: the offset of level L is the
+    /// sum of the sizes of every level below it. `update_buffers` reads with the offsets, the
+    /// pyramid builder writes with the sizes.
+    #[test]
+    fn level_offsets_are_the_running_sum_of_level_sizes() {
+        for nchan in [4usize, 10, 63, 1024, 1250, 80000] {
+            let mut expected = 0;
+            for level in 0..=mipmap_level_count(nchan) {
+                assert_eq!(
+                    mipmap_level_offset_chan(nchan, level),
+                    expected,
+                    "nchan={}, level={}",
+                    nchan,
+                    level
+                );
+                expected += mipmap_level_nchan(nchan, level);
+            }
+        }
+    }
+
+    #[test]
+    fn levels_len_covers_every_level_above_zero() {
+        let nslices = 7;
+        for nchan in [4usize, 10, 63, 1024, 1250, 80000] {
+            let past_last = mipmap_level_offset_chan(nchan, mipmap_level_count(nchan) + 1);
+            assert_eq!(
+                mipmap_levels_len(nslices, nchan),
+                nslices * (past_last - nchan),
+                "nchan={}",
+                nchan
+            );
+        }
+    }
+
+    /// The 4/3 budget in `mipmap_buffer_size` must hold for the levels we actually build.
+    #[test]
+    fn levels_fit_within_the_mipmap_buffer_budget() {
+        let nslices = 7;
+        for nchan in [4usize, 10, 63, 1024, 1250, 80000] {
+            let data_len = nslices * nchan;
+            let budget = mipmap_buffer_size(data_len * std::mem::size_of::<f32>())
+                / std::mem::size_of::<f32>();
+            assert!(
+                data_len + mipmap_levels_len(nslices, nchan) <= budget,
+                "nchan={}: {} + {} > {}",
+                nchan,
+                data_len,
+                mipmap_levels_len(nslices, nchan),
+                budget
+            );
+        }
+    }
+
+    #[test]
+    fn fewer_than_four_channels_has_no_levels() {
+        for nchan in 0..4 {
+            assert_eq!(mipmap_level_count(nchan), 0, "nchan={}", nchan);
+            assert_eq!(mipmap_levels_len(9, nchan), 0, "nchan={}", nchan);
         }
     }
 
