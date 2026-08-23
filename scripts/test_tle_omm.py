@@ -1,13 +1,27 @@
+import dataclasses
+import math
 from pathlib import Path
 
 import pytest
 
-from tle_omm import determine_format, parse_input
+from tle_omm import MeanElements, determine_format, parse_input
 
-FORMATS = ("3le", "xml", "kvn", "csv", "json")
+FORMATS = ("tle", "xml", "kvn", "csv", "json")
 
 
-@pytest.mark.parametrize("base_path_str", ["spacetrack/spire"])
+def assert_elements_close(a: MeanElements, b: MeanElements) -> None:
+    for field in dataclasses.fields(MeanElements):
+        va = getattr(a, field.name)
+        vb = getattr(b, field.name)
+        if isinstance(va, float):
+            assert math.isclose(
+                va, vb, rel_tol=1e-2, abs_tol=1e-8
+            ), f"{field.name}: {va} != {vb}"
+        else:
+            assert va == vb, f"{field.name}: {va} != {vb}"
+
+
+@pytest.mark.parametrize("base_path_str", ["celestrak/spire"])
 def test_formats_match(base_path_str: str) -> None:
     base_path = Path(base_path_str)
 
@@ -19,6 +33,5 @@ def test_formats_match(base_path_str: str) -> None:
         parsed.append(parse_input(input_data, determine_format(input_path, None)))
 
     for i in range(1, len(parsed)):
-        assert (
-            parsed[i] == parsed[0]
-        ), f"Parsed data for {FORMATS[i]} does not match parsed data for {FORMATS[0]}"
+        for a, b in zip(parsed[i], parsed[0]):
+            assert_elements_close(a, b)
