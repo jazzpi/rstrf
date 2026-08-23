@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import re
 import sys
-from typing import Generator, Iterable
+from typing import Generator, Iterable, Mapping
 import xml.etree.ElementTree as ET
 
 OMM_FORMATS = ["xml", "kvn", "json", "json-ct", "json-st", "csv", "csv-ct", "csv-st"]
@@ -37,7 +37,10 @@ class MeanElements:
     rev_at_epoch: int
 
     @classmethod
-    def from_dict(cls, data: dict[str, str | int | float]) -> "MeanElements":
+    def from_map(cls, data: Mapping[str, str | int | float]) -> "MeanElements":
+        version = str(data["CCSDS_OMM_VERS"])
+        if version not in ("2.0", "3.0"):
+            logging.warning(f"Unsupported OMM version: {version}")
         mean_element_theory = str(data["MEAN_ELEMENT_THEORY"])
         if mean_element_theory != "SGP4":
             raise ValueError(f"Unsupported MEAN_ELEMENT_THEORY: {mean_element_theory}")
@@ -292,105 +295,61 @@ def parse_tle_float(s: str, leading_decimal: bool = False) -> float:
 
 def parse_omm(input_data: str, input_format: str) -> list[MeanElements]:
     if input_format == "xml":
-        return parse_omm_xml(input_data)
+        return parse_odm_xml(input_data)
     elif input_format == "kvn":
-        return parse_omm_kvn(input_data)
+        return parse_odm_kvn(input_data)
     elif input_format.startswith("json"):
-        return parse_omm_json(input_data, input_format)
+        return parse_odm_json(input_data, input_format)
     elif input_format.startswith("csv"):
-        return parse_omm_csv(input_data, input_format)
+        return parse_odm_csv(input_data, input_format)
     else:
         raise ValueError(f"Unsupported OMM format: {input_format}")
 
 
-def parse_omm_xml(input_data: str) -> list[MeanElements]:
+def parse_odm_xml(input_data: str) -> list[MeanElements]:
     root = ET.fromstring(input_data)
     if root.tag == "ndm":
         result = []
         for child in root:
-            elements = parse_omm_xml_omm(child)
+            elements = parse_odm_xml_omm(child)
             result.append(elements)
         assert result, "No OMMs found in NDM"
     elif root.tag == "omm":
-        elements = parse_omm_xml_omm(root)
+        elements = parse_odm_xml_omm(root)
         result = [elements]
     else:
         raise ValueError(f"Invalid XML root tag: {root.tag}")
     return result
 
 
-def parse_omm_xml_omm(omm: ET.Element) -> MeanElements:
+def parse_odm_xml_omm(omm: ET.Element) -> MeanElements:
     if omm.attrib["id"] != "CCSDS_OMM_VERS":
         raise ValueError(f"Invalid OMM id: {omm.attrib['id']}")
-    if omm.attrib["version"] not in ("2.0", "3.0"):
-        logging.warning(f"Unsupported OMM version: {omm.attrib['version']}")
+    version = omm.attrib["version"]
 
     # TODO: does this find <omm><body><segment> or only <omm><segment>?
     segment = _find(omm, "segment")
 
-    metadata = _find(segment, "metadata")
-    mean_element_theory = _find_text(metadata, "MEAN_ELEMENT_THEORY")
-    if mean_element_theory != "SGP4":
-        raise ValueError(f"Unsupported MEAN_ELEMENT_THEORY: {mean_element_theory}")
-    time_system = _find_text(metadata, "TIME_SYSTEM")
-    if time_system != "UTC":
-        raise ValueError(f"Unsupported TIME_SYSTEM: {time_system}")
-    name = _find_text(metadata, "OBJECT_NAME")
-    intl_designator = _find_text(metadata, "OBJECT_ID")
-
+    metadata = _node_to_dict(_find(segment, "metadata"))
     data = _find(segment, "data")
 
-    mean_elements = _find(data, "meanElements")
-    epoch_str = _find_text(mean_elements, "EPOCH")
-    epoch = datetime.fromisoformat(epoch_str)
-    mean_motion = float(_find_text(mean_elements, "MEAN_MOTION"))
-    eccentricity = float(_find_text(mean_elements, "ECCENTRICITY"))
-    inclination = float(_find_text(mean_elements, "INCLINATION"))
-    raan = float(_find_text(mean_elements, "RA_OF_ASC_NODE"))
-    arg_perigee = float(_find_text(mean_elements, "ARG_OF_PERICENTER"))
-    mean_anomaly = float(_find_text(mean_elements, "MEAN_ANOMALY"))
+    mean_elements = _node_to_dict(_find(data, "meanElements"))
+    tle_parameters = _node_to_dict(_find(data, "tleParameters"))
 
-    tle_parameters = _find(data, "tleParameters")
-    ephemeris_type = int(_find_text(tle_parameters, "EPHEMERIS_TYPE"))
-    classification = _find_text(tle_parameters, "CLASSIFICATION_TYPE")
-    cat_no = int(_find_text(tle_parameters, "NORAD_CAT_ID"))
-    element_set_no = int(_find_text(tle_parameters, "ELEMENT_SET_NO"))
-    rev_at_epoch = int(_find_text(tle_parameters, "REV_AT_EPOCH"))
-    bstar = float(_find_text(tle_parameters, "BSTAR"))
-    mean_motion_dot = float(_find_text(tle_parameters, "MEAN_MOTION_DOT"))
-    mean_motion_ddot = float(_find_text(tle_parameters, "MEAN_MOTION_DDOT"))
+    data_map = {
+        "CCSDS_OMM_VERS": version,
+        **metadata,
+        **mean_elements,
+        **tle_parameters,
+    }
 
-    return MeanElements(
-        name=name,
-        cat_no=cat_no,
-        classification=classification,
-        intl_designator=intl_designator,
-        epoch=epoch,
-        mean_motion_dot=mean_motion_dot,
-        mean_motion_ddot=mean_motion_ddot,
-        bstar=bstar,
-        ephemeris_type=ephemeris_type,
-        element_set_no=element_set_no,
-        inclination=inclination,
-        raan=raan,
-        eccentricity=eccentricity,
-        arg_perigee=arg_perigee,
-        mean_anomaly=mean_anomaly,
-        mean_motion=mean_motion,
-        rev_at_epoch=rev_at_epoch,
-    )
+    return MeanElements.from_map(data_map)
 
 
 def _find(parent: ET.Element, path: str) -> ET.Element:
     elem = parent.find(path)
     assert elem is not None, f"OMM {path} not found"
     return elem
-
-
-def _find_text(parent: ET.Element, path: str) -> str:
-    elem = _find(parent, path)
-    assert elem.text is not None, f"OMM {path} text not found"
-    return elem.text
 
 
 def _node_to_dict(node: ET.Element) -> dict[str, str]:
@@ -401,10 +360,10 @@ def _node_to_dict(node: ET.Element) -> dict[str, str]:
     return result
 
 
-def parse_omm_kvn(input_data: str) -> list[MeanElements]:
+def parse_odm_kvn(input_data: str) -> list[MeanElements]:
     result = []
     for omm in _group_kvn(input_data.strip().splitlines()):
-        elements = parse_omm_kvn_omm(omm)
+        elements = MeanElements.from_map(omm)
         result.append(elements)
     return result
 
@@ -427,12 +386,6 @@ def _group_kvn(lines: Iterable[str]) -> Generator[dict[str, str]]:
             group[keyword] = value
     if group:
         yield group
-
-
-def parse_omm_kvn_omm(omm: dict[str, str]) -> MeanElements:
-    vers = omm["CCSDS_OMM_VERS"]
-    if vers not in ("2.0", "3.0"):
-        raise ValueError(f"Unsupported CCSDS_OMM_VERS: {vers}")
 
 
 if __name__ == "__main__":
