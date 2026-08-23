@@ -39,15 +39,9 @@ class MeanElements:
 
     @classmethod
     def from_map(cls, data: Mapping[str, str | int | float]) -> "MeanElements":
-        version = str(data["CCSDS_OMM_VERS"])
-        if version not in ("2.0", "3.0"):
-            logging.warning(f"Unsupported OMM version: {version}")
-        mean_element_theory = str(data["MEAN_ELEMENT_THEORY"])
-        if mean_element_theory != "SGP4":
-            raise ValueError(f"Unsupported MEAN_ELEMENT_THEORY: {mean_element_theory}")
-        time_system = str(data["TIME_SYSTEM"])
-        if time_system != "UTC":
-            raise ValueError(f"Unsupported TIME_SYSTEM: {time_system}")
+        cls._check_if_exists(data, "CCSDS_OMM_VERS", ["2.0", "3.0"], str, True)
+        cls._check_if_exists(data, "MEAN_ELEMENT_THEORY", ["SGP4", "SGP/SGP4"], str)
+        cls._check_if_exists(data, "TIME_SYSTEM", ["UTC"], str)
         name = str(data["OBJECT_NAME"])
         intl_designator = str(data["OBJECT_ID"])
 
@@ -88,6 +82,25 @@ class MeanElements:
             mean_motion=mean_motion,
             rev_at_epoch=rev_at_epoch,
         )
+
+    @staticmethod
+    def _check_if_exists(
+        data: Mapping[str, str | int | float],
+        key: str,
+        values: list,
+        typecast: type | None = None,
+        warn: bool = False,
+    ):
+        value = data.get(key)
+        if value is not None:
+            if typecast is not None:
+                value = typecast(value)
+            if value not in values:
+                msg = f"Unsupported {key}: {value}"
+                if warn:
+                    logging.warning(msg)
+                else:
+                    raise ValueError(msg)
 
 
 def main() -> int:
@@ -329,7 +342,7 @@ def parse_odm_xml_omm(omm: ET.Element) -> MeanElements:
     version = omm.attrib["version"]
 
     # TODO: does this find <omm><body><segment> or only <omm><segment>?
-    segment = _find(omm, "segment")
+    segment = _find(omm, "body/segment")
 
     metadata = _node_to_dict(_find(segment, "metadata"))
     data = _find(segment, "data")
@@ -370,7 +383,7 @@ def parse_odm_kvn(input_data: str) -> list[MeanElements]:
 
 
 _KVN_LINE_REGEX = re.compile(
-    r"(?:\s*)(?<keyword>\S*)(?:\s*)=(?:\s*)(?<value>\S*)(?:\s*)$"
+    r"(?:\s*)(?P<keyword>\S*)(?:\s*)=(?:\s*)(?P<value>.*)(?:\s*)$"
 )
 
 
