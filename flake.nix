@@ -101,6 +101,7 @@
               ps: with ps; [
                 numpy
                 skyfield
+                pytest
               ]
             ))
           ];
