@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
+import json
 import logging
 from pathlib import Path
 import re
@@ -11,7 +12,7 @@ import sys
 from typing import Generator, Iterable, Mapping
 import xml.etree.ElementTree as ET
 
-OMM_FORMATS = ["xml", "kvn", "json", "json-ct", "json-st", "csv", "csv-ct", "csv-st"]
+ODM_FORMATS = ["xml", "kvn", "json", "json-ct", "json-st", "csv", "csv-ct", "csv-st"]
 DEFAULT_JSON_FORMAT = "json-ct"
 DEFAULT_CSV_FORMAT = "csv-ct"
 
@@ -103,12 +104,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--input-format",
-        choices=["tle"] + OMM_FORMATS,
+        choices=["tle"] + ODM_FORMATS,
         help="Format of the input file (see FORMATS). If not specified, the format will be inferred from the file extension.",
     )
     parser.add_argument(
         "--output-format",
-        choices=["tle"] + OMM_FORMATS,
+        choices=["tle"] + ODM_FORMATS,
         help="Format of the output file (see FORMATS). If not specified, the format will be inferred from the file extension.",
     )
     # TODO: How can I add a FORMATS section to the help text?
@@ -122,7 +123,7 @@ def main() -> int:
         output_format = determine_format(args.output_file, args.output_format)
         if output_format == "tle":
             output_data = format_tles(elements)
-        elif output_format in OMM_FORMATS:
+        elif output_format in ODM_FORMATS:
             output_data = format_omm(elements, output_format)
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
@@ -153,7 +154,7 @@ def determine_format(file_path: Path, specified_format: str | None) -> str:
 def parse_input(input_data: str, input_format: str) -> list[MeanElements]:
     if input_format == "tle":
         return parse_tles(input_data)
-    elif input_format in OMM_FORMATS:
+    elif input_format in ODM_FORMATS:
         return parse_omm(input_data, input_format)
     else:
         raise ValueError(f"Unsupported input format: {input_format}")
@@ -386,6 +387,28 @@ def _group_kvn(lines: Iterable[str]) -> Generator[dict[str, str]]:
             group[keyword] = value
     if group:
         yield group
+
+
+def parse_odm_json(input_data: str, input_format: str) -> list[MeanElements]:
+    # TODO: does input_format matter?
+    data = json.loads(input_data)
+    if isinstance(data, dict):
+        data = [data]
+    result = []
+    for omm in data:
+        elements = MeanElements.from_map(omm)
+        result.append(elements)
+    return result
+
+
+def parse_odm_csv(input_data: str, input_format: str) -> list[MeanElements]:
+    # TODO: does input_format matter?
+    reader = csv.DictReader(input_data.strip().splitlines())
+    result = []
+    for row in reader:
+        elements = MeanElements.from_map(row)
+        result.append(elements)
+    return result
 
 
 if __name__ == "__main__":
