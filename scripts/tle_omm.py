@@ -5,12 +5,13 @@ import csv
 from dataclasses import dataclass, field
 import dataclasses
 from datetime import datetime, timedelta
+from io import StringIO
 import json
 import logging
 from pathlib import Path
 import re
 import sys
-from typing import Callable, Generator, Iterable, Mapping
+from typing import Callable, ClassVar, Generator, Iterable, Mapping
 import xml.etree.ElementTree as ET
 
 ODM_FORMATS = ["xml", "kvn", "json", "json-ct", "json-st", "csv", "csv-ct", "csv-st"]
@@ -73,7 +74,7 @@ class MeanElements:
         "MEAN_MOTION_DDOT",
     )
     # All fields sorted according to CCSDS 502.0-B-3, 7.4.8
-    ALL_FIELDS = (
+    ALL_FIELDS: ClassVar[tuple[str, ...]] = (
         HEADER_FIELDS + METADATA_FIELDS + MEAN_ELEMENTS_FIELDS + TLE_PARAMETERS_FIELDS
     )
 
@@ -618,6 +619,28 @@ def format_odm_kvn_omm(elements: MeanElements) -> str:
         value = data[field]
         result += f"{field} = {value}\n"
     return result
+
+
+def format_odm_json(elements_list: list[MeanElements], output_format: str) -> str:
+    data = [elements.to_map() for elements in elements_list]
+    if output_format == "json-st":
+        data = [{k: str(v) for k, v in d.items()} for d in data]
+    # TODO: Option for pretty-printing
+    return json.dumps(data)
+
+
+def format_odm_csv(elements_list: list[MeanElements], output_format: str) -> str:
+    output = StringIO()
+    # Always write header without quotes
+    output.write(",".join(MeanElements.ALL_FIELDS) + "\n")
+    quoting = csv.QUOTE_MINIMAL
+    if output_format == "csv-st":
+        quoting = csv.QUOTE_ALL
+    writer = csv.DictWriter(output, fieldnames=MeanElements.ALL_FIELDS, quoting=quoting)
+    for elements in elements_list:
+        data = elements.to_map()
+        writer.writerow(data)
+    return output.getvalue()
 
 
 if __name__ == "__main__":
