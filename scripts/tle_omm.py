@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import re
 import sys
-from typing import Generator, Iterable, Mapping
+from typing import Callable, Generator, Iterable, Mapping
 import xml.etree.ElementTree as ET
 
 ODM_FORMATS = ["xml", "kvn", "json", "json-ct", "json-st", "csv", "csv-ct", "csv-st"]
@@ -54,6 +54,21 @@ class MeanElements:
             data[field.name] = initializer(map_[name])
 
         return MeanElements(**data)
+
+    def to_map(self, marshal: Callable | None = None) -> dict[str, str | int | float]:
+        result = {}
+        for field in dataclasses.fields(self):
+            name = field.name.upper()
+            value = getattr(self, field.name)
+            if isinstance(value, datetime):
+                value = value.isoformat()
+            if marshal is not None:
+                value = marshal(value)
+            result[name] = value
+        result["CCSDS_OMM_VERS"] = "3.0"
+        result["MEAN_ELEMENT_THEORY"] = "SGP4"
+        result["TIME_SYSTEM"] = "UTC"
+        return result
 
     @staticmethod
     def _check_if_exists(
@@ -525,34 +540,51 @@ def format_odm_xml(elements_list: list[MeanElements]) -> str:
 
 
 def format_odm_xml_omm(elements: MeanElements) -> str:
-    return (
+    METADATA_FIELDS = (
+        "OBJECT_NAME",
+        "OBJECT_ID",
+        "CENTER_NAME",
+        "REF_FRAME",
+        "TIME_SYSTEM",
+        "MEAN_ELEMENT_THEORY",
+    )
+    MEAN_ELEMENTS_FIELDS = (
+        "EPOCH",
+        "MEAN_MOTION",
+        "ECCENTRICITY",
+        "INCLINATION",
+        "RA_OF_ASC_NODE",
+        "ARG_OF_PERICENTER",
+        "MEAN_ANOMALY",
+    )
+    TLE_PARAMETERS_FIELDS = (
+        "EPHEMERIS_TYPE",
+        "CLASSIFICATION_TYPE",
+        "NORAD_CAT_ID",
+        "ELEMENT_SET_NO",
+        "REV_AT_EPOCH",
+        "BSTAR",
+        "MEAN_MOTION_DOT",
+        "MEAN_MOTION_DDOT",
+    )
+    result = (
         '<omm id="CCSDS_OMM_VERS" version="3.0"><header><CREATION_DATE/><ORIGINATOR/></header><body><segment>'
         "<metadata>"
-        f"<OBJECT_NAME>{elements.object_name}</OBJECT_NAME>"
-        f"<OBJECT_ID>{elements.object_id}</OBJECT_ID>"
-        "<CENTER_NAME>EARTH</CENTER_NAME>"
-        "<REF_FRAME>TEME</REF_FRAME>"
-        "<TIME_SYSTEM>UTC</TIME_SYSTEM>"
-        "<MEAN_ELEMENT_THEORY>SGP4</MEAN_ELEMENT_THEORY>"
-        "</metadata><data><meanElements>"
-        f"<EPOCH>{elements.epoch.isoformat()}</EPOCH>"
-        f"<MEAN_MOTION>{elements.mean_motion}</MEAN_MOTION>"
-        f"<ECCENTRICITY>{elements.eccentricity}</ECCENTRICITY>"
-        f"<INCLINATION>{elements.inclination}</INCLINATION>"
-        f"<RA_OF_ASC_NODE>{elements.ra_of_asc_node}</RA_OF_ASC_NODE>"
-        f"<ARG_OF_PERICENTER>{elements.arg_of_pericenter}</ARG_OF_PERICENTER>"
-        f"<MEAN_ANOMALY>{elements.mean_anomaly}</MEAN_ANOMALY>"
-        "</meanElements><tleParameters>"
-        f"<EPHEMERIS_TYPE>{elements.ephemeris_type}</EPHEMERIS_TYPE>"
-        f"<CLASSIFICATION_TYPE>{elements.classification_type}</CLASSIFICATION_TYPE>"
-        f"<NORAD_CAT_ID>{elements.norad_cat_id}</NORAD_CAT_ID>"
-        f"<ELEMENT_SET_NO>{elements.element_set_no}</ELEMENT_SET_NO>"
-        f"<REV_AT_EPOCH>{elements.rev_at_epoch}</REV_AT_EPOCH>"
-        f"<BSTAR>{elements.bstar}</BSTAR>"
-        f"<MEAN_MOTION_DOT>{elements.mean_motion_dot}</MEAN_MOTION_DOT>"
-        f"<MEAN_MOTION_DDOT>{elements.mean_motion_ddot}</MEAN_MOTION_DDOT>"
-        "</tleParameters></data></segment></body></omm>"
     )
+    data = elements.to_map()
+    for field in METADATA_FIELDS:
+        value = data[field]
+        result += f"<{field}>{value}</{field}>"
+    result += "</metadata><data><meanElements>"
+    for field in MEAN_ELEMENTS_FIELDS:
+        value = data[field]
+        result += f"<{field}>{value}</{field}>"
+    result += "</meanElements><tleParameters>"
+    for field in TLE_PARAMETERS_FIELDS:
+        value = data[field]
+        result += f"<{field}>{value}</{field}>"
+    result += "</tleParameters></data></segment></body></omm>"
+    return result
 
 
 def format_odm_kvn(elements_list: list[MeanElements]) -> str:
@@ -563,32 +595,7 @@ def format_odm_kvn(elements_list: list[MeanElements]) -> str:
 
 
 def format_odm_kvn_omm(elements: MeanElements) -> str:
-    return (
-        "CCSDS_OMM_VERS = 3.0\n"
-        "CREATION_DATE = \n"
-        "ORIGINATOR = \n"
-        f"OBJECT_NAME = {elements.object_name}\n"
-        f"OBJECT_ID = {elements.object_id}\n"
-        "CENTER_NAME = EARTH\n"
-        "REF_FRAME = TEME\n"
-        "TIME_SYSTEM = UTC\n"
-        "MEAN_ELEMENT_THEORY = SGP4\n"
-        f"EPOCH = {elements.epoch.isoformat()}\n"
-        f"MEAN_MOTION = {elements.mean_motion}\n"
-        f"ECCENTRICITY = {elements.eccentricity}\n"
-        f"INCLINATION = {elements.inclination}\n"
-        f"RA_OF_ASC_NODE = {elements.ra_of_asc_node}\n"
-        f"ARG_OF_PERICENTER = {elements.arg_of_pericenter}\n"
-        f"MEAN_ANOMALY = {elements.mean_anomaly}\n"
-        f"EPHEMERIS_TYPE = {elements.ephemeris_type}\n"
-        f"CLASSIFICATION_TYPE = {elements.classification_type}\n"
-        f"NORAD_CAT_ID = {elements.norad_cat_id}\n"
-        f"ELEMENT_SET_NO = {elements.element_set_no}\n"
-        f"REV_AT_EPOCH = {elements.rev_at_epoch}\n"
-        f"BSTAR = {elements.bstar}\n"
-        f"MEAN_MOTION_DOT = {elements.mean_motion_dot}\n"
-        f"MEAN_MOTION_DDOT = {elements.mean_motion_ddot}"
-    )
+    return "\n".join(f"{k} = {v}" for k, v in elements.to_map().items())
 
 
 if __name__ == "__main__":
