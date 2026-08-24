@@ -302,7 +302,7 @@ def parse_tle_float(s: str, leading_decimal: bool = False) -> float:
             s = s[0] + "0." + s[1:]
         else:
             s = "0." + s
-    if len(s) >= 3 and s[-2] in ("+", "-") and s[-3].upper() != "E":
+    if len(s) >= 3 and s[-2] in ("+", "-"):
         s = s[:-2] + "e" + s[-2:]
     return float(s)
 
@@ -422,6 +422,111 @@ def parse_odm_csv(input_data: str, input_format: str) -> list[MeanElements]:
         elements = MeanElements.from_map(row)
         result.append(elements)
     return result
+
+
+def format_tles(elements_list: list[MeanElements]) -> str:
+    lines = []
+    for elements in elements_list:
+        line1, line2 = format_tle(elements)
+        lines.append(elements.name)
+        lines.append(line1)
+        lines.append(line2)
+    return "\n".join(lines) + "\n"
+
+
+def format_tle(elements: MeanElements) -> tuple[str, str]:
+    line1 = (
+        f"1 {format_alpha5(elements.cat_no):05}{elements.classification} "
+        f"{format_tle_designator(elements.intl_designator)} "
+        f"{format_tle_epoch(elements.epoch)} "
+        f"{format_tle_mmdot(elements.mean_motion_dot)} "
+        f"{format_tle_exponential(elements.mean_motion_ddot)} "
+        f"{format_tle_exponential(elements.bstar)} "
+        f"{elements.ephemeris_type} "
+        f"{elements.element_set_no:04}"
+    )
+    line2 = (
+        f"2 {format_alpha5(elements.cat_no):05} "
+        f"{elements.inclination:8.4f} "
+        f"{elements.raan:8.4f} "
+        f"{format_tle_assumed_decimal(elements.eccentricity, 7)} "
+        f"{elements.arg_perigee:8.4f} "
+        f"{elements.mean_anomaly:8.4f} "
+        f"{elements.mean_motion:11.8f}"
+        f"{elements.rev_at_epoch:05}"
+    )
+    return line1 + _tle_checksum(line1), line2 + _tle_checksum(line2)
+
+
+def format_alpha5(cat_no: int) -> str:
+    if cat_no < 100_000:
+        return f"{cat_no:05}"
+    else:
+        first = cat_no // 100_000
+        rest = cat_no % 100_000
+        if 10 <= first <= 17:
+            first_char = chr(ord("A") + (first - 10))
+        elif 18 <= first <= 22:
+            first_char = chr(ord("J") + (first - 18))
+        elif 23 <= first <= 33:
+            first_char = chr(ord("P") + (first - 23))
+        else:
+            raise ValueError(f"Catalog number too large for alpha-5 format: {cat_no}")
+        return f"{first_char}{rest:04}"
+
+
+def format_tle_designator(desig: str) -> str:
+    return f"{desig[2:4]}{desig[5:8]}{desig[8:]:<3}"
+
+
+def format_tle_epoch(epoch: datetime) -> str:
+    year = epoch.year % 100
+    day_of_year = (epoch - datetime(epoch.year, 1, 1)).days + 1
+    fraction_of_day = (
+        epoch.hour * 3600 + epoch.minute * 60 + epoch.second + epoch.microsecond / 1e6
+    ) / 86400
+    fractional_day = day_of_year + fraction_of_day
+    return f"{year:02}{fractional_day:012.8f}"
+
+
+def format_tle_exponential(value: float) -> str:
+    if abs(value) < 1e-9:
+        value = 0.0
+    if value == 0.0:
+        return f"+00000+0"
+    value_str = f"{value:+.{4}e}"
+    # Turn `+2.1e-03` into `21-4`
+    exponent = int(value_str[-3:])
+    assert exponent < 0
+    exponent += 1
+    sign = value_str[0]
+    value_str = value_str[1] + value_str[3:-4]  # Omit sign, decimal point, and exponent
+    value_str = f"{sign}{value_str}{exponent}"
+    assert (
+        len(value_str) == 8
+    ), f"Value {value} cannot be formatted in exponential notation"
+    return value_str
+
+
+def format_tle_assumed_decimal(value: float, width: int) -> str:
+    assert value >= 0.0, f"Value {value} cannot be negative for assumed decimal format"
+    value_str = f"{value:.{width}f}"
+    return value_str[2:]  # skip leading "0."
+
+
+def format_tle_mmdot(value: float) -> str:
+    value_str = f"{value:+.8f}"
+    return value_str[0] + value_str[2:]  # Keep the sign, skip leading "0.
+
+
+def _tle_checksum(line: str) -> str:
+    checksum = 0
+    for c in line:
+        if c.isdigit():
+            checksum += int(c)
+        elif c == "-":
+            checksum += 1
+    return str(checksum % 10)
 
 
 if __name__ == "__main__":

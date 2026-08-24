@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tle_omm import MeanElements, determine_format, parse_input
+from tle_omm import MeanElements, determine_format, format_tles, parse_input
 
 FORMATS = ("tle", "xml", "kvn", "csv", "json")
 
@@ -21,7 +21,7 @@ def assert_elements_close(a: MeanElements, b: MeanElements) -> None:
             assert va == vb, f"{field.name}: {va} != {vb}"
 
 
-@pytest.mark.parametrize("base_path_str", ["celestrak/spire"])
+@pytest.mark.parametrize("base_path_str", ["spacetrack/spire"])
 def test_formats_match(base_path_str: str) -> None:
     base_path = Path(base_path_str)
 
@@ -35,3 +35,19 @@ def test_formats_match(base_path_str: str) -> None:
     for i in range(1, len(parsed)):
         for a, b in zip(parsed[i], parsed[0]):
             assert_elements_close(a, b)
+
+
+@pytest.mark.parametrize("base_path_str", ["spacetrack/spire"])
+def test_roundtrip_tle(base_path_str: str) -> None:
+    base_path = Path(base_path_str)
+
+    input_path = base_path.with_suffix(".tle")
+    with open(input_path, "r") as f:
+        input_data = f.read()
+    parsed = parse_input(input_data, determine_format(input_path, None))
+
+    output_data = format_tles(parsed)
+    parsed_roundtrip = parse_input(output_data, determine_format(input_path, None))
+
+    for a, b in zip(parsed_roundtrip, parsed):
+        assert_elements_close(a, b)
