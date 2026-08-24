@@ -19,10 +19,10 @@ DEFAULT_CSV_FORMAT = "csv-ct"
 
 @dataclass
 class MeanElements:
-    name: str
-    cat_no: int
-    classification: str
-    intl_designator: str
+    object_name: str
+    norad_cat_id: int
+    classification_type: str
+    object_id: str
     epoch: datetime
     mean_motion_dot: float
     mean_motion_ddot: float
@@ -30,9 +30,9 @@ class MeanElements:
     ephemeris_type: int
     element_set_no: int
     inclination: float
-    raan: float
+    ra_of_asc_node: float
     eccentricity: float
-    arg_perigee: float
+    arg_of_pericenter: float
     mean_anomaly: float
     mean_motion: float
     rev_at_epoch: int
@@ -64,10 +64,10 @@ class MeanElements:
         mean_motion_ddot = float(data["MEAN_MOTION_DDOT"])
 
         return MeanElements(
-            name=name,
-            cat_no=cat_no,
-            classification=classification,
-            intl_designator=intl_designator,
+            object_name=name,
+            norad_cat_id=cat_no,
+            classification_type=classification,
+            object_id=intl_designator,
             epoch=epoch,
             mean_motion_dot=mean_motion_dot,
             mean_motion_ddot=mean_motion_ddot,
@@ -75,9 +75,9 @@ class MeanElements:
             ephemeris_type=ephemeris_type,
             element_set_no=element_set_no,
             inclination=inclination,
-            raan=raan,
+            ra_of_asc_node=raan,
             eccentricity=eccentricity,
-            arg_perigee=arg_perigee,
+            arg_of_pericenter=arg_perigee,
             mean_anomaly=mean_anomaly,
             mean_motion=mean_motion,
             rev_at_epoch=rev_at_epoch,
@@ -228,10 +228,10 @@ def parse_tle(name: str, line1: str, line2: str) -> MeanElements:
     # TODO: validate checksum?
 
     return MeanElements(
-        name=name,
-        cat_no=cat_no,
-        classification=classification,
-        intl_designator=intl_designator,
+        object_name=name,
+        norad_cat_id=cat_no,
+        classification_type=classification,
+        object_id=intl_designator,
         epoch=epoch,
         mean_motion_dot=mean_motion_dot,
         mean_motion_ddot=mean_motion_ddot,
@@ -239,9 +239,9 @@ def parse_tle(name: str, line1: str, line2: str) -> MeanElements:
         ephemeris_type=ephemeris_type,
         element_set_no=element_set_no,
         inclination=inclination,
-        raan=raan,
+        ra_of_asc_node=raan,
         eccentricity=eccentricity,
-        arg_perigee=arg_perigee,
+        arg_of_pericenter=arg_perigee,
         mean_anomaly=mean_anomaly,
         mean_motion=mean_motion,
         rev_at_epoch=rev_at_epoch,
@@ -428,7 +428,7 @@ def format_tles(elements_list: list[MeanElements]) -> str:
     lines = []
     for elements in elements_list:
         line1, line2 = format_tle(elements)
-        lines.append(elements.name)
+        lines.append(elements.object_name)
         lines.append(line1)
         lines.append(line2)
     return "\n".join(lines) + "\n"
@@ -436,8 +436,8 @@ def format_tles(elements_list: list[MeanElements]) -> str:
 
 def format_tle(elements: MeanElements) -> tuple[str, str]:
     line1 = (
-        f"1 {format_alpha5(elements.cat_no):05}{elements.classification} "
-        f"{format_tle_designator(elements.intl_designator)} "
+        f"1 {format_alpha5(elements.norad_cat_id):05}{elements.classification_type} "
+        f"{format_tle_designator(elements.object_id)} "
         f"{format_tle_epoch(elements.epoch)} "
         f"{format_tle_mmdot(elements.mean_motion_dot)} "
         f"{format_tle_exponential(elements.mean_motion_ddot)} "
@@ -446,11 +446,11 @@ def format_tle(elements: MeanElements) -> tuple[str, str]:
         f"{elements.element_set_no:04}"
     )
     line2 = (
-        f"2 {format_alpha5(elements.cat_no):05} "
+        f"2 {format_alpha5(elements.norad_cat_id):05} "
         f"{elements.inclination:8.4f} "
-        f"{elements.raan:8.4f} "
+        f"{elements.ra_of_asc_node:8.4f} "
         f"{format_tle_assumed_decimal(elements.eccentricity, 7)} "
-        f"{elements.arg_perigee:8.4f} "
+        f"{elements.arg_of_pericenter:8.4f} "
         f"{elements.mean_anomaly:8.4f} "
         f"{elements.mean_motion:11.8f}"
         f"{elements.rev_at_epoch:05}"
@@ -556,8 +556,8 @@ def format_odm_xml_omm(elements: MeanElements) -> str:
     return (
         '<omm id="CCSDS_OMM_VERS" version="3.0"><header><CREATION_DATE/><ORIGINATOR/></header><body><segment>'
         "<metadata>"
-        f"<OBJECT_NAME>{elements.name}</OBJECT_NAME>"
-        f"<OBJECT_ID>{elements.intl_designator}</OBJECT_ID>"
+        f"<OBJECT_NAME>{elements.object_name}</OBJECT_NAME>"
+        f"<OBJECT_ID>{elements.object_id}</OBJECT_ID>"
         "<CENTER_NAME>EARTH</CENTER_NAME>"
         "<REF_FRAME>TEME</REF_FRAME>"
         "<TIME_SYSTEM>UTC</TIME_SYSTEM>"
@@ -567,13 +567,13 @@ def format_odm_xml_omm(elements: MeanElements) -> str:
         f"<MEAN_MOTION>{elements.mean_motion}</MEAN_MOTION>"
         f"<ECCENTRICITY>{elements.eccentricity}</ECCENTRICITY>"
         f"<INCLINATION>{elements.inclination}</INCLINATION>"
-        f"<RA_OF_ASC_NODE>{elements.raan}</RA_OF_ASC_NODE>"
-        f"<ARG_OF_PERICENTER>{elements.arg_perigee}</ARG_OF_PERICENTER>"
+        f"<RA_OF_ASC_NODE>{elements.ra_of_asc_node}</RA_OF_ASC_NODE>"
+        f"<ARG_OF_PERICENTER>{elements.arg_of_pericenter}</ARG_OF_PERICENTER>"
         f"<MEAN_ANOMALY>{elements.mean_anomaly}</MEAN_ANOMALY>"
         "</meanElements><tleParameters>"
         f"<EPHEMERIS_TYPE>{elements.ephemeris_type}</EPHEMERIS_TYPE>"
-        f"<CLASSIFICATION_TYPE>{elements.classification}</CLASSIFICATION_TYPE>"
-        f"<NORAD_CAT_ID>{elements.cat_no}</NORAD_CAT_ID>"
+        f"<CLASSIFICATION_TYPE>{elements.classification_type}</CLASSIFICATION_TYPE>"
+        f"<NORAD_CAT_ID>{elements.norad_cat_id}</NORAD_CAT_ID>"
         f"<ELEMENT_SET_NO>{elements.element_set_no}</ELEMENT_SET_NO>"
         f"<REV_AT_EPOCH>{elements.rev_at_epoch}</REV_AT_EPOCH>"
         f"<BSTAR>{elements.bstar}</BSTAR>"
@@ -595,8 +595,8 @@ def format_odm_kvn_omm(elements: MeanElements) -> str:
         "CCSDS_OMM_VERS = 3.0\n"
         "CREATION_DATE = \n"
         "ORIGINATOR = \n"
-        f"OBJECT_NAME = {elements.name}\n"
-        f"OBJECT_ID = {elements.intl_designator}\n"
+        f"OBJECT_NAME = {elements.object_name}\n"
+        f"OBJECT_ID = {elements.object_id}\n"
         "CENTER_NAME = EARTH\n"
         "REF_FRAME = TEME\n"
         "TIME_SYSTEM = UTC\n"
@@ -605,12 +605,12 @@ def format_odm_kvn_omm(elements: MeanElements) -> str:
         f"MEAN_MOTION = {elements.mean_motion}\n"
         f"ECCENTRICITY = {elements.eccentricity}\n"
         f"INCLINATION = {elements.inclination}\n"
-        f"RA_OF_ASC_NODE = {elements.raan}\n"
-        f"ARG_OF_PERICENTER = {elements.arg_perigee}\n"
+        f"RA_OF_ASC_NODE = {elements.ra_of_asc_node}\n"
+        f"ARG_OF_PERICENTER = {elements.arg_of_pericenter}\n"
         f"MEAN_ANOMALY = {elements.mean_anomaly}\n"
         f"EPHEMERIS_TYPE = {elements.ephemeris_type}\n"
-        f"CLASSIFICATION_TYPE = {elements.classification}\n"
-        f"NORAD_CAT_ID = {elements.cat_no}\n"
+        f"CLASSIFICATION_TYPE = {elements.classification_type}\n"
+        f"NORAD_CAT_ID = {elements.norad_cat_id}\n"
         f"ELEMENT_SET_NO = {elements.element_set_no}\n"
         f"REV_AT_EPOCH = {elements.rev_at_epoch}\n"
         f"BSTAR = {elements.bstar}\n"
