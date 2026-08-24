@@ -2,7 +2,8 @@
 
 import argparse
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import dataclasses
 from datetime import datetime, timedelta
 import json
 import logging
@@ -23,7 +24,9 @@ class MeanElements:
     norad_cat_id: int
     classification_type: str
     object_id: str
-    epoch: datetime
+    epoch: datetime = field(
+        metadata={"initializer": lambda x: datetime.fromisoformat(str(x))}
+    )
     mean_motion_dot: float
     mean_motion_ddot: float
     bstar: float
@@ -38,50 +41,19 @@ class MeanElements:
     rev_at_epoch: int
 
     @classmethod
-    def from_map(cls, data: Mapping[str, str | int | float]) -> "MeanElements":
-        cls._check_if_exists(data, "CCSDS_OMM_VERS", ["2.0", "3.0"], str, True)
-        cls._check_if_exists(data, "MEAN_ELEMENT_THEORY", ["SGP4", "SGP/SGP4"], str)
-        cls._check_if_exists(data, "TIME_SYSTEM", ["UTC"], str)
-        name = str(data["OBJECT_NAME"])
-        intl_designator = str(data["OBJECT_ID"])
+    def from_map(cls, map_: Mapping[str, str | int | float]) -> "MeanElements":
+        cls._check_if_exists(map_, "CCSDS_OMM_VERS", ["2.0", "3.0"], str, True)
+        cls._check_if_exists(map_, "MEAN_ELEMENT_THEORY", ["SGP4", "SGP/SGP4"], str)
+        cls._check_if_exists(map_, "TIME_SYSTEM", ["UTC"], str)
+        data = {}
+        for field in dataclasses.fields(cls):
+            name = field.name.upper()
+            if name not in map_:
+                raise ValueError(f"Missing required field: {field.name}")
+            initializer = field.metadata.get("initializer", field.type)
+            data[field.name] = initializer(map_[name])
 
-        epoch_str = str(data["EPOCH"])
-        epoch = datetime.fromisoformat(epoch_str)
-        mean_motion = float(data["MEAN_MOTION"])
-        eccentricity = float(data["ECCENTRICITY"])
-        inclination = float(data["INCLINATION"])
-        raan = float(data["RA_OF_ASC_NODE"])
-        arg_perigee = float(data["ARG_OF_PERICENTER"])
-        mean_anomaly = float(data["MEAN_ANOMALY"])
-
-        ephemeris_type = int(data["EPHEMERIS_TYPE"])
-        classification = str(data["CLASSIFICATION_TYPE"])
-        cat_no = int(data["NORAD_CAT_ID"])
-        element_set_no = int(data["ELEMENT_SET_NO"])
-        rev_at_epoch = int(data["REV_AT_EPOCH"])
-        bstar = float(data["BSTAR"])
-        mean_motion_dot = float(data["MEAN_MOTION_DOT"])
-        mean_motion_ddot = float(data["MEAN_MOTION_DDOT"])
-
-        return MeanElements(
-            object_name=name,
-            norad_cat_id=cat_no,
-            classification_type=classification,
-            object_id=intl_designator,
-            epoch=epoch,
-            mean_motion_dot=mean_motion_dot,
-            mean_motion_ddot=mean_motion_ddot,
-            bstar=bstar,
-            ephemeris_type=ephemeris_type,
-            element_set_no=element_set_no,
-            inclination=inclination,
-            ra_of_asc_node=raan,
-            eccentricity=eccentricity,
-            arg_of_pericenter=arg_perigee,
-            mean_anomaly=mean_anomaly,
-            mean_motion=mean_motion,
-            rev_at_epoch=rev_at_epoch,
-        )
+        return MeanElements(**data)
 
     @staticmethod
     def _check_if_exists(
