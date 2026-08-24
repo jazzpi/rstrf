@@ -544,9 +544,10 @@ def format_omm(elements_list: list[MeanElements], output_format: str) -> str:
 
 def format_odm_xml(elements_list: list[MeanElements]) -> str:
     result = """<?xml version="1.0" encoding="UTF-8"?>
-<ndm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd">"""
+<ndm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd">
+"""
     for elements in elements_list:
-        result += format_odm_xml_omm(elements)
+        result += format_odm_xml_omm(elements) + "\n"
     result += "</ndm>"
     return result
 
@@ -579,6 +580,42 @@ def format_odm_xml_omm(elements: MeanElements) -> str:
         f"<MEAN_MOTION_DOT>{elements.mean_motion_dot}</MEAN_MOTION_DOT>"
         f"<MEAN_MOTION_DDOT>{elements.mean_motion_ddot}</MEAN_MOTION_DDOT>"
         "</tleParameters></data></segment></body></omm>"
+    )
+
+
+def format_odm_kvn(elements_list: list[MeanElements]) -> str:
+    result = ""
+    for elements in elements_list:
+        result += format_odm_kvn_omm(elements) + "\n"
+    return result
+
+
+def format_odm_kvn_omm(elements: MeanElements) -> str:
+    return (
+        "CCSDS_OMM_VERS = 3.0\n"
+        "CREATION_DATE = \n"
+        "ORIGINATOR = \n"
+        f"OBJECT_NAME = {elements.name}\n"
+        f"OBJECT_ID = {elements.intl_designator}\n"
+        "CENTER_NAME = EARTH\n"
+        "REF_FRAME = TEME\n"
+        "TIME_SYSTEM = UTC\n"
+        "MEAN_ELEMENT_THEORY = SGP4\n"
+        f"EPOCH = {elements.epoch.isoformat()}\n"
+        f"MEAN_MOTION = {elements.mean_motion}\n"
+        f"ECCENTRICITY = {elements.eccentricity}\n"
+        f"INCLINATION = {elements.inclination}\n"
+        f"RA_OF_ASC_NODE = {elements.raan}\n"
+        f"ARG_OF_PERICENTER = {elements.arg_perigee}\n"
+        f"MEAN_ANOMALY = {elements.mean_anomaly}\n"
+        f"EPHEMERIS_TYPE = {elements.ephemeris_type}\n"
+        f"CLASSIFICATION_TYPE = {elements.classification}\n"
+        f"NORAD_CAT_ID = {elements.cat_no}\n"
+        f"ELEMENT_SET_NO = {elements.element_set_no}\n"
+        f"REV_AT_EPOCH = {elements.rev_at_epoch}\n"
+        f"BSTAR = {elements.bstar}\n"
+        f"MEAN_MOTION_DOT = {elements.mean_motion_dot}\n"
+        f"MEAN_MOTION_DDOT = {elements.mean_motion_ddot}"
     )
 
 
