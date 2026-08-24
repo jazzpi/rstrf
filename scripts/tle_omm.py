@@ -40,6 +40,43 @@ class MeanElements:
     mean_motion: float
     rev_at_epoch: int
 
+    HEADER_FIELDS = (
+        "CCSDS_OMM_VERS",
+        "CREATION_DATE",
+        "ORIGINATOR",
+    )
+    METADATA_FIELDS = (
+        "OBJECT_NAME",
+        "OBJECT_ID",
+        "CENTER_NAME",
+        "REF_FRAME",
+        "TIME_SYSTEM",
+        "MEAN_ELEMENT_THEORY",
+    )
+    MEAN_ELEMENTS_FIELDS = (
+        "EPOCH",
+        "MEAN_MOTION",
+        "ECCENTRICITY",
+        "INCLINATION",
+        "RA_OF_ASC_NODE",
+        "ARG_OF_PERICENTER",
+        "MEAN_ANOMALY",
+    )
+    TLE_PARAMETERS_FIELDS = (
+        "EPHEMERIS_TYPE",
+        "CLASSIFICATION_TYPE",
+        "NORAD_CAT_ID",
+        "ELEMENT_SET_NO",
+        "REV_AT_EPOCH",
+        "BSTAR",
+        "MEAN_MOTION_DOT",
+        "MEAN_MOTION_DDOT",
+    )
+    # All fields sorted according to CCSDS 502.0-B-3, 7.4.8
+    ALL_FIELDS = (
+        HEADER_FIELDS + METADATA_FIELDS + MEAN_ELEMENTS_FIELDS + TLE_PARAMETERS_FIELDS
+    )
+
     @classmethod
     def from_map(cls, map_: Mapping[str, str | int | float]) -> "MeanElements":
         cls._check_if_exists(map_, "CCSDS_OMM_VERS", ["2.0", "3.0"], str, True)
@@ -547,47 +584,20 @@ def format_odm_xml(elements_list: list[MeanElements]) -> str:
 
 
 def format_odm_xml_omm(elements: MeanElements) -> str:
-    METADATA_FIELDS = (
-        "OBJECT_NAME",
-        "OBJECT_ID",
-        "CENTER_NAME",
-        "REF_FRAME",
-        "TIME_SYSTEM",
-        "MEAN_ELEMENT_THEORY",
-    )
-    MEAN_ELEMENTS_FIELDS = (
-        "EPOCH",
-        "MEAN_MOTION",
-        "ECCENTRICITY",
-        "INCLINATION",
-        "RA_OF_ASC_NODE",
-        "ARG_OF_PERICENTER",
-        "MEAN_ANOMALY",
-    )
-    TLE_PARAMETERS_FIELDS = (
-        "EPHEMERIS_TYPE",
-        "CLASSIFICATION_TYPE",
-        "NORAD_CAT_ID",
-        "ELEMENT_SET_NO",
-        "REV_AT_EPOCH",
-        "BSTAR",
-        "MEAN_MOTION_DOT",
-        "MEAN_MOTION_DDOT",
-    )
     result = (
         '<omm id="CCSDS_OMM_VERS" version="3.0"><header><CREATION_DATE/><ORIGINATOR/></header><body><segment>'
         "<metadata>"
     )
     data = elements.to_map()
-    for field in METADATA_FIELDS:
+    for field in MeanElements.METADATA_FIELDS:
         value = data[field]
         result += f"<{field}>{value}</{field}>"
     result += "</metadata><data><meanElements>"
-    for field in MEAN_ELEMENTS_FIELDS:
+    for field in MeanElements.MEAN_ELEMENTS_FIELDS:
         value = data[field]
         result += f"<{field}>{value}</{field}>"
     result += "</meanElements><tleParameters>"
-    for field in TLE_PARAMETERS_FIELDS:
+    for field in MeanElements.TLE_PARAMETERS_FIELDS:
         value = data[field]
         result += f"<{field}>{value}</{field}>"
     result += "</tleParameters></data></segment></body></omm>"
@@ -602,7 +612,12 @@ def format_odm_kvn(elements_list: list[MeanElements]) -> str:
 
 
 def format_odm_kvn_omm(elements: MeanElements) -> str:
-    return "\n".join(f"{k} = {v}" for k, v in elements.to_map().items())
+    result = ""
+    data = elements.to_map()
+    for field in MeanElements.ALL_FIELDS:
+        value = data[field]
+        result += f"{field} = {value}\n"
+    return result
 
 
 if __name__ == "__main__":
