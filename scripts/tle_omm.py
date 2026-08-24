@@ -45,6 +45,8 @@ class MeanElements:
         cls._check_if_exists(map_, "CCSDS_OMM_VERS", ["2.0", "3.0"], str, True)
         cls._check_if_exists(map_, "MEAN_ELEMENT_THEORY", ["SGP4", "SGP/SGP4"], str)
         cls._check_if_exists(map_, "TIME_SYSTEM", ["UTC"], str)
+        cls._check_if_exists(map_, "CENTER_NAME", ["EARTH"], str)
+        cls._check_if_exists(map_, "REF_FRAME", ["TEME"], str)
         data = {}
         for field in dataclasses.fields(cls):
             name = field.name.upper()
@@ -66,8 +68,13 @@ class MeanElements:
                 value = marshal(value)
             result[name] = value
         result["CCSDS_OMM_VERS"] = "3.0"
+        # TODO: options to set creation date & originator
+        result["CREATION_DATE"] = ""
+        result["ORIGINATOR"] = ""
         result["MEAN_ELEMENT_THEORY"] = "SGP4"
         result["TIME_SYSTEM"] = "UTC"
+        result["CENTER_NAME"] = "EARTH"
+        result["REF_FRAME"] = "TEME"
         return result
 
     @staticmethod
