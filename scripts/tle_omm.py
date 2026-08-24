@@ -529,5 +529,58 @@ def _tle_checksum(line: str) -> str:
     return str(checksum % 10)
 
 
+def format_omm(elements_list: list[MeanElements], output_format: str) -> str:
+    if output_format == "xml":
+        return format_odm_xml(elements_list)
+    elif output_format == "kvn":
+        return format_odm_kvn(elements_list)
+    elif output_format.startswith("json"):
+        return format_odm_json(elements_list, output_format)
+    elif output_format.startswith("csv"):
+        return format_odm_csv(elements_list, output_format)
+    else:
+        raise ValueError(f"Unsupported OMM format: {output_format}")
+
+
+def format_odm_xml(elements_list: list[MeanElements]) -> str:
+    result = """<?xml version="1.0" encoding="UTF-8"?>
+<ndm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd">"""
+    for elements in elements_list:
+        result += format_odm_xml_omm(elements)
+    result += "</ndm>"
+    return result
+
+
+def format_odm_xml_omm(elements: MeanElements) -> str:
+    return (
+        '<omm id="CCSDS_OMM_VERS" version="3.0"><header><CREATION_DATE/><ORIGINATOR/></header><body><segment>'
+        "<metadata>"
+        f"<OBJECT_NAME>{elements.name}</OBJECT_NAME>"
+        f"<OBJECT_ID>{elements.intl_designator}</OBJECT_ID>"
+        "<CENTER_NAME>EARTH</CENTER_NAME>"
+        "<REF_FRAME>TEME</REF_FRAME>"
+        "<TIME_SYSTEM>UTC</TIME_SYSTEM>"
+        "<MEAN_ELEMENT_THEORY>SGP4</MEAN_ELEMENT_THEORY>"
+        "</metadata><data><meanElements>"
+        f"<EPOCH>{elements.epoch.isoformat()}</EPOCH>"
+        f"<MEAN_MOTION>{elements.mean_motion}</MEAN_MOTION>"
+        f"<ECCENTRICITY>{elements.eccentricity}</ECCENTRICITY>"
+        f"<INCLINATION>{elements.inclination}</INCLINATION>"
+        f"<RA_OF_ASC_NODE>{elements.raan}</RA_OF_ASC_NODE>"
+        f"<ARG_OF_PERICENTER>{elements.arg_perigee}</ARG_OF_PERICENTER>"
+        f"<MEAN_ANOMALY>{elements.mean_anomaly}</MEAN_ANOMALY>"
+        "</meanElements><tleParameters>"
+        f"<EPHEMERIS_TYPE>{elements.ephemeris_type}</EPHEMERIS_TYPE>"
+        f"<CLASSIFICATION_TYPE>{elements.classification}</CLASSIFICATION_TYPE>"
+        f"<NORAD_CAT_ID>{elements.cat_no}</NORAD_CAT_ID>"
+        f"<ELEMENT_SET_NO>{elements.element_set_no}</ELEMENT_SET_NO>"
+        f"<REV_AT_EPOCH>{elements.rev_at_epoch}</REV_AT_EPOCH>"
+        f"<BSTAR>{elements.bstar}</BSTAR>"
+        f"<MEAN_MOTION_DOT>{elements.mean_motion_dot}</MEAN_MOTION_DOT>"
+        f"<MEAN_MOTION_DDOT>{elements.mean_motion_ddot}</MEAN_MOTION_DDOT>"
+        "</tleParameters></data></segment></body></omm>"
+    )
+
+
 if __name__ == "__main__":
     sys.exit(main())
