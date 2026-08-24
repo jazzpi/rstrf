@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tle_omm import MeanElements, determine_format, format_tles, parse_input
+from tle_omm import MeanElements, determine_format, format_omm, format_tles, parse_input
 
 FORMATS = ("tle", "xml", "kvn", "csv", "json")
 
@@ -38,16 +38,21 @@ def test_formats_match(base_path_str: str) -> None:
 
 
 @pytest.mark.parametrize("base_path_str", ["spacetrack/spire"])
-def test_roundtrip_tle(base_path_str: str) -> None:
+@pytest.mark.parametrize("format", FORMATS)
+def test_roundtrip(base_path_str: str, format: str) -> None:
     base_path = Path(base_path_str)
 
-    input_path = base_path.with_suffix(".tle")
+    input_path = base_path.with_suffix(f".{format}")
     with open(input_path, "r") as f:
         input_data = f.read()
-    parsed = parse_input(input_data, determine_format(input_path, None))
+    resolved_format = determine_format(input_path, None)
+    parsed = parse_input(input_data, resolved_format)
 
-    output_data = format_tles(parsed)
-    parsed_roundtrip = parse_input(output_data, determine_format(input_path, None))
+    if resolved_format == "tle":
+        output_data = format_tles(parsed)
+    else:
+        output_data = format_omm(parsed, resolved_format)
+    parsed_roundtrip = parse_input(output_data, resolved_format)
 
     for a, b in zip(parsed_roundtrip, parsed):
         assert_elements_close(a, b)
