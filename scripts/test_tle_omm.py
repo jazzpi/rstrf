@@ -21,10 +21,12 @@ def assert_elements_close(a: MeanElements, b: MeanElements) -> None:
             assert va == vb, f"{field.name}: {va} != {vb}"
 
 
-@pytest.mark.parametrize("base_path_str", ["spacetrack/spire"])
-def test_formats_match(base_path_str: str) -> None:
-    base_path = Path(base_path_str)
+BASE_PATH = Path(__file__).parent.parent / "resources/testdata"
+BASE_PATHS = [BASE_PATH / "spacetrack/spire", BASE_PATH / "celestrak/spire"]
 
+
+@pytest.mark.parametrize("base_path", BASE_PATHS)
+def test_formats_match(base_path: Path) -> None:
     parsed = []
     for format in FORMATS:
         input_path = base_path.with_suffix(f".{format}")
@@ -37,11 +39,9 @@ def test_formats_match(base_path_str: str) -> None:
             assert_elements_close(a, b)
 
 
-@pytest.mark.parametrize("base_path_str", ["spacetrack/spire"])
+@pytest.mark.parametrize("base_path", BASE_PATHS)
 @pytest.mark.parametrize("format", FORMATS)
-def test_roundtrip(base_path_str: str, format: str) -> None:
-    base_path = Path(base_path_str)
-
+def test_roundtrip(base_path: Path, format: str) -> None:
     input_path = base_path.with_suffix(f".{format}")
     with open(input_path, "r") as f:
         input_data = f.read()
