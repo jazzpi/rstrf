@@ -23,7 +23,7 @@ def parse_omm_epoch(input: object) -> datetime:
     in_str = str(input)
     if in_str.count("-") == 2:
         # Should be YYYY-MM-DD...
-        return datetime.fromisoformat(in_str)
+        epoch = datetime.fromisoformat(in_str)
     elif in_str.count("-") == 1:
         # Should be YYYY-DDD...
         date_part, time_part = in_str.split("T", 1)
@@ -36,9 +36,14 @@ def parse_omm_epoch(input: object) -> datetime:
         hour = int(hour_str)
         minute = int(minute_str)
         second = float(second_str)
-        return date + timedelta(hours=hour, minutes=minute, seconds=second)
+        epoch = date + timedelta(hours=hour, minutes=minute, seconds=second)
     else:
         raise ValueError(f"Invalid epoch format: {in_str}")
+    if epoch.tzinfo == timezone.utc:
+        epoch = epoch.replace(tzinfo=None)
+    elif epoch.tzinfo is not None:
+        raise ValueError(f"Invalid epoch timezone: {epoch.tzinfo}")
+    return epoch
 
 
 @dataclass
