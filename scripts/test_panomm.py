@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from tle_omm import MeanElements, determine_format, format_omm, format_tles, parse_input
+from panomm import MeanElements, determine_format, format_omm, format_tles, parse_input
 
 FORMATS = ("tle", "xml", "kvn", "csv", "json")
 
