@@ -345,9 +345,9 @@ def parse_omm(input_data: str, input_format: str) -> list[MeanElements]:
     elif input_format == "kvn":
         return parse_odm_kvn(input_data)
     elif input_format.startswith("json"):
-        return parse_odm_json(input_data, input_format)
+        return parse_odm_json(input_data)
     elif input_format.startswith("csv"):
-        return parse_odm_csv(input_data, input_format)
+        return parse_odm_csv(input_data)
     else:
         raise ValueError(f"Unsupported OMM format: {input_format}")
 
@@ -373,7 +373,6 @@ def parse_odm_xml_omm(omm: ET.Element) -> MeanElements:
         raise ValueError(f"Invalid OMM id: {omm.attrib['id']}")
     version = omm.attrib["version"]
 
-    # TODO: does this find <omm><body><segment> or only <omm><segment>?
     segment = _find(omm, "body/segment")
 
     metadata = _node_to_dict(_find(segment, "metadata"))
@@ -434,8 +433,7 @@ def _group_kvn(lines: Iterable[str]) -> Generator[dict[str, str]]:
         yield group
 
 
-def parse_odm_json(input_data: str, input_format: str) -> list[MeanElements]:
-    # TODO: does input_format matter?
+def parse_odm_json(input_data: str) -> list[MeanElements]:
     data = json.loads(input_data)
     if isinstance(data, dict):
         data = [data]
@@ -446,8 +444,7 @@ def parse_odm_json(input_data: str, input_format: str) -> list[MeanElements]:
     return result
 
 
-def parse_odm_csv(input_data: str, input_format: str) -> list[MeanElements]:
-    # TODO: does input_format matter?
+def parse_odm_csv(input_data: str) -> list[MeanElements]:
     reader = csv.DictReader(input_data.strip().splitlines())
     result = []
     for row in reader:
