@@ -95,15 +95,13 @@ class MeanElements:
 
         return MeanElements(**data)
 
-    def to_map(self, marshal: Callable | None = None) -> dict[str, str | int | float]:
+    def to_map(self) -> dict[str, str | int | float]:
         result = {}
         for field in dataclasses.fields(self):
             name = field.name.upper()
             value = getattr(self, field.name)
             if isinstance(value, datetime):
                 value = value.isoformat()
-            if marshal is not None:
-                value = marshal(value)
             result[name] = value
         result["CCSDS_OMM_VERS"] = "3.0"
         # TODO: options to set creation date & originator
@@ -619,11 +617,20 @@ def format_odm_kvn_omm(elements: MeanElements) -> str:
 
 
 def format_odm_json(elements_list: list[MeanElements], output_format: str) -> str:
-    data = [elements.to_map() for elements in elements_list]
-    if output_format == "json-st":
-        data = [{k: str(v) for k, v in d.items()} for d in data]
+    data = [
+        _marshal_odm_json_omm(elements, output_format) for elements in elements_list
+    ]
     # TODO: Option for pretty-printing
     return json.dumps(data)
+
+
+def _marshal_odm_json_omm(
+    elements: MeanElements, output_format: str
+) -> dict[str, str | int | float]:
+    data = elements.to_map()
+    if output_format == "json-st":
+        data: dict[str, str | int | float] = {k: str(v) for k, v in data.items()}
+    return data
 
 
 def format_odm_csv(elements_list: list[MeanElements], output_format: str) -> str:
