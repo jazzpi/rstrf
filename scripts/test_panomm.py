@@ -8,6 +8,7 @@ import re
 import pytest
 
 from panomm import (
+    CommonFields,
     MeanElements,
     determine_format,
     format_omm,
@@ -75,6 +76,10 @@ BASE_PATH = Path(__file__).parent.parent / "resources/testdata"
 SPACETRACK_PATH = BASE_PATH / "spacetrack/spire"
 CELESTRAK_PATH = BASE_PATH / "celestrak/spire"
 BASE_PATHS = [SPACETRACK_PATH, CELESTRAK_PATH]
+COMMON = CommonFields(
+    creation_date="2024-01-01T00:00:00",
+    originator="panomm",
+)
 
 
 @pytest.mark.parametrize("base_path", BASE_PATHS)
@@ -103,7 +108,7 @@ def test_roundtrip(base_path: Path, format: str) -> None:
     if resolved_format == "tle":
         output_data = format_tles(parsed)
     else:
-        output_data = format_omm(parsed, resolved_format)
+        output_data = format_omm(parsed, COMMON, resolved_format)
     # Output might not be byte-identical to input (newlines, quotes
     # etc.). So here we only check parsed objects. Formatting is tested
     # below in format-specific tests.
@@ -119,7 +124,7 @@ def test_json_st_quotes_all_values(base_path: Path) -> None:
     with open(input_path, "r") as f:
         parsed = parse_input(f.read(), "json")
 
-    output_data = format_omm(parsed, "json-st")
+    output_data = format_omm(parsed, COMMON, "json-st")
 
     for row in json.loads(output_data):
         for key, value in row.items():
@@ -132,7 +137,7 @@ def test_json_ct_keeps_types() -> None:
         input_data = f.read()
         parsed = parse_input(input_data, "json")
 
-    output_data = format_omm(parsed, "json-ct")
+    output_data = format_omm(parsed, COMMON, "json-ct")
 
     for input_row, output_row in zip(json.loads(input_data), json.loads(output_data)):
         # Check only fields in input_row, since output_row may have
@@ -162,7 +167,7 @@ def test_csv_st_quotes_values_not_header(base_path: Path) -> None:
     with open(base_path.with_suffix(".csv"), "r") as f:
         parsed = parse_input(f.read(), "csv")
 
-    output_data = format_omm(parsed, "csv-st")
+    output_data = format_omm(parsed, COMMON, "csv-st")
 
     lines = output_data.strip("\r\n").splitlines()
     assert '"' not in lines[0], f"header should not be quoted: {lines[0]!r}"
@@ -178,7 +183,7 @@ def test_kvn_keeps_field_order(base_path: Path) -> None:
         input_data = f.read()
         parsed = parse_input(input_data, "kvn")
 
-    output_data = format_omm(parsed, "kvn")
+    output_data = format_omm(parsed, COMMON, "kvn")
 
     input_lines = _kvn_remove_empty(input_data.splitlines())
     output_lines = _kvn_remove_empty(output_data.splitlines())

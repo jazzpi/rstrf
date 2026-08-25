@@ -4,7 +4,7 @@ import argparse
 import csv
 from dataclasses import dataclass, field
 import dataclasses
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
 import logging
@@ -39,6 +39,12 @@ def parse_omm_epoch(input: object) -> datetime:
         return date + timedelta(hours=hour, minutes=minute, seconds=second)
     else:
         raise ValueError(f"Invalid epoch format: {in_str}")
+
+
+@dataclass
+class CommonFields:
+    creation_date: str = ""
+    originator: str = ""
 
 
 @dataclass
@@ -115,7 +121,7 @@ class MeanElements:
 
         return MeanElements(**data)
 
-    def to_map(self) -> dict[str, str | int | float]:
+    def to_map(self, common: CommonFields) -> dict[str, str | int | float]:
         result = {}
         for field in dataclasses.fields(self):
             name = field.name.upper()
@@ -124,9 +130,8 @@ class MeanElements:
                 value = value.isoformat()
             result[name] = value
         result["CCSDS_OMM_VERS"] = "3.0"
-        # TODO: options to set creation date & originator
-        result["CREATION_DATE"] = ""
-        result["ORIGINATOR"] = ""
+        result["CREATION_DATE"] = common.creation_date
+        result["ORIGINATOR"] = common.originator
         result["MEAN_ELEMENT_THEORY"] = "SGP4"
         result["TIME_SYSTEM"] = "UTC"
         result["CENTER_NAME"] = "EARTH"
@@ -191,6 +196,16 @@ def main() -> int:
         choices=["tle"] + ODM_FORMATS,
         help="Format of the output file (see FORMATS). If not specified, the format will be inferred from the file extension.",
     )
+    parser.add_argument(
+        "--creation-date",
+        default=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+        help="Creation date to include in OMM output (default: current UTC time).",
+    )
+    parser.add_argument(
+        "--originator",
+        default="panomm",
+        help="Originator to include in OMM output (default: 'panomm').",
+    )
     args = parser.parse_args()
 
     with open(args.input_file, "r") as f:
@@ -202,7 +217,11 @@ def main() -> int:
         if output_format == "tle":
             output_data = format_tles(elements)
         elif output_format in ODM_FORMATS:
-            output_data = format_omm(elements, output_format)
+            common = CommonFields(
+                creation_date=args.creation_date,
+                originator=args.originator,
+            )
+            output_data = format_omm(elements, common, output_format)
         else:
             raise ValueError(f"Unsupported output format: {output_format}")
 
@@ -591,35 +610,37 @@ def _tle_checksum(line: str) -> str:
     return str(checksum % 10)
 
 
-def format_omm(elements_list: list[MeanElements], output_format: str) -> str:
+def format_omm(
+    elements_list: list[MeanElements], common: CommonFields, output_format: str
+) -> str:
     if output_format == "xml":
-        return format_odm_xml(elements_list)
+        return format_odm_xml(elements_list, common)
     elif output_format == "kvn":
-        return format_odm_kvn(elements_list)
+        return format_odm_kvn(elements_list, common)
     elif output_format.startswith("json"):
-        return format_odm_json(elements_list, output_format)
+        return format_odm_json(elements_list, common, output_format)
     elif output_format.startswith("csv"):
-        return format_odm_csv(elements_list, output_format)
+        return format_odm_csv(elements_list, common, output_format)
     else:
         raise ValueError(f"Unsupported OMM format: {output_format}")
 
 
-def format_odm_xml(elements_list: list[MeanElements]) -> str:
+def format_odm_xml(elements_list: list[MeanElements], common: CommonFields) -> str:
     result = """<?xml version="1.0" encoding="UTF-8"?>
 <ndm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd">
 """
     for elements in elements_list:
-        result += format_odm_xml_omm(elements) + "\n"
+        result += format_odm_xml_omm(elements, common) + "\n"
     result += "</ndm>"
     return result
 
 
-def format_odm_xml_omm(elements: MeanElements) -> str:
+def format_odm_xml_omm(elements: MeanElements, common: CommonFields) -> str:
     result = (
         '<omm id="CCSDS_OMM_VERS" version="3.0"><header><CREATION_DATE/><ORIGINATOR/></header><body><segment>'
         "<metadata>"
     )
-    data = elements.to_map()
+    data = elements.to_map(common)
     for field in MeanElements.METADATA_FIELDS:
         value = data[field]
         result += f"<{field}>{value}</{field}>"
@@ -635,40 +656,45 @@ def format_odm_xml_omm(elements: MeanElements) -> str:
     return result
 
 
-def format_odm_kvn(elements_list: list[MeanElements]) -> str:
+def format_odm_kvn(elements_list: list[MeanElements], common: CommonFields) -> str:
     result = ""
     for elements in elements_list:
-        result += format_odm_kvn_omm(elements) + "\n"
+        result += format_odm_kvn_omm(elements, common) + "\n"
     return result
 
 
-def format_odm_kvn_omm(elements: MeanElements) -> str:
+def format_odm_kvn_omm(elements: MeanElements, common: CommonFields) -> str:
     result = ""
-    data = elements.to_map()
+    data = elements.to_map(common)
     for field in MeanElements.ALL_FIELDS:
         value = data[field]
         result += f"{field} = {value}\n"
     return result
 
 
-def format_odm_json(elements_list: list[MeanElements], output_format: str) -> str:
+def format_odm_json(
+    elements_list: list[MeanElements], common: CommonFields, output_format: str
+) -> str:
     data = [
-        _marshal_odm_json_omm(elements, output_format) for elements in elements_list
+        _marshal_odm_json_omm(elements, common, output_format)
+        for elements in elements_list
     ]
     # TODO: Option for pretty-printing
     return json.dumps(data)
 
 
 def _marshal_odm_json_omm(
-    elements: MeanElements, output_format: str
+    elements: MeanElements, common: CommonFields, output_format: str
 ) -> dict[str, str | int | float]:
-    data = elements.to_map()
+    data = elements.to_map(common)
     if output_format == "json-st":
         data: dict[str, str | int | float] = {k: str(v) for k, v in data.items()}
     return data
 
 
-def format_odm_csv(elements_list: list[MeanElements], output_format: str) -> str:
+def format_odm_csv(
+    elements_list: list[MeanElements], common: CommonFields, output_format: str
+) -> str:
     output = StringIO()
     # Always write header without quotes
     output.write(",".join(MeanElements.ALL_FIELDS) + "\n")
@@ -677,7 +703,7 @@ def format_odm_csv(elements_list: list[MeanElements], output_format: str) -> str
         quoting = csv.QUOTE_ALL
     writer = csv.DictWriter(output, fieldnames=MeanElements.ALL_FIELDS, quoting=quoting)
     for elements in elements_list:
-        data = elements.to_map()
+        data = elements.to_map(common)
         writer.writerow(data)
     return output.getvalue()
 
