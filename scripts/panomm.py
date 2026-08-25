@@ -153,8 +153,24 @@ class MeanElements:
                     raise ValueError(msg)
 
 
+FORMATS_HELP = """
+FORMATS:
+  tle, xml, kvn, json, csv
+
+  JSON & CSV are not standardized by CCSDS. panomm parses the formats
+  used by Celestrak & Space-Track. By default it outputs JSON & CSV with
+  the formatting used by Celestrak (but with all mandatory fields
+  included). The output formatting can be overridden to the Space-Track
+  one by specifying `(json|csv)-st`.
+"""
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Convert between TLE and OMM formats.")
+    parser = argparse.ArgumentParser(
+        description="Convert between TLE and OMM formats.",
+        epilog=FORMATS_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "input_file",
         type=Path,
@@ -175,7 +191,6 @@ def main() -> int:
         choices=["tle"] + ODM_FORMATS,
         help="Format of the output file (see FORMATS). If not specified, the format will be inferred from the file extension.",
     )
-    # TODO: How can I add a FORMATS section to the help text?
     args = parser.parse_args()
 
     with open(args.input_file, "r") as f:
