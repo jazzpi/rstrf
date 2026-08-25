@@ -1,4 +1,5 @@
 import dataclasses
+from datetime import datetime, timedelta
 import json
 import math
 from pathlib import Path
@@ -6,7 +7,14 @@ import re
 
 import pytest
 
-from panomm import MeanElements, determine_format, format_omm, format_tles, parse_input
+from panomm import (
+    MeanElements,
+    determine_format,
+    format_omm,
+    format_tles,
+    parse_input,
+    parse_omm_epoch,
+)
 
 FORMATS = ("tle", "xml", "kvn", "csv", "json")
 
@@ -21,6 +29,46 @@ def assert_elements_close(a: MeanElements, b: MeanElements) -> None:
             ), f"{field.name}: {va} != {vb}"
         else:
             assert va == vb, f"{field.name}: {va} != {vb}"
+
+
+# Check all combinations allowed by OMM spec 7.5.10
+_EPOCH_DATES = [
+    # ordinary year
+    ("2026-03-15", datetime(2026, 3, 15)),
+    ("2026-074", datetime(2026, 3, 15)),
+    # leap day
+    ("2028-02-29", datetime(2028, 2, 29)),
+    ("2028-060", datetime(2028, 2, 29)),
+]
+_EPOCH_FRACTIONS = [
+    "",
+    ".1",
+    ".123456",
+]
+_EPOCH_TERMINATORS = ["", "Z"]
+
+
+@pytest.mark.parametrize("epoch_date,expected", _EPOCH_DATES)
+@pytest.mark.parametrize("epoch_fraction", _EPOCH_FRACTIONS)
+@pytest.mark.parametrize("terminator", _EPOCH_TERMINATORS)
+def test_parse_omm_epoch(
+    epoch_date: str, expected: datetime, epoch_fraction: str, terminator: str
+) -> None:
+    epoch_str = f"{epoch_date}T12:34:56{epoch_fraction}{terminator}"
+    expected = expected.replace(hour=12, minute=34, second=56)
+    if epoch_fraction:
+        microseconds = int(float(epoch_fraction) * 1e6)
+        expected = expected.replace(microsecond=microseconds)
+    parsed = parse_omm_epoch(epoch_str)
+
+    # 'Z' denotes UTC; strip tzinfo before comparing since it carries no
+    # offset of its own.
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+
+    assert math.isclose(
+        (parsed - expected).total_seconds(), 0, abs_tol=1e-5
+    ), f"{epoch_str!r} parsed as {parsed}, expected {expected}"
 
 
 BASE_PATH = Path(__file__).parent.parent / "resources/testdata"

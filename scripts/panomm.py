@@ -19,15 +19,35 @@ DEFAULT_JSON_FORMAT = "json-ct"
 DEFAULT_CSV_FORMAT = "csv-ct"
 
 
+def parse_omm_epoch(input: object) -> datetime:
+    in_str = str(input)
+    if in_str.count("-") == 2:
+        # Should be YYYY-MM-DD...
+        return datetime.fromisoformat(in_str)
+    elif in_str.count("-") == 1:
+        # Should be YYYY-DDD...
+        date_part, time_part = in_str.split("T", 1)
+        year_str, day_of_year_str = date_part.split("-", 1)
+        year = int(year_str)
+        day_of_year = int(day_of_year_str)
+        date = datetime(year, 1, 1) + timedelta(days=day_of_year - 1)
+        time_part = time_part.rstrip("Z")
+        hour_str, minute_str, second_str = time_part.split(":", 2)
+        hour = int(hour_str)
+        minute = int(minute_str)
+        second = float(second_str)
+        return date + timedelta(hours=hour, minutes=minute, seconds=second)
+    else:
+        raise ValueError(f"Invalid epoch format: {in_str}")
+
+
 @dataclass
 class MeanElements:
     object_name: str
     norad_cat_id: int
     classification_type: str
     object_id: str
-    epoch: datetime = field(
-        metadata={"initializer": lambda x: datetime.fromisoformat(str(x))}
-    )
+    epoch: datetime = field(metadata={"initializer": parse_omm_epoch})
     mean_motion_dot: float
     mean_motion_ddot: float
     bstar: float
