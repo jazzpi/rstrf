@@ -15,6 +15,7 @@ debian/*
 
 .vscode/
 .claude/
+.superpowers/
 
 # `nix build` output
 result
