@@ -133,10 +133,6 @@ fn clamp_line_to_plot(
 pub(super) struct Overlay {
     #[serde(skip)]
     prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>,
-    show_predictions: bool,
-    show_grid: bool,
-    show_crosshair: bool,
-    absolute_axes: bool,
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
     #[serde(skip)]
@@ -151,10 +147,6 @@ impl Default for Overlay {
     fn default() -> Self {
         Self {
             prediction_cache: AsyncCache::default(),
-            show_predictions: true,
-            show_grid: Default::default(),
-            show_crosshair: Default::default(),
-            absolute_axes: true,
             track_points: Default::default(),
             signals: Default::default(),
             crosshair: Default::default(),
@@ -214,7 +206,7 @@ impl Overlay {
             reference: bounds.0.y + bounds.0.height / 2.0,
             mode: ReferenceMode::Center,
         };
-        let x_ticks = if self.absolute_axes {
+        let x_ticks = if shared.display.absolute_axes {
             y_ticks.snap(y, spectrogram.freq);
             datetime_referenced_ticks(x, spectrogram.start_time(), NUM_TICKS)
         } else {
@@ -252,7 +244,7 @@ impl Overlay {
             format!("{}", t.format(x_tick_format))
         };
         let y_formatter = |v: &f32| format!("{:.1}", (v - y_ticks.reference) / 1000.0);
-        if self.absolute_axes {
+        if shared.display.absolute_axes {
             frame = frame
                 .x_label_formatter(&x_formatter)
                 .y_label_formatter(&y_formatter)
@@ -271,7 +263,7 @@ impl Overlay {
                 .x_desc("Time [s]")
                 .y_desc("Frequency offset [kHz]");
         }
-        if !self.show_grid {
+        if !shared.display.show_grid {
             frame = frame.disable_mesh();
         }
 
@@ -307,7 +299,7 @@ impl Overlay {
             }
         }
 
-        if self.show_predictions
+        if shared.display.show_predictions
             && let Some((_, predictions)) = self.prediction_cache.get_stored()
         {
             let time = &predictions.times;
@@ -414,7 +406,7 @@ impl Overlay {
                 }
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
-        if self.show_crosshair
+        if shared.display.show_crosshair
             && let Some(crosshair) = &self.crosshair.get()
             && bounds.contains(*crosshair)
         {
@@ -456,7 +448,7 @@ impl Overlay {
             )];
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
                 * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
-            let crosshair_text = if self.absolute_axes {
+            let crosshair_text = if shared.display.absolute_axes {
                 let t = spectrogram.start_time() + sec_to_duration(crosshair.0.x);
                 format!(
                     "t = {}\nf = {:.01} kHz\nP = {:.01} dB",
@@ -578,7 +570,7 @@ impl Overlay {
         }
 
         let update_crosshair =
-            matches!(event, mouse::Event::CursorMoved { .. }) && self.show_crosshair;
+            matches!(event, mouse::Event::CursorMoved { .. }) && shared.display.show_crosshair;
         if update_crosshair {
             if cursor.is_over(bounds)
                 && let Some(spectrogram) = &shared.spectrogram
@@ -832,8 +824,8 @@ impl Overlay {
         }
     }
 
-    pub(super) fn status(&self, app: &AppShared) -> Option<&str> {
-        if !self.show_predictions {
+    pub(super) fn status(&self, shared: &SharedState, app: &AppShared) -> Option<&str> {
+        if !shared.display.show_predictions {
             return None;
         }
         if app.satellites.is_empty() {
@@ -880,7 +872,7 @@ impl Overlay {
     pub fn update(
         &mut self,
         message: Message,
-        shared: &SharedState,
+        shared: &mut SharedState,
         app: &AppShared,
     ) -> Task<Message> {
         let msg_task = match message {
@@ -992,19 +984,19 @@ impl Overlay {
                 Task::none()
             }
             Message::TogglePredictions => {
-                self.show_predictions = !self.show_predictions;
+                shared.display.show_predictions = !shared.display.show_predictions;
                 Task::none()
             }
             Message::ToggleGrid => {
-                self.show_grid = !self.show_grid;
+                shared.display.show_grid = !shared.display.show_grid;
                 Task::none()
             }
             Message::ToggleCrosshair => {
-                self.show_crosshair = !self.show_crosshair;
+                shared.display.show_crosshair = !shared.display.show_crosshair;
                 Task::none()
             }
             Message::ToggleAbsoluteAxes => {
-                self.absolute_axes = !self.absolute_axes;
+                shared.display.absolute_axes = !shared.display.absolute_axes;
                 Task::none()
             }
             Message::DeleteInRect(rect) => {
@@ -1116,7 +1108,6 @@ impl PartialEq for Overlay {
         self.track_points == other.track_points
             && self.signals == other.signals
             && self.crosshair == other.crosshair
-            && self.absolute_axes == other.absolute_axes
     }
 }
 

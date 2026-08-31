@@ -83,7 +83,26 @@ pub enum MouseState {
     Marking(MarkAction),
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Default, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct Display {
+    show_predictions: bool,
+    show_grid: bool,
+    show_crosshair: bool,
+    absolute_axes: bool,
+}
+
+impl Default for Display {
+    fn default() -> Self {
+        Self {
+            show_predictions: true,
+            show_grid: false,
+            show_crosshair: false,
+            absolute_axes: true,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct SharedState {
     pub controls: Controls,
     pub spectrogram_files: Vec<PathBuf>,
@@ -91,6 +110,17 @@ pub(crate) struct SharedState {
     pub spectrogram: Option<Spectrogram>,
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
+    pub display: Display,
+}
+
+impl PartialEq for SharedState {
+    fn eq(&self, other: &Self) -> bool {
+        self.controls == other.controls
+            && self.spectrogram_files == other.spectrogram_files
+            && self.spectrogram == other.spectrogram
+            && self.plot_area_margin == other.plot_area_margin
+            && self.display.absolute_axes == other.display.absolute_axes
+    }
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
@@ -210,7 +240,7 @@ impl RFPlot {
         // Trigger a prediction cache check
         let cache_task = self
             .overlay
-            .update(overlay::Message::RefreshCache, &self.shared, app)
+            .update(overlay::Message::RefreshCache, &mut self.shared, app)
             .map(Message::Overlay)
             .map(WindowOut::Msg);
         Task::batch(vec![config_task, cache_task])
@@ -343,7 +373,7 @@ impl Window<Message> for RFPlot {
             .height(Length::Fill)
             .into();
 
-        let status = self.overlay.status(app);
+        let status = self.overlay.status(&self.shared, app);
 
         let mut stack = widget::stack![spectrogram, plot_overlay];
         if let Some(status) = status {
@@ -415,7 +445,7 @@ impl Window<Message> for RFPlot {
             Message::Control(message) => self.shared.controls.update(message),
             Message::Overlay(message) => self
                 .overlay
-                .update(message, &self.shared, app)
+                .update(message, &mut self.shared, app)
                 .map(Message::Overlay),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
@@ -438,7 +468,7 @@ impl Window<Message> for RFPlot {
                     self.loading_state = LoadingState::GpuUploading;
 
                     self.overlay
-                        .update(overlay::Message::SpectrogramUpdated, &self.shared, app)
+                        .update(overlay::Message::SpectrogramUpdated, &mut self.shared, app)
                         .map(Message::Overlay)
                 }
                 Err(err) => {
