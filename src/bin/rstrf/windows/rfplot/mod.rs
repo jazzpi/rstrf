@@ -239,6 +239,10 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
     controls.set_power_range(iv.zmin, iv.zmax);
 }
 
+struct PlotChart<'a> {
+    rfplot: &'a RFPlot,
+}
+
 impl Window<Message> for RFPlot {
     fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
         let cmap_task = self
@@ -333,7 +337,7 @@ impl Window<Message> for RFPlot {
             left: self.shared.plot_area_margin,
         })
         .into();
-        let plot_overlay: Element<'_, Message> = ChartWidget::new(self)
+        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart { rfplot: self })
             .width(Length::Fill)
             .height(Length::Fill)
             .into();

@@ -39,7 +39,7 @@ use rfd::AsyncFileDialog;
 use crate::{app::AppShared, windows::rfplot::MarkAction};
 use rstrf::async_cache::AsyncCache;
 
-use super::{MouseState, RFPlot, RectAction, SharedState, control};
+use super::{MouseState, PlotChart, RectAction, SharedState, control};
 
 /// All inputs that determine the satellite pass predictions.
 ///
@@ -1108,11 +1108,11 @@ impl PartialEq for Overlay {
     }
 }
 
-impl Chart<super::Message> for RFPlot {
+impl Chart<super::Message> for PlotChart<'_> {
     type State = ();
 
     fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, chart: ChartBuilder<DB>) {
-        match self.overlay.build_chart(chart, &self.shared) {
+        match self.rfplot.overlay.build_chart(chart, &self.rfplot.shared) {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -1126,23 +1126,25 @@ impl Chart<super::Message> for RFPlot {
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
         let bounds = Rectangle {
-            x: bounds.x + self.shared.plot_area_margin,
+            x: bounds.x + self.rfplot.shared.plot_area_margin,
             y: bounds.y,
-            width: bounds.width - self.shared.plot_area_margin,
-            height: bounds.height - self.shared.plot_area_margin,
+            width: bounds.width - self.rfplot.shared.plot_area_margin,
+            height: bounds.height - self.rfplot.shared.plot_area_margin,
         };
         match event {
             canvas::Event::Mouse(event) => {
-                self.overlay
-                    .handle_mouse(event, bounds, cursor, &self.shared)
+                self.rfplot
+                    .overlay
+                    .handle_mouse(event, bounds, cursor, &self.rfplot.shared)
             }
             canvas::Event::Keyboard(event) => {
                 if let keyboard::Event::ModifiersChanged(modifiers) = event {
-                    self.overlay.modifiers.set(*modifiers);
+                    self.rfplot.overlay.modifiers.set(*modifiers);
                     return (Status::Ignored, None);
                 }
-                self.overlay
-                    .handle_keyboard(event, bounds, cursor, &self.shared)
+                self.rfplot
+                    .overlay
+                    .handle_keyboard(event, bounds, cursor, &self.rfplot.shared)
             }
             _ => {
                 log::debug!("{:?}", event);
@@ -1158,7 +1160,7 @@ impl Chart<super::Message> for RFPlot {
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if cursor.is_over(bounds) {
-            match self.overlay.mouse_state.get() {
+            match self.rfplot.overlay.mouse_state.get() {
                 MouseState::Idle => mouse::Interaction::Idle,
                 MouseState::Panning(_) => mouse::Interaction::Grabbing,
                 MouseState::DrawingRect { .. } | MouseState::Marking(_) => {
