@@ -2,8 +2,6 @@
 //! itself (like axes and overlays). It is also responsible for the user interaction with the plot
 //! (like panning/zooming).
 
-use std::cell::Cell;
-
 use chrono::{DateTime, Duration, Utc};
 use copy_range::CopyRange;
 use iced::{
@@ -129,27 +127,10 @@ fn clamp_line_to_plot(
         .map(data_absolute::Point)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct Overlay {
     #[serde(skip)]
     prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>,
-    #[serde(skip)]
-    crosshair: Cell<Option<data_absolute::Point>>,
-    #[serde(skip)]
-    mouse_state: Cell<MouseState>,
-    #[serde(skip)]
-    modifiers: Cell<keyboard::Modifiers>,
-}
-
-impl Default for Overlay {
-    fn default() -> Self {
-        Self {
-            prediction_cache: AsyncCache::default(),
-            crosshair: Default::default(),
-            mouse_state: Cell::new(MouseState::Idle),
-            modifiers: Cell::new(keyboard::Modifiers::default()),
-        }
-    }
 }
 
 /// We want to use `with_key_points()`, which creates a `WithKeyPoints<RangedCoordf32>`. That
@@ -403,7 +384,7 @@ impl Overlay {
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
         if shared.display.show_crosshair
-            && let Some(crosshair) = &self.crosshair.get()
+            && let Some(crosshair) = &shared.interaction.crosshair.get()
             && bounds.contains(*crosshair)
         {
             let style = ShapeStyle {
@@ -473,7 +454,7 @@ impl Overlay {
             action,
             corner1,
             corner2,
-        } = self.mouse_state.get()
+        } = shared.interaction.mouse_state.get()
         {
             let pa_to_da =
                 PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
@@ -518,7 +499,7 @@ impl Overlay {
         };
         let pos = screen::Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
         let plot_pos = pos * ScreenToPlotArea::new(&screen::Size(bounds.size()));
-        let modifiers = self.modifiers.get();
+        let modifiers = shared.interaction.modifiers.get();
         if let mouse::Event::WheelScrolled { delta } = event {
             let delta = match delta {
                 mouse::ScrollDelta::Lines { x: _, y } => y,
@@ -573,17 +554,20 @@ impl Overlay {
             {
                 let pos = plot_pos
                     * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
-                self.crosshair.set(Some(pos));
+                shared.interaction.crosshair.set(Some(pos));
             } else {
-                self.crosshair.set(None);
+                shared.interaction.crosshair.set(None);
             }
         }
 
-        match self.mouse_state.get() {
+        match shared.interaction.mouse_state.get() {
             MouseState::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     if cursor.is_over(bounds) {
-                        self.mouse_state.set(MouseState::Panning(plot_pos));
+                        shared
+                            .interaction
+                            .mouse_state
+                            .set(MouseState::Panning(plot_pos));
                         return (Status::Captured, None);
                     }
                 }
@@ -612,11 +596,14 @@ impl Overlay {
             },
             MouseState::Panning(prev_pos) => match event {
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    self.mouse_state.set(MouseState::Idle);
+                    shared.interaction.mouse_state.set(MouseState::Idle);
                 }
                 mouse::Event::CursorMoved { position: _ } => {
                     let mut delta = plot_pos - prev_pos;
-                    self.mouse_state.set(MouseState::Panning(plot_pos));
+                    shared
+                        .interaction
+                        .mouse_state
+                        .set(MouseState::Panning(plot_pos));
                     if modifiers.shift() {
                         delta.0.y = 0.0;
                     }
@@ -631,7 +618,7 @@ impl Overlay {
                 action, corner1, ..
             } => match event {
                 mouse::Event::CursorMoved { .. } => {
-                    self.mouse_state.set(MouseState::DrawingRect {
+                    shared.interaction.mouse_state.set(MouseState::DrawingRect {
                         action,
                         corner1,
                         corner2: plot_pos,
@@ -639,7 +626,7 @@ impl Overlay {
                     return (Status::Captured, Some(Message::Refresh.into()));
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    self.mouse_state.set(MouseState::Idle);
+                    shared.interaction.mouse_state.set(MouseState::Idle);
                     if let Some(spectrogram) = &shared.spectrogram {
                         let pa_to_da = PlotAreaToDataAbsolute::new(
                             &shared.controls.bounds(),
@@ -688,7 +675,7 @@ impl Overlay {
                 } else if matches!(event, mouse::Event::ButtonPressed(mouse::Button::Left))
                     && !cursor.is_over(bounds)
                 {
-                    self.mouse_state.set(MouseState::Idle);
+                    shared.interaction.mouse_state.set(MouseState::Idle);
                     return (Status::Captured, None);
                 }
             }
@@ -712,24 +699,28 @@ impl Overlay {
         let keyboard::Event::KeyReleased { key, .. } = event else {
             return (Status::Ignored, None);
         };
-        let modifiers = self.modifiers.get();
+        let modifiers = shared.interaction.modifiers.get();
 
-        if matches!(self.mouse_state.get(), MouseState::Marking(_)) && !is_modifier(key) {
-            self.mouse_state.set(MouseState::Idle);
+        if matches!(shared.interaction.mouse_state.get(), MouseState::Marking(_))
+            && !is_modifier(key)
+        {
+            shared.interaction.mouse_state.set(MouseState::Idle);
         }
 
         // Some keys should work regardless of cursor position...
         let pan = if modifiers.shift() { 0.5 } else { 1.0 };
         match key.as_ref() {
-            keyboard::Key::Named(keyboard::key::Named::Escape) => match self.mouse_state.get() {
-                MouseState::Idle => (),
-                MouseState::Panning(_) => (),
-                MouseState::DrawingRect { .. } => {
-                    self.mouse_state.set(MouseState::Idle);
-                    return (Status::Captured, Some(Message::Refresh.into()));
+            keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                match shared.interaction.mouse_state.get() {
+                    MouseState::Idle => (),
+                    MouseState::Panning(_) => (),
+                    MouseState::DrawingRect { .. } => {
+                        shared.interaction.mouse_state.set(MouseState::Idle);
+                        return (Status::Captured, Some(Message::Refresh.into()));
+                    }
+                    MouseState::Marking(_) => shared.interaction.mouse_state.set(MouseState::Idle),
                 }
-                MouseState::Marking(_) => self.mouse_state.set(MouseState::Idle),
-            },
+            }
             keyboard::Key::Character("s") => {
                 return (Status::Captured, Some(Message::MarkTrackpoints.into()));
             }
@@ -784,10 +775,10 @@ impl Overlay {
         match key.as_ref() {
             keyboard::Key::Character("d")
                 if !modifiers.shift()
-                    && matches!(self.mouse_state.get(), MouseState::Idle)
+                    && matches!(shared.interaction.mouse_state.get(), MouseState::Idle)
                     && shared.spectrogram.is_some() =>
             {
-                self.mouse_state.set(MouseState::DrawingRect {
+                shared.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Delete,
                     corner1: plot_pos,
                     corner2: plot_pos,
@@ -795,10 +786,10 @@ impl Overlay {
                 (Status::Captured, None)
             }
             keyboard::Key::Character("z")
-                if matches!(self.mouse_state.get(), MouseState::Idle)
+                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle)
                     && shared.spectrogram.is_some() =>
             {
-                self.mouse_state.set(MouseState::DrawingRect {
+                shared.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Zoom,
                     corner1: plot_pos,
                     corner2: plot_pos,
@@ -806,10 +797,10 @@ impl Overlay {
                 (Status::Captured, None)
             }
             keyboard::Key::Character("m")
-                if matches!(self.mouse_state.get(), MouseState::Idle)
+                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle)
                     && shared.spectrogram.is_some() =>
             {
-                self.mouse_state.set(MouseState::DrawingRect {
+                shared.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::MarkCentroid,
                     corner1: plot_pos,
                     corner2: plot_pos,
@@ -874,15 +865,19 @@ impl Overlay {
         let msg_task = match message {
             Message::Refresh => Task::none(),
             Message::MarkTrackpoints => {
-                if matches!(self.mouse_state.get(), MouseState::Idle) {
-                    self.mouse_state
+                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle) {
+                    shared
+                        .interaction
+                        .mouse_state
                         .set(MouseState::Marking(MarkAction::Trackpoint));
                 }
                 Task::none()
             }
             Message::MarkSignals => {
-                if matches!(self.mouse_state.get(), MouseState::Idle) {
-                    self.mouse_state
+                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle) {
+                    shared
+                        .interaction
+                        .mouse_state
                         .set(MouseState::Marking(MarkAction::Signal));
                 }
                 Task::none()
@@ -964,7 +959,7 @@ impl Overlay {
             Message::SpectrogramUpdated => {
                 shared.marks.track_points.clear();
                 shared.marks.signals.clear();
-                self.crosshair.set(None);
+                shared.interaction.crosshair.set(None);
                 Task::none()
             }
             Message::RefreshCache => {
@@ -1135,7 +1130,7 @@ impl Chart<super::Message> for PlotChart<'_> {
             }
             canvas::Event::Keyboard(event) => {
                 if let keyboard::Event::ModifiersChanged(modifiers) = event {
-                    self.rfplot.overlay.modifiers.set(*modifiers);
+                    self.rfplot.shared.interaction.modifiers.set(*modifiers);
                     return (Status::Ignored, None);
                 }
                 self.rfplot
@@ -1156,7 +1151,7 @@ impl Chart<super::Message> for PlotChart<'_> {
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if cursor.is_over(bounds) {
-            match self.rfplot.overlay.mouse_state.get() {
+            match self.rfplot.shared.interaction.mouse_state.get() {
                 MouseState::Idle => mouse::Interaction::Idle,
                 MouseState::Panning(_) => mouse::Interaction::Grabbing,
                 MouseState::DrawingRect { .. } | MouseState::Marking(_) => {

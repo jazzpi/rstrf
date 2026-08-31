@@ -1,9 +1,10 @@
-use std::{path::PathBuf, pin::Pin, sync::Arc};
+use std::{cell::Cell, path::PathBuf, pin::Pin, sync::Arc};
 
 use futures_util::{SinkExt, Stream};
 use iced::{
     Element, Length, Padding, Subscription, Task,
     alignment::{Horizontal, Vertical},
+    keyboard,
     widget::{self, button, container},
     window,
 };
@@ -108,6 +109,13 @@ pub(crate) struct Marks {
     signals: Vec<data_absolute::Point>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Interaction {
+    crosshair: Cell<Option<data_absolute::Point>>,
+    mouse_state: Cell<MouseState>,
+    modifiers: Cell<keyboard::Modifiers>,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct SharedState {
     pub controls: Controls,
@@ -118,6 +126,8 @@ pub(crate) struct SharedState {
     pub plot_area_margin: f32,
     pub display: Display,
     pub marks: Marks,
+    #[serde(skip)]
+    pub interaction: Interaction,
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
