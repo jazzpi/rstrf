@@ -83,7 +83,7 @@ pub enum MouseState {
     Marking(MarkAction),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Display {
     show_predictions: bool,
     show_grid: bool,
@@ -111,16 +111,6 @@ pub(crate) struct SharedState {
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
     pub display: Display,
-}
-
-impl PartialEq for SharedState {
-    fn eq(&self, other: &Self) -> bool {
-        self.controls == other.controls
-            && self.spectrogram_files == other.spectrogram_files
-            && self.spectrogram == other.spectrogram
-            && self.plot_area_margin == other.plot_area_margin
-            && self.display.absolute_axes == other.display.absolute_axes
-    }
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
@@ -191,12 +181,6 @@ pub struct RFPlot {
     /// Handle given to `Primitive` so `prepare()` can fire the wakeup.
     #[serde(skip)]
     pub gpu_notify: Option<Arc<tokio::sync::Notify>>,
-}
-
-impl PartialEq for RFPlot {
-    fn eq(&self, other: &Self) -> bool {
-        self.shared == other.shared && self.overlay == other.overlay && self.id == other.id
-    }
 }
 
 impl RFPlot {

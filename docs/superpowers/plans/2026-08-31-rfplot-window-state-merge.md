@@ -561,14 +561,16 @@ git commit -m "refactor: move Overlay's display toggles onto SharedState"
 - Modify: `src/bin/rstrf/windows/rfplot/overlay.rs`
 
 **Interfaces:**
-- Produces: `Marks { track_points: Vec<data_absolute::Point>, signals: Vec<data_absolute::Point> }`, a new field `pub marks: Marks` on `SharedState`. Unlike `Display`, both fields of `Marks` participate in equality — this matches `Overlay`'s current manual `PartialEq`, so `Marks` can safely `#[derive(PartialEq)]` in full.
+- Produces: `Marks { track_points: Vec<data_absolute::Point>, signals: Vec<data_absolute::Point> }`, a new field `pub marks: Marks` on `SharedState`.
+
+**Note:** `RFPlot`/`SharedState`/`Overlay`/`Display`'s `PartialEq` impls were removed entirely in a standalone commit before this task (they were dead code — nothing in the compiled binary, `plotters-iced2`, or `iced_widget::shader::Program` ever consumed that equality; the requirement had only ever propagated down transitively from a now-uncompiled `Workspace`/`PaneTree`/`Pane` type). Earlier drafts of this plan (and every subsequent task through Task 7) assumed that `PartialEq` machinery was load-bearing and had to be threaded through each relocation — ignore those instructions. `Marks` does not need to derive `PartialEq`, and no `impl PartialEq for SharedState`/`Overlay` exists to extend.
 
 - [ ] **Step 1: Add `Marks` to `mod.rs`**
 
 Add next to `Display`:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct Marks {
     track_points: Vec<data_absolute::Point>,
     signals: Vec<data_absolute::Point>,
@@ -577,16 +579,15 @@ struct Marks {
 
 This needs `data_absolute` in scope — `mod.rs` does not currently import it; add `data_absolute` to the existing `use rstrf::coord::{data_normalized, plot_area};` import, making it `use rstrf::coord::{data_absolute, data_normalized, plot_area};`.
 
-- [ ] **Step 2: Add the field to `SharedState` and extend the manual `PartialEq`**
+- [ ] **Step 2: Add the field to `SharedState`**
 
-Add `pub marks: Marks,` to the `SharedState` struct (from Task 4), and extend the `impl PartialEq for SharedState` block with `&& self.marks == other.marks`.
+Add `pub marks: Marks,` to the `SharedState` struct (from Task 4).
 
 - [ ] **Step 3: Remove the fields from `Overlay` and read/write them via `shared.marks` instead**
 
 In `overlay.rs`:
 
 - Remove `track_points: Vec<data_absolute::Point>` and `signals: Vec<data_absolute::Point>` from the `Overlay` struct, and their initializers from `impl Default for Overlay`.
-- Remove `track_points`/`signals` from `impl PartialEq for Overlay` (only `crosshair` remains there after this task).
 - `Overlay::update`'s `AddTrackPoint`, `AddSignal`, `DeleteMark`, `ClearAll`, `FindSignals`, `FoundSignals`, `DeleteInRect`, `MarkCentroid`, `SaveSignals` arms all read or mutate `self.track_points`/`self.signals` — after Task 4, `Overlay::update` already takes `shared: &mut SharedState`, so change these to `shared.marks.track_points`/`shared.marks.signals`.
 - `Overlay::build_chart`, `handle_mouse` read `self.track_points`/`self.signals` (e.g. the `closest_mark(pos, ..., &self.track_points, &self.signals)` call, and the two `draw_series` calls over `self.track_points.iter()`/`self.signals.iter()`) — both already take `shared: &SharedState`, so change these to `shared.marks.track_points`/`shared.marks.signals`.
 
@@ -623,8 +624,6 @@ git commit -m "refactor: move Overlay's track points/signals onto SharedState"
 **Interfaces:**
 - Produces: `Interaction { crosshair: Cell<Option<data_absolute::Point>>, mouse_state: Cell<MouseState>, modifiers: Cell<keyboard::Modifiers> }`, a new field `pub interaction: Interaction` on `SharedState`.
 
-**Important non-obvious detail:** only `crosshair` participates in `Overlay`'s current equality check — `mouse_state` and `modifiers` are deliberately excluded (they're pure transient interaction bookkeeping, not state that should trigger a redraw comparison). Do **not** derive `PartialEq` on `Interaction` — deriving it would silently start comparing `mouse_state`/`modifiers` too, changing behavior. Keep the hand-written comparison at the `SharedState` level, touching only `.crosshair`.
-
 - [ ] **Step 1: Add `Interaction` to `mod.rs`**
 
 `keyboard::Modifiers` needs `iced::keyboard` in scope in `mod.rs` — add `keyboard` to the existing `iced::{...}` import list.
@@ -642,16 +641,15 @@ struct Interaction {
 
 `Cell` needs `std::cell::Cell` in scope in `mod.rs` — add `use std::cell::Cell;` (or fold it into an existing `std::` import if one exists).
 
-- [ ] **Step 2: Add the field to `SharedState`, skip it in serde, and extend the manual `PartialEq`**
+- [ ] **Step 2: Add the field to `SharedState` and skip it in serde**
 
-Add `#[serde(skip)] pub interaction: Interaction,` to the `SharedState` struct, and extend `impl PartialEq for SharedState` with `&& self.interaction.crosshair == other.interaction.crosshair` (not `mouse_state`, not `modifiers`).
+Add `#[serde(skip)] pub interaction: Interaction,` to the `SharedState` struct.
 
 - [ ] **Step 3: Remove the fields from `Overlay` and read/write them via `shared.interaction` instead**
 
 In `overlay.rs`:
 
 - Remove `crosshair`, `mouse_state`, `modifiers` (all three `Cell<_>` fields, all `#[serde(skip)]`) from the `Overlay` struct, and their initializers from `impl Default for Overlay`.
-- Remove `crosshair` from `impl PartialEq for Overlay` — after this task, `Overlay`'s manual `PartialEq` impl has nothing left to compare (`track_points`/`signals` moved in Task 5, `absolute_axes` in Task 4, `crosshair` now); leave the impl in place with an empty-bodied `true` for now — Task 7 deletes the whole `Overlay` struct anyway.
 - `handle_mouse` and `handle_keyboard` both already take `shared: &SharedState` — change every `self.crosshair`/`self.mouse_state`/`self.modifiers` in their bodies to `shared.interaction.crosshair`/`shared.interaction.mouse_state`/`shared.interaction.modifiers`.
 - The `impl Chart<super::Message> for PlotChart<'_>` block in `mod.rs` (from Task 1) reads `self.rfplot.overlay.modifiers.set(*modifiers)` (in `update`) and `self.rfplot.overlay.mouse_state.get()` (in `mouse_interaction`) — change both to `self.rfplot.shared.interaction.modifiers`/`self.rfplot.shared.interaction.mouse_state`.
 
@@ -687,7 +685,7 @@ git commit -m "refactor: move Overlay's Cell-based interaction state onto Shared
 
 **Interfaces:**
 - Consumes: `SharedState` now carrying `display`, `marks`, `interaction` (Tasks 4–6).
-- Produces: `SharedState` also carrying `#[serde(skip)] pub prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>`. The `Overlay` type, its `Default` impl, and its `PartialEq` impl are deleted entirely. Its methods (`build_chart`, `handle_mouse`, `handle_keyboard`, `status`, `check_cache`, `update`) become inherent methods on `SharedState` (`impl SharedState { ... }` in `overlay.rs`), each dropping the now-redundant `shared: &SharedState`/`&mut SharedState` parameter (`self` already is what `shared` used to be).
+- Produces: `SharedState` also carrying `#[serde(skip)] pub prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>`. The `Overlay` type and its `Default` impl are deleted entirely. Its methods (`build_chart`, `handle_mouse`, `handle_keyboard`, `status`, `check_cache`, `update`) become inherent methods on `SharedState` (`impl SharedState { ... }` in `overlay.rs`), each dropping the now-redundant `shared: &SharedState`/`&mut SharedState` parameter (`self` already is what `shared` used to be).
 
 At this point `Overlay` is an empty shell — every field it had has moved to `SharedState`. This task removes the shell and its methods' redundant second `self`-like parameter.
 
@@ -703,9 +701,9 @@ and use `rfplot::overlay::PredictionKey` (already `pub(crate)` in `overlay.rs`) 
 
 Delete the `#[serde(skip)] prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>,` field from `Overlay` and its `AsyncCache::default()` initializer from `impl Default for Overlay`.
 
-- [ ] **Step 2: Delete `Overlay`'s struct, `Default`, and `PartialEq` definitions**
+- [ ] **Step 2: Delete `Overlay`'s struct and `Default` definitions**
 
-Delete the `struct Overlay { ... }` definition (now empty), its `impl Default for Overlay { ... }`, and its `impl PartialEq for Overlay { ... }` (now comparing nothing, per Task 6).
+Delete the `struct Overlay { ... }` definition (now empty) and its `impl Default for Overlay { ... }`.
 
 - [ ] **Step 3: Turn `impl Overlay { ... }` into `impl SharedState { ... }`**
 
@@ -728,7 +726,7 @@ In `mod.rs`:
 - `RFPlot::update`'s `Message::Overlay` arm: `self.overlay.update(message, &self.shared, app)` → `self.shared.update(message, app)`.
 - `RFPlot::update`'s `Message::SpectrogramLoaded` arm: `self.overlay.update(overlay::Message::SpectrogramUpdated, &self.shared, app)` → `self.shared.update(overlay::Message::SpectrogramUpdated, app)`.
 - `RFPlot::view`: `let status = self.overlay.status(app);` → `let status = self.shared.status(app);`.
-- Remove the `overlay: overlay::Overlay` field from the `RFPlot` struct (and its `overlay::Overlay::default()` initializer in `RFPlot::new()`, and `self.overlay == other.overlay` from `RFPlot`'s manual `PartialEq`).
+- Remove the `overlay: overlay::Overlay` field from the `RFPlot` struct (and its `overlay::Overlay::default()` initializer in `RFPlot::new()`).
 - The `impl Chart<super::Message> for PlotChart<'_>` block (Task 1) reads `self.rfplot.overlay.build_chart(...)`, `self.rfplot.overlay.handle_mouse(...)`, `self.rfplot.overlay.handle_keyboard(...)` — change each to `self.rfplot.shared.build_chart(...)`, `self.rfplot.shared.handle_mouse(...)`, `self.rfplot.shared.handle_keyboard(...)` (and drop the now-redundant `&self.rfplot.shared` argument each was passing).
 
 To find every remaining reference to the deleted `overlay` field or type, run:

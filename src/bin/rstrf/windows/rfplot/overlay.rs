@@ -1103,14 +1103,6 @@ fn closest_mark(
         .map(|(action, point, _)| (action, point))
 }
 
-impl PartialEq for Overlay {
-    fn eq(&self, other: &Self) -> bool {
-        self.track_points == other.track_points
-            && self.signals == other.signals
-            && self.crosshair == other.crosshair
-    }
-}
-
 impl Chart<super::Message> for PlotChart<'_> {
     type State = ();
 
