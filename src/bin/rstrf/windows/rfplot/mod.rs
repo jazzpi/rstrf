@@ -241,6 +241,7 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
 
 struct PlotChart<'a> {
     rfplot: &'a RFPlot,
+    app: &'a AppShared,
 }
 
 impl Window<Message> for RFPlot {
@@ -282,7 +283,7 @@ impl Window<Message> for RFPlot {
         }]
     }
 
-    fn view(&self, app: &AppShared) -> Element<'_, WindowOut<Message>> {
+    fn view<'a>(&'a self, app: &'a AppShared) -> Element<'a, WindowOut<Message>> {
         match &self.loading_state {
             LoadingState::LoadingFiles { loaded, total } => {
                 return container(widget::text(format!(
@@ -337,7 +338,7 @@ impl Window<Message> for RFPlot {
             left: self.shared.plot_area_margin,
         })
         .into();
-        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart { rfplot: self })
+        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart { rfplot: self, app })
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
