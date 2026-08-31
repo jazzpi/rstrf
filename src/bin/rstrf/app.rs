@@ -67,6 +67,13 @@ impl AppShared {
             self.config.site.clone()
         }
     }
+
+    pub fn satellite_classification(&self, norad_id: u64) -> Option<sgp4::Classification> {
+        self.satellites
+            .iter()
+            .find(|(sat, _)| sat.norad_id() == norad_id)
+            .map(|(sat, _)| sat.elements.classification.clone())
+    }
 }
 
 /// The application model stores app-specific state used to describe its interface and
@@ -631,5 +638,32 @@ impl AppModel {
             satellites,
             frequencies,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_satellite() -> Satellite {
+        let line1 = "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753";
+        let line2 = "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667";
+        Satellite::from_tle(Some("V1".to_string()), line1, line2, &HashMap::new()).unwrap()
+    }
+
+    #[test]
+    fn satellite_classification_finds_matching_norad_id() {
+        let mut shared = AppShared::default();
+        shared.satellites = vec![(test_satellite(), true)];
+        assert_eq!(
+            shared.satellite_classification(5),
+            Some(sgp4::Classification::Unclassified)
+        );
+    }
+
+    #[test]
+    fn satellite_classification_returns_none_for_unknown_id() {
+        let shared = AppShared::default();
+        assert_eq!(shared.satellite_classification(99999), None);
     }
 }

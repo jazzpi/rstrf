@@ -81,6 +81,16 @@ fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey
 /// render as radius-5 circles, so this gives a comfortable grab radius around them.
 const DELETE_TOLERANCE_PX: f32 = 15.0;
 
+const ORANGE: RGBColor = RGBColor(255, 165, 0);
+
+fn prediction_color(classification: Option<sgp4::Classification>) -> RGBColor {
+    match classification {
+        Some(sgp4::Classification::Secret) => RED,
+        Some(sgp4::Classification::Classified) => ORANGE,
+        Some(sgp4::Classification::Unclassified) | None => GREEN,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     /// No-op to force a redraw
@@ -187,6 +197,7 @@ impl Overlay {
         &self,
         mut chart: ChartBuilder<DB>,
         shared: &SharedState,
+        app: &AppShared,
     ) -> Result<(), String> {
         let Some(spectrogram) = &shared.spectrogram else {
             return Err("No spectrogram loaded".to_string());
@@ -302,6 +313,7 @@ impl Overlay {
             let time = &predictions.times;
             for prediction in predictions.iter_satellites() {
                 let (id, passes) = prediction;
+                let color = prediction_color(app.satellite_classification(id));
                 log::trace!("Plotting {} passes for satellite {}", passes.len(), id);
                 for pass in passes {
                     let time = time.slice(s![pass.time_range.clone()]);
@@ -320,7 +332,7 @@ impl Overlay {
                             .draw_series(LineSeries::new(
                                 izip!(time.iter(), freq.iter())
                                     .map(|(&t, &f)| (t as f32, (f as f32 - spectrogram.freq))),
-                                &GREEN,
+                                &color,
                             ))
                             .map_err(|e| {
                                 format!("Could not draw line for satellite {}: {:?}", id, e)
@@ -333,7 +345,7 @@ impl Overlay {
                             .draw_series(vec![Text::new(
                                 format!("{:06}", id),
                                 (first_time, first_freq),
-                                ("sans-serif", 12).into_font().color(&GREEN),
+                                ("sans-serif", 12).into_font().color(&color),
                             )])
                             .map_err(|e| {
                                 format!("Could not draw label for satellite {}: {:?}", id, e)
@@ -1112,7 +1124,11 @@ impl Chart<super::Message> for PlotChart<'_> {
     type State = ();
 
     fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, chart: ChartBuilder<DB>) {
-        match self.rfplot.overlay.build_chart(chart, &self.rfplot.shared) {
+        match self
+            .rfplot
+            .overlay
+            .build_chart(chart, &self.rfplot.shared, self.app)
+        {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -1312,5 +1328,19 @@ mod tests {
             closest_mark(sp(0.0, 0.0), &identity_da_to_screen(), &[], &signals),
             Some((MarkAction::Signal, pt(DELETE_TOLERANCE_PX, 0.0)))
         );
+    }
+
+    #[test]
+    fn prediction_color_maps_classification_to_expected_rgb() {
+        assert_eq!(prediction_color(None), GREEN);
+        assert_eq!(
+            prediction_color(Some(sgp4::Classification::Unclassified)),
+            GREEN
+        );
+        assert_eq!(
+            prediction_color(Some(sgp4::Classification::Classified)),
+            ORANGE
+        );
+        assert_eq!(prediction_color(Some(sgp4::Classification::Secret)), RED);
     }
 }
