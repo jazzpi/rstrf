@@ -104,8 +104,8 @@ impl Default for Display {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct Marks {
-    pub track_points: Vec<data_absolute::Point>,
-    pub signals: Vec<data_absolute::Point>,
+    track_points: Vec<data_absolute::Point>,
+    signals: Vec<data_absolute::Point>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
