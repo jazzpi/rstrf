@@ -119,7 +119,7 @@ pub(crate) struct Interaction {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
-pub(crate) struct SharedState {
+pub(crate) struct State {
     pub controls: Controls,
     pub spectrogram_files: Vec<PathBuf>,
     #[serde(skip)]
@@ -187,7 +187,7 @@ fn gpu_done_stream(
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RFPlot {
-    shared: SharedState,
+    state: State,
     id: Uuid,
     #[serde(skip)]
     initial_view: Option<Box<InitialView>>,
@@ -205,13 +205,13 @@ pub struct RFPlot {
 
 impl RFPlot {
     pub fn new() -> Self {
-        let shared = SharedState {
+        let state = State {
             plot_area_margin: 75.0,
             ..Default::default()
         };
         let id = Uuid::new_v4();
         Self {
-            shared,
+            state,
             id,
             initial_view: None,
             loading_state: LoadingState::default(),
@@ -223,7 +223,7 @@ impl RFPlot {
 
     pub fn with_initial_view(files: Vec<PathBuf>, view: InitialView) -> Self {
         let mut rfplot = Self::new();
-        rfplot.shared.spectrogram_files = files;
+        rfplot.state.spectrogram_files = files;
         rfplot.initial_view = Some(Box::new(view));
         rfplot
     }
@@ -231,7 +231,7 @@ impl RFPlot {
     // TODO
     pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
         let config_task = if matches!(event, AppEvent::ConfigUpdated) {
-            self.shared
+            self.state
                 .controls
                 .update(control::Message::UpdateAveragePlotting(
                     app.config.average_plotting,
@@ -242,7 +242,7 @@ impl RFPlot {
         };
         // Trigger a prediction cache check
         let cache_task = self
-            .shared
+            .state
             .update(overlay::Message::RefreshCache, app)
             .map(Message::Overlay)
             .map(WindowOut::Msg);
@@ -280,25 +280,25 @@ struct PlotChart<'a> {
 impl Window<Message> for RFPlot {
     fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
         let cmap_task = self
-            .shared
+            .state
             .controls
             .update(control::Message::UpdateColormap(
                 app.config.default_colormap,
             ))
             .map(WindowOut::Msg);
         let average_task = self
-            .shared
+            .state
             .controls
             .update(control::Message::UpdateAveragePlotting(
                 app.config.average_plotting,
             ))
             .map(WindowOut::Msg);
-        let spec_task = if self.shared.spectrogram_files.is_empty() {
+        let spec_task = if self.state.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
                 id,
-                Message::LoadSpectrogram(self.shared.spectrogram_files.clone()),
+                Message::LoadSpectrogram(self.state.spectrogram_files.clone()),
                 app,
             )
         };
@@ -347,7 +347,7 @@ impl Window<Message> for RFPlot {
 
         // The plot is implemented as a stack of two layers: the spectrogram itself (see
         // `shader.rs`) and the overlay (see `overlay.rs`).
-        if self.shared.spectrogram.is_none() {
+        if self.state.spectrogram.is_none() {
             return container(
                 button("Open Spectrogram")
                     .style(button::primary)
@@ -357,7 +357,7 @@ impl Window<Message> for RFPlot {
             .into();
         }
 
-        let controls = self.shared.controls.view(&self.shared).map(Message::from);
+        let controls = self.state.controls.view(&self.state).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)
@@ -367,8 +367,8 @@ impl Window<Message> for RFPlot {
         .padding(Padding {
             top: 0.0,
             right: 0.0,
-            bottom: self.shared.plot_area_margin,
-            left: self.shared.plot_area_margin,
+            bottom: self.state.plot_area_margin,
+            left: self.state.plot_area_margin,
         })
         .into();
         let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart { rfplot: self, app })
@@ -376,7 +376,7 @@ impl Window<Message> for RFPlot {
             .height(Length::Fill)
             .into();
 
-        let status = self.shared.status(app);
+        let status = self.state.status(app);
 
         let mut stack = widget::stack![spectrogram, plot_overlay];
         if let Some(status) = status {
@@ -422,7 +422,7 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::Idle;
                 self.gpu_watcher = None;
                 self.gpu_notify = None;
-                if let Some(spec) = &self.shared.spectrogram {
+                if let Some(spec) = &self.state.spectrogram {
                     return Task::done(WindowOut::Effect(WindowEffect::PlotReady(
                         id,
                         spec.absolute_bounds(),
@@ -442,11 +442,14 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
                 return Task::done(WindowOut::Effect(WindowEffect::ReloadCatalog));
             }
+            Message::Control(control::Message::ResetView) => {
+                self.state.marks = Default::default();
+            }
             _ => (),
         };
         let result = match message {
-            Message::Control(message) => self.shared.controls.update(message),
-            Message::Overlay(message) => self.shared.update(message, app).map(Message::Overlay),
+            Message::Control(message) => self.state.controls.update(message),
+            Message::Overlay(message) => self.state.update(message, app).map(Message::Overlay),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
                 Task::none()
@@ -454,20 +457,20 @@ impl Window<Message> for RFPlot {
             Message::SpectrogramLoaded(result) => match result {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
-                    self.shared.controls.set_spectrogram(&spec);
+                    self.state.controls.set_spectrogram(&spec);
                     if let Some(iv) = self.initial_view.take() {
-                        apply_initial_view(&mut self.shared.controls, &spec, &iv);
+                        apply_initial_view(&mut self.state.controls, &spec, &iv);
                     }
                     let spec_id = spec.id;
-                    self.shared.spectrogram = Some(spec);
-                    self.shared.spectrogram_files = paths;
+                    self.state.spectrogram = Some(spec);
+                    self.state.spectrogram_files = paths;
 
                     let notify = Arc::new(tokio::sync::Notify::new());
                     self.gpu_notify = Some(notify.clone());
                     self.gpu_watcher = Some(GpuDoneWatcher { spec_id, notify });
                     self.loading_state = LoadingState::GpuUploading;
 
-                    self.shared
+                    self.state
                         .update(overlay::Message::SpectrogramUpdated, app)
                         .map(Message::Overlay)
                 }
@@ -522,7 +525,7 @@ impl Window<Message> for RFPlot {
                 }
             }),
             Message::SetView(rect) => self
-                .shared
+                .state
                 .controls
                 .update(control::Message::ZoomToRect(rect)),
             Message::Nop => Task::none(),
@@ -560,7 +563,7 @@ impl Window<Message> for RFPlot {
     fn title(&self) -> String {
         format!(
             "Plot: {}",
-            self.shared
+            self.state
                 .spectrogram
                 .as_ref()
                 .map(|s| s.start_time().to_string())

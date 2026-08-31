@@ -35,7 +35,7 @@ use rfd::AsyncFileDialog;
 
 use crate::{app::AppShared, windows::rfplot::MarkAction};
 
-use super::{MouseState, PlotChart, RectAction, SharedState, control};
+use super::{MouseState, PlotChart, RectAction, State, control};
 
 /// All inputs that determine the satellite pass predictions.
 ///
@@ -57,8 +57,8 @@ pub(crate) struct PredictionKey {
     site: Site,
 }
 
-fn prediction_key(shared: &SharedState, app: &AppShared) -> Option<PredictionKey> {
-    let spectrogram = shared.spectrogram.as_ref()?;
+fn prediction_key(state: &State, app: &AppShared) -> Option<PredictionKey> {
+    let spectrogram = state.spectrogram.as_ref()?;
     let site = app.site()?;
     let satellites = app.active_satellite_ids();
     if satellites.is_empty() {
@@ -153,7 +153,7 @@ impl ValueFormatter<f32> for FmtWithKeyPoints {
     }
 }
 
-impl SharedState {
+impl State {
     fn build_chart<DB: DrawingBackend>(
         &self,
         mut chart: ChartBuilder<DB>,
@@ -1071,7 +1071,7 @@ impl Chart<super::Message> for PlotChart<'_> {
     type State = ();
 
     fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, chart: ChartBuilder<DB>) {
-        match self.rfplot.shared.build_chart(chart, self.app) {
+        match self.rfplot.state.build_chart(chart, self.app) {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -1085,19 +1085,19 @@ impl Chart<super::Message> for PlotChart<'_> {
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
         let bounds = Rectangle {
-            x: bounds.x + self.rfplot.shared.plot_area_margin,
+            x: bounds.x + self.rfplot.state.plot_area_margin,
             y: bounds.y,
-            width: bounds.width - self.rfplot.shared.plot_area_margin,
-            height: bounds.height - self.rfplot.shared.plot_area_margin,
+            width: bounds.width - self.rfplot.state.plot_area_margin,
+            height: bounds.height - self.rfplot.state.plot_area_margin,
         };
         match event {
-            canvas::Event::Mouse(event) => self.rfplot.shared.handle_mouse(event, bounds, cursor),
+            canvas::Event::Mouse(event) => self.rfplot.state.handle_mouse(event, bounds, cursor),
             canvas::Event::Keyboard(event) => {
                 if let keyboard::Event::ModifiersChanged(modifiers) = event {
-                    self.rfplot.shared.interaction.modifiers.set(*modifiers);
+                    self.rfplot.state.interaction.modifiers.set(*modifiers);
                     return (Status::Ignored, None);
                 }
-                self.rfplot.shared.handle_keyboard(event, bounds, cursor)
+                self.rfplot.state.handle_keyboard(event, bounds, cursor)
             }
             _ => {
                 log::debug!("{:?}", event);
@@ -1113,7 +1113,7 @@ impl Chart<super::Message> for PlotChart<'_> {
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if cursor.is_over(bounds) {
-            match self.rfplot.shared.interaction.mouse_state.get() {
+            match self.rfplot.state.interaction.mouse_state.get() {
                 MouseState::Idle => mouse::Interaction::Idle,
                 MouseState::Panning(_) => mouse::Interaction::Grabbing,
                 MouseState::DrawingRect { .. } | MouseState::Marking(_) => {

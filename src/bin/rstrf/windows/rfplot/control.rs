@@ -160,7 +160,7 @@ impl Controls {
         .align_y(Vertical::Center)
     }
 
-    pub fn view(&self, shared: &super::SharedState) -> Element<'_, rfplot::Message> {
+    pub fn view(&self, state: &super::State) -> Element<'_, rfplot::Message> {
         let colormaps = Colormap::iter()
             .map(|c| ToolbarButton::LabeledIcon {
                 icon: Icon::Colormap(c),
@@ -239,7 +239,7 @@ impl Controls {
             },
             ToolbarButton::Submenu {
                 toplevel: Box::new(ToolbarButton::Icon {
-                    icon: Icon::Colormap(shared.controls.colormap),
+                    icon: Icon::Colormap(state.controls.colormap),
                     tooltip: "Colormap",
                     msg: rfplot::Message::Nop,
                     style: widget::button::primary,
@@ -249,7 +249,7 @@ impl Controls {
         ]);
         let mut result = widget::column![buttons].spacing(8);
         if self.show_controls
-            && let Some(spectrogram) = &shared.spectrogram
+            && let Some(spectrogram) = &state.spectrogram
         {
             let bounds = self.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
             result = result.push(
@@ -362,7 +362,6 @@ impl Controls {
             Message::ResetView => {
                 self.log_scale = Vec2::new(ZOOM_MIN, ZOOM_MIN);
                 self.center = data_normalized::Point::new(0.5, 0.5);
-                return Task::done(rfplot::overlay::Message::ClearAll.into());
             }
             Message::ZoomToRect(rect) => {
                 self.set_view_from_rect_dn(&rect);

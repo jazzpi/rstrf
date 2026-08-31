@@ -1047,8 +1047,8 @@ impl shader::Program<Message> for RFPlot {
     ) -> Self::Primitive {
         Primitive::new(
             self.id,
-            self.shared.controls,
-            self.shared.spectrogram.clone(),
+            self.state.controls,
+            self.state.spectrogram.clone(),
             self.gpu_notify.clone(),
         )
     }
