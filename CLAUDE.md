@@ -22,6 +22,18 @@ A Nix flake is provided for reproducible builds; a Cachix cache at `rstrf.cachix
 
 `scripts/pass_png_historic.py` batches the `pass-png` subcommand over many days of spectrograms, grouping `.bin` files by recording session (rffft or rsmedfilt naming) and selecting the closest-epoch TLE per group from a historic TLE archive.
 
+## Commits
+
+Commits should ideally stand on their own: from reading a commit message (and the diff), it should be apparent what the commit is trying to do. If implementing a feature takes multiple logical chunks of work, these should be committed in separate commits.
+
+After each commit, everything should compile, all tests should pass, and everything should work. WIP commits may violate this rule if appropriate (e.g. a commit would get too large/be hard to follow).
+
+Commit messages should use the Conventional Commits style, with the types `fix`, `feat`, `build`, `chore`, `ci`, `docs`, `refactor`, `perf`, `test`, and `wip`.
+
+If the message header is not enough to understand what a commit is doing, or why it is doing it, include a body with further explanation. Commit bodies should typically not exceed 1--2 paragraphs, but this is not a hard rule.
+
+Agent-authored commits should **always** include a `Co-authored-by: $MODEL $VERSION <$EMAIL>` footer (e.g. `Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>`).
+
 ## Architecture
 
 rSTRF is a GPU-accelerated satellite radio waterfall spectrogram viewer — a Rust rewrite of the `strf` toolkit's `rfplot`. It displays power-vs-frequency-vs-time spectrograms, overlays Doppler-shifted satellite tracks, and detects signals.
