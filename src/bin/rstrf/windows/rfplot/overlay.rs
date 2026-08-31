@@ -133,8 +133,6 @@ fn clamp_line_to_plot(
 pub(super) struct Overlay {
     #[serde(skip)]
     prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>,
-    track_points: Vec<data_absolute::Point>,
-    signals: Vec<data_absolute::Point>,
     #[serde(skip)]
     crosshair: Cell<Option<data_absolute::Point>>,
     #[serde(skip)]
@@ -147,8 +145,6 @@ impl Default for Overlay {
     fn default() -> Self {
         Self {
             prediction_cache: AsyncCache::default(),
-            track_points: Default::default(),
-            signals: Default::default(),
             crosshair: Default::default(),
             mouse_state: Cell::new(MouseState::Idle),
             modifiers: Cell::new(keyboard::Modifiers::default()),
@@ -348,7 +344,7 @@ impl Overlay {
         }
 
         chart
-            .draw_series(self.track_points.iter().filter_map(|pos| {
+            .draw_series(shared.marks.track_points.iter().filter_map(|pos| {
                 if bounds.contains(*pos) {
                     Some(Circle::new(pos.into(), 5, YELLOW.filled()))
                 } else {
@@ -360,7 +356,7 @@ impl Overlay {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    self.track_points.iter().map(|pos| {
+                    shared.marks.track_points.iter().map(|pos| {
                         data_absolute::Point::new(
                             pos.0.x,
                             pos.0.y + shared.controls.track_bw() / 2.0,
@@ -380,7 +376,7 @@ impl Overlay {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    self.track_points.iter().map(|pos| {
+                    shared.marks.track_points.iter().map(|pos| {
                         data_absolute::Point::new(
                             pos.0.x,
                             pos.0.y - shared.controls.track_bw() / 2.0,
@@ -398,7 +394,7 @@ impl Overlay {
             })?;
 
         chart
-            .draw_series(self.signals.iter().filter_map(|pos| {
+            .draw_series(shared.marks.signals.iter().filter_map(|pos| {
                 if bounds.contains(*pos) {
                     Some(Circle::new(pos.into(), 5, WHITE.filled()))
                 } else {
@@ -601,8 +597,8 @@ impl Overlay {
                                 &shared.controls.bounds(),
                                 &spectrogram.bounds(),
                             ),
-                            &self.track_points,
-                            &self.signals,
+                            &shared.marks.track_points,
+                            &shared.marks.signals,
                         )
                     {
                         return (
@@ -893,25 +889,26 @@ impl Overlay {
             }
             Message::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
-                match self
+                match shared
+                    .marks
                     .track_points
                     .binary_search_by(|p| p.0.x.partial_cmp(&pos.0.x).unwrap())
                 {
-                    Ok(idx) => self.track_points[idx] = pos,
-                    Err(idx) => self.track_points.insert(idx, pos),
+                    Ok(idx) => shared.marks.track_points[idx] = pos,
+                    Err(idx) => shared.marks.track_points.insert(idx, pos),
                 }
                 Task::none()
             }
             Message::AddSignal(pos) => {
                 log::debug!("Manually adding signal at position: {:?}", pos);
-                self.signals.push(pos);
+                shared.marks.signals.push(pos);
                 Task::none()
             }
             Message::DeleteMark(action, point) => {
                 log::debug!("Deleting {:?} mark at position: {:?}", action, point);
                 let collection = match action {
-                    MarkAction::Trackpoint => &mut self.track_points,
-                    MarkAction::Signal => &mut self.signals,
+                    MarkAction::Trackpoint => &mut shared.marks.track_points,
+                    MarkAction::Signal => &mut shared.marks.signals,
                 };
                 if let Some(idx) = collection.iter().position(|p| *p == point) {
                     collection.remove(idx);
@@ -919,12 +916,12 @@ impl Overlay {
                 Task::none()
             }
             Message::ClearAll => {
-                self.track_points.clear();
-                self.signals.clear();
+                shared.marks.track_points.clear();
+                shared.marks.signals.clear();
                 Task::none()
             }
             Message::FindSignals => {
-                if self.track_points.len() < 2 {
+                if shared.marks.track_points.len() < 2 {
                     Task::none()
                 } else {
                     let Some(spectrogram) = &shared.spectrogram else {
@@ -932,7 +929,7 @@ impl Overlay {
                         return Task::none();
                     };
                     let spectrogram = spectrogram.clone();
-                    let track_points = self.track_points.clone();
+                    let track_points = shared.marks.track_points.clone();
                     let sigma = shared.controls.signal_sigma();
                     let track_bw = shared.controls.track_bw();
                     Task::future(async move {
@@ -961,12 +958,12 @@ impl Overlay {
                 }
             }
             Message::FoundSignals(signals) => {
-                self.signals = signals;
+                shared.marks.signals = signals;
                 Task::none()
             }
             Message::SpectrogramUpdated => {
-                self.track_points.clear();
-                self.signals.clear();
+                shared.marks.track_points.clear();
+                shared.marks.signals.clear();
                 self.crosshair.set(None);
                 Task::none()
             }
@@ -1000,12 +997,12 @@ impl Overlay {
                 Task::none()
             }
             Message::DeleteInRect(rect) => {
-                self.track_points.retain(|p| !rect.contains(*p));
-                self.signals.retain(|p| !rect.contains(*p));
+                shared.marks.track_points.retain(|p| !rect.contains(*p));
+                shared.marks.signals.retain(|p| !rect.contains(*p));
                 Task::none()
             }
             Message::MarkCentroid(rect) => {
-                self.signals.extend(
+                shared.marks.signals.extend(
                     shared
                         .spectrogram
                         .as_ref()
@@ -1025,10 +1022,10 @@ impl Overlay {
                 let start_time = spectrogram.start_time();
                 let start_mjd = start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
-                let suggested = signals_filename(start_time, center_freq, &self.signals)
+                let suggested = signals_filename(start_time, center_freq, &shared.marks.signals)
                     .unwrap_or_else(|| "out.dat".to_owned());
                 let mut output = String::new();
-                for sig in &self.signals {
+                for sig in &shared.marks.signals {
                     let mjd = start_mjd + sig.0.x as f64 / 86400.0;
                     let freq = center_freq + sig.0.y as f64;
                     output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));

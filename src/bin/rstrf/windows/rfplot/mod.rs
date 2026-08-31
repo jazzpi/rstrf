@@ -11,7 +11,7 @@ use image::RgbaImage;
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{
-    coord::{data_normalized, plot_area},
+    coord::{data_absolute, data_normalized, plot_area},
     menu::MenuItem,
     spectrogram::Spectrogram,
     util::DebugRgbaImage,
@@ -102,6 +102,12 @@ impl Default for Display {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct Marks {
+    pub track_points: Vec<data_absolute::Point>,
+    pub signals: Vec<data_absolute::Point>,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct SharedState {
     pub controls: Controls,
@@ -111,6 +117,7 @@ pub(crate) struct SharedState {
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
     pub display: Display,
+    pub marks: Marks,
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
