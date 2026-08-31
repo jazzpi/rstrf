@@ -30,12 +30,10 @@ use rstrf::{
     signal,
     util::{clip_line, is_modifier, sec_to_duration},
 };
-use serde::{Deserialize, Serialize};
 
 use rfd::AsyncFileDialog;
 
 use crate::{app::AppShared, windows::rfplot::MarkAction};
-use rstrf::async_cache::AsyncCache;
 
 use super::{MouseState, PlotChart, RectAction, SharedState, control};
 
@@ -127,12 +125,6 @@ fn clamp_line_to_plot(
         .map(data_absolute::Point)
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(super) struct Overlay {
-    #[serde(skip)]
-    prediction_cache: AsyncCache<PredictionKey, orbit::Predictions>,
-}
-
 /// We want to use `with_key_points()`, which creates a `WithKeyPoints<RangedCoordf32>`. That
 /// doesn't impl `ValueFormatter<f32>`, which breaks the `configure_mesh()` call. Due to the orphan
 /// rule we can't `impl` it ourselves, so we wrap the `WithKeyPoints` in a newtype.
@@ -161,17 +153,16 @@ impl ValueFormatter<f32> for FmtWithKeyPoints {
     }
 }
 
-impl Overlay {
+impl SharedState {
     fn build_chart<DB: DrawingBackend>(
         &self,
         mut chart: ChartBuilder<DB>,
-        shared: &SharedState,
         app: &AppShared,
     ) -> Result<(), String> {
-        let Some(spectrogram) = &shared.spectrogram else {
+        let Some(spectrogram) = &self.spectrogram else {
             return Err("No spectrogram loaded".to_string());
         };
-        let view_norm = shared.controls.bounds();
+        let view_norm = self.controls.bounds();
         let bounds = view_norm * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
@@ -183,7 +174,7 @@ impl Overlay {
             reference: bounds.0.y + bounds.0.height / 2.0,
             mode: ReferenceMode::Center,
         };
-        let x_ticks = if shared.display.absolute_axes {
+        let x_ticks = if self.display.absolute_axes {
             y_ticks.snap(y, spectrogram.freq);
             datetime_referenced_ticks(x, spectrogram.start_time(), NUM_TICKS)
         } else {
@@ -191,8 +182,8 @@ impl Overlay {
         };
 
         let mut chart = chart
-            .x_label_area_size(shared.plot_area_margin)
-            .y_label_area_size(shared.plot_area_margin)
+            .x_label_area_size(self.plot_area_margin)
+            .y_label_area_size(self.plot_area_margin)
             .build_cartesian_2d(
                 FmtWithKeyPoints(x.into_std().with_key_points(x_ticks)),
                 FmtWithKeyPoints(y.into_std().with_key_points(y_ticks.ticks)),
@@ -221,7 +212,7 @@ impl Overlay {
             format!("{}", t.format(x_tick_format))
         };
         let y_formatter = |v: &f32| format!("{:.1}", (v - y_ticks.reference) / 1000.0);
-        if shared.display.absolute_axes {
+        if self.display.absolute_axes {
             frame = frame
                 .x_label_formatter(&x_formatter)
                 .y_label_formatter(&y_formatter)
@@ -240,7 +231,7 @@ impl Overlay {
                 .x_desc("Time [s]")
                 .y_desc("Frequency offset [kHz]");
         }
-        if !shared.display.show_grid {
+        if !self.display.show_grid {
             frame = frame.disable_mesh();
         }
 
@@ -276,7 +267,7 @@ impl Overlay {
             }
         }
 
-        if shared.display.show_predictions
+        if self.display.show_predictions
             && let Some((_, predictions)) = self.prediction_cache.get_stored()
         {
             let time = &predictions.times;
@@ -325,7 +316,7 @@ impl Overlay {
         }
 
         chart
-            .draw_series(shared.marks.track_points.iter().filter_map(|pos| {
+            .draw_series(self.marks.track_points.iter().filter_map(|pos| {
                 if bounds.contains(*pos) {
                     Some(Circle::new(pos.into(), 5, YELLOW.filled()))
                 } else {
@@ -337,11 +328,8 @@ impl Overlay {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    shared.marks.track_points.iter().map(|pos| {
-                        data_absolute::Point::new(
-                            pos.0.x,
-                            pos.0.y + shared.controls.track_bw() / 2.0,
-                        )
+                    self.marks.track_points.iter().map(|pos| {
+                        data_absolute::Point::new(pos.0.x, pos.0.y + self.controls.track_bw() / 2.0)
                     }),
                 )
                 .map(|v| v.into()),
@@ -357,11 +345,8 @@ impl Overlay {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    shared.marks.track_points.iter().map(|pos| {
-                        data_absolute::Point::new(
-                            pos.0.x,
-                            pos.0.y - shared.controls.track_bw() / 2.0,
-                        )
+                    self.marks.track_points.iter().map(|pos| {
+                        data_absolute::Point::new(pos.0.x, pos.0.y - self.controls.track_bw() / 2.0)
                     }),
                 )
                 .map(|v| v.into()),
@@ -375,7 +360,7 @@ impl Overlay {
             })?;
 
         chart
-            .draw_series(shared.marks.signals.iter().filter_map(|pos| {
+            .draw_series(self.marks.signals.iter().filter_map(|pos| {
                 if bounds.contains(*pos) {
                     Some(Circle::new(pos.into(), 5, WHITE.filled()))
                 } else {
@@ -383,8 +368,8 @@ impl Overlay {
                 }
             }))
             .map_err(|e| format!("Could not draw track points: {:?}", e))?;
-        if shared.display.show_crosshair
-            && let Some(crosshair) = &shared.interaction.crosshair.get()
+        if self.display.show_crosshair
+            && let Some(crosshair) = &self.interaction.crosshair.get()
             && bounds.contains(*crosshair)
         {
             let style = ShapeStyle {
@@ -424,8 +409,8 @@ impl Overlay {
                 ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
             )];
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
-                * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
-            let crosshair_text = if shared.display.absolute_axes {
+                * PlotAreaToDataAbsolute::new(&self.controls.bounds(), &spectrogram.bounds());
+            let crosshair_text = if self.display.absolute_axes {
                 let t = spectrogram.start_time() + sec_to_duration(crosshair.0.x);
                 format!(
                     "t = {}\nf = {:.01} kHz\nP = {:.01} dB",
@@ -454,10 +439,10 @@ impl Overlay {
             action,
             corner1,
             corner2,
-        } = shared.interaction.mouse_state.get()
+        } = self.interaction.mouse_state.get()
         {
             let pa_to_da =
-                PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
+                PlotAreaToDataAbsolute::new(&self.controls.bounds(), &spectrogram.bounds());
             let c1: (f32, f32) = (corner1 * pa_to_da).into();
             let c2: (f32, f32) = (corner2 * pa_to_da).into();
             let (fill_color, border_color) = match action {
@@ -491,7 +476,6 @@ impl Overlay {
         event: &mouse::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-        shared: &SharedState,
     ) -> (Status, Option<super::Message>) {
         use control::Message as CMessage;
         let Some(cursor_pos) = cursor.position() else {
@@ -499,7 +483,7 @@ impl Overlay {
         };
         let pos = screen::Point::new(cursor_pos.x - bounds.x, cursor_pos.y - bounds.y);
         let plot_pos = pos * ScreenToPlotArea::new(&screen::Size(bounds.size()));
-        let modifiers = shared.interaction.modifiers.get();
+        let modifiers = self.interaction.modifiers.get();
         if let mouse::Event::WheelScrolled { delta } = event {
             let delta = match delta {
                 mouse::ScrollDelta::Lines { x: _, y } => y,
@@ -509,12 +493,12 @@ impl Overlay {
                 x: bounds.x,
                 y: bounds.y + bounds.height,
                 width: bounds.width,
-                height: shared.plot_area_margin,
+                height: self.plot_area_margin,
             };
             let y_axis = Rectangle {
-                x: bounds.x - shared.plot_area_margin,
+                x: bounds.x - self.plot_area_margin,
                 y: bounds.y,
-                width: shared.plot_area_margin,
+                width: self.plot_area_margin,
                 height: bounds.height,
             };
             if cursor.is_over(bounds) {
@@ -547,25 +531,24 @@ impl Overlay {
         }
 
         let update_crosshair =
-            matches!(event, mouse::Event::CursorMoved { .. }) && shared.display.show_crosshair;
+            matches!(event, mouse::Event::CursorMoved { .. }) && self.display.show_crosshair;
         if update_crosshair {
             if cursor.is_over(bounds)
-                && let Some(spectrogram) = &shared.spectrogram
+                && let Some(spectrogram) = &self.spectrogram
             {
                 let pos = plot_pos
-                    * PlotAreaToDataAbsolute::new(&shared.controls.bounds(), &spectrogram.bounds());
-                shared.interaction.crosshair.set(Some(pos));
+                    * PlotAreaToDataAbsolute::new(&self.controls.bounds(), &spectrogram.bounds());
+                self.interaction.crosshair.set(Some(pos));
             } else {
-                shared.interaction.crosshair.set(None);
+                self.interaction.crosshair.set(None);
             }
         }
 
-        match shared.interaction.mouse_state.get() {
+        match self.interaction.mouse_state.get() {
             MouseState::Idle => match event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     if cursor.is_over(bounds) {
-                        shared
-                            .interaction
+                        self.interaction
                             .mouse_state
                             .set(MouseState::Panning(plot_pos));
                         return (Status::Captured, None);
@@ -573,16 +556,16 @@ impl Overlay {
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Right) => {
                     if cursor.is_over(bounds)
-                        && let Some(spectrogram) = &shared.spectrogram
+                        && let Some(spectrogram) = &self.spectrogram
                         && let Some((action, point)) = closest_mark(
                             pos,
                             &DataAbsoluteToScreen::new(
                                 &screen::Size(bounds.size()),
-                                &shared.controls.bounds(),
+                                &self.controls.bounds(),
                                 &spectrogram.bounds(),
                             ),
-                            &shared.marks.track_points,
-                            &shared.marks.signals,
+                            &self.marks.track_points,
+                            &self.marks.signals,
                         )
                     {
                         return (
@@ -596,12 +579,11 @@ impl Overlay {
             },
             MouseState::Panning(prev_pos) => match event {
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    shared.interaction.mouse_state.set(MouseState::Idle);
+                    self.interaction.mouse_state.set(MouseState::Idle);
                 }
                 mouse::Event::CursorMoved { position: _ } => {
                     let mut delta = plot_pos - prev_pos;
-                    shared
-                        .interaction
+                    self.interaction
                         .mouse_state
                         .set(MouseState::Panning(plot_pos));
                     if modifiers.shift() {
@@ -618,7 +600,7 @@ impl Overlay {
                 action, corner1, ..
             } => match event {
                 mouse::Event::CursorMoved { .. } => {
-                    shared.interaction.mouse_state.set(MouseState::DrawingRect {
+                    self.interaction.mouse_state.set(MouseState::DrawingRect {
                         action,
                         corner1,
                         corner2: plot_pos,
@@ -626,10 +608,10 @@ impl Overlay {
                     return (Status::Captured, Some(Message::Refresh.into()));
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    shared.interaction.mouse_state.set(MouseState::Idle);
-                    if let Some(spectrogram) = &shared.spectrogram {
+                    self.interaction.mouse_state.set(MouseState::Idle);
+                    if let Some(spectrogram) = &self.spectrogram {
                         let pa_to_da = PlotAreaToDataAbsolute::new(
-                            &shared.controls.bounds(),
+                            &self.controls.bounds(),
                             &spectrogram.bounds(),
                         );
                         let c1 = corner1 * pa_to_da;
@@ -659,12 +641,12 @@ impl Overlay {
                 if matches!(event, mouse::Event::ButtonReleased(mouse::Button::Left))
                     && cursor.is_over(bounds)
                 {
-                    let Some(spectrogram) = &shared.spectrogram else {
+                    let Some(spectrogram) = &self.spectrogram else {
                         return (Status::Captured, None);
                     };
                     let da_pos = plot_pos
                         * PlotAreaToDataAbsolute::new(
-                            &shared.controls.bounds(),
+                            &self.controls.bounds(),
                             &spectrogram.bounds(),
                         );
                     let msg = match kind {
@@ -675,7 +657,7 @@ impl Overlay {
                 } else if matches!(event, mouse::Event::ButtonPressed(mouse::Button::Left))
                     && !cursor.is_over(bounds)
                 {
-                    shared.interaction.mouse_state.set(MouseState::Idle);
+                    self.interaction.mouse_state.set(MouseState::Idle);
                     return (Status::Captured, None);
                 }
             }
@@ -694,31 +676,29 @@ impl Overlay {
         event: &keyboard::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-        shared: &SharedState,
     ) -> (Status, Option<super::Message>) {
         let keyboard::Event::KeyReleased { key, .. } = event else {
             return (Status::Ignored, None);
         };
-        let modifiers = shared.interaction.modifiers.get();
+        let modifiers = self.interaction.modifiers.get();
 
-        if matches!(shared.interaction.mouse_state.get(), MouseState::Marking(_))
-            && !is_modifier(key)
+        if matches!(self.interaction.mouse_state.get(), MouseState::Marking(_)) && !is_modifier(key)
         {
-            shared.interaction.mouse_state.set(MouseState::Idle);
+            self.interaction.mouse_state.set(MouseState::Idle);
         }
 
         // Some keys should work regardless of cursor position...
         let pan = if modifiers.shift() { 0.5 } else { 1.0 };
         match key.as_ref() {
             keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                match shared.interaction.mouse_state.get() {
+                match self.interaction.mouse_state.get() {
                     MouseState::Idle => (),
                     MouseState::Panning(_) => (),
                     MouseState::DrawingRect { .. } => {
-                        shared.interaction.mouse_state.set(MouseState::Idle);
+                        self.interaction.mouse_state.set(MouseState::Idle);
                         return (Status::Captured, Some(Message::Refresh.into()));
                     }
-                    MouseState::Marking(_) => shared.interaction.mouse_state.set(MouseState::Idle),
+                    MouseState::Marking(_) => self.interaction.mouse_state.set(MouseState::Idle),
                 }
             }
             keyboard::Key::Character("s") => {
@@ -775,10 +755,10 @@ impl Overlay {
         match key.as_ref() {
             keyboard::Key::Character("d")
                 if !modifiers.shift()
-                    && matches!(shared.interaction.mouse_state.get(), MouseState::Idle)
-                    && shared.spectrogram.is_some() =>
+                    && matches!(self.interaction.mouse_state.get(), MouseState::Idle)
+                    && self.spectrogram.is_some() =>
             {
-                shared.interaction.mouse_state.set(MouseState::DrawingRect {
+                self.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Delete,
                     corner1: plot_pos,
                     corner2: plot_pos,
@@ -786,10 +766,10 @@ impl Overlay {
                 (Status::Captured, None)
             }
             keyboard::Key::Character("z")
-                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle)
-                    && shared.spectrogram.is_some() =>
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle)
+                    && self.spectrogram.is_some() =>
             {
-                shared.interaction.mouse_state.set(MouseState::DrawingRect {
+                self.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Zoom,
                     corner1: plot_pos,
                     corner2: plot_pos,
@@ -797,10 +777,10 @@ impl Overlay {
                 (Status::Captured, None)
             }
             keyboard::Key::Character("m")
-                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle)
-                    && shared.spectrogram.is_some() =>
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle)
+                    && self.spectrogram.is_some() =>
             {
-                shared.interaction.mouse_state.set(MouseState::DrawingRect {
+                self.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::MarkCentroid,
                     corner1: plot_pos,
                     corner2: plot_pos,
@@ -811,8 +791,8 @@ impl Overlay {
         }
     }
 
-    pub(super) fn status(&self, shared: &SharedState, app: &AppShared) -> Option<&str> {
-        if !shared.display.show_predictions {
+    pub(super) fn status(&self, app: &AppShared) -> Option<&str> {
+        if !self.display.show_predictions {
             return None;
         }
         if app.satellites.is_empty() {
@@ -831,8 +811,8 @@ impl Overlay {
     /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
     /// recomputation. Called at the top of every `update()` so any incoming message acts as a
     /// trigger.
-    fn check_cache(&mut self, shared: &SharedState, app: &AppShared) -> Task<Message> {
-        let Some(key) = prediction_key(shared, app) else {
+    fn check_cache(&mut self, app: &AppShared) -> Task<Message> {
+        let Some(key) = prediction_key(self, app) else {
             self.prediction_cache.reset();
             return Task::none();
         };
@@ -856,27 +836,20 @@ impl Overlay {
         })
     }
 
-    pub fn update(
-        &mut self,
-        message: Message,
-        shared: &mut SharedState,
-        app: &AppShared,
-    ) -> Task<Message> {
+    pub fn update(&mut self, message: Message, app: &AppShared) -> Task<Message> {
         let msg_task = match message {
             Message::Refresh => Task::none(),
             Message::MarkTrackpoints => {
-                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle) {
-                    shared
-                        .interaction
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
+                    self.interaction
                         .mouse_state
                         .set(MouseState::Marking(MarkAction::Trackpoint));
                 }
                 Task::none()
             }
             Message::MarkSignals => {
-                if matches!(shared.interaction.mouse_state.get(), MouseState::Idle) {
-                    shared
-                        .interaction
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
+                    self.interaction
                         .mouse_state
                         .set(MouseState::Marking(MarkAction::Signal));
                 }
@@ -884,26 +857,26 @@ impl Overlay {
             }
             Message::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
-                match shared
+                match self
                     .marks
                     .track_points
                     .binary_search_by(|p| p.0.x.partial_cmp(&pos.0.x).unwrap())
                 {
-                    Ok(idx) => shared.marks.track_points[idx] = pos,
-                    Err(idx) => shared.marks.track_points.insert(idx, pos),
+                    Ok(idx) => self.marks.track_points[idx] = pos,
+                    Err(idx) => self.marks.track_points.insert(idx, pos),
                 }
                 Task::none()
             }
             Message::AddSignal(pos) => {
                 log::debug!("Manually adding signal at position: {:?}", pos);
-                shared.marks.signals.push(pos);
+                self.marks.signals.push(pos);
                 Task::none()
             }
             Message::DeleteMark(action, point) => {
                 log::debug!("Deleting {:?} mark at position: {:?}", action, point);
                 let collection = match action {
-                    MarkAction::Trackpoint => &mut shared.marks.track_points,
-                    MarkAction::Signal => &mut shared.marks.signals,
+                    MarkAction::Trackpoint => &mut self.marks.track_points,
+                    MarkAction::Signal => &mut self.marks.signals,
                 };
                 if let Some(idx) = collection.iter().position(|p| *p == point) {
                     collection.remove(idx);
@@ -911,22 +884,22 @@ impl Overlay {
                 Task::none()
             }
             Message::ClearAll => {
-                shared.marks.track_points.clear();
-                shared.marks.signals.clear();
+                self.marks.track_points.clear();
+                self.marks.signals.clear();
                 Task::none()
             }
             Message::FindSignals => {
-                if shared.marks.track_points.len() < 2 {
+                if self.marks.track_points.len() < 2 {
                     Task::none()
                 } else {
-                    let Some(spectrogram) = &shared.spectrogram else {
+                    let Some(spectrogram) = &self.spectrogram else {
                         log::error!("No spectrogram loaded, cannot find signals");
                         return Task::none();
                     };
                     let spectrogram = spectrogram.clone();
-                    let track_points = shared.marks.track_points.clone();
-                    let sigma = shared.controls.signal_sigma();
-                    let track_bw = shared.controls.track_bw();
+                    let track_points = self.marks.track_points.clone();
+                    let sigma = self.controls.signal_sigma();
+                    let track_bw = self.controls.track_bw();
                     Task::future(async move {
                         tokio::task::spawn_blocking(move || {
                             let signals = signal::find_signals(
@@ -953,13 +926,13 @@ impl Overlay {
                 }
             }
             Message::FoundSignals(signals) => {
-                shared.marks.signals = signals;
+                self.marks.signals = signals;
                 Task::none()
             }
             Message::SpectrogramUpdated => {
-                shared.marks.track_points.clear();
-                shared.marks.signals.clear();
-                shared.interaction.crosshair.set(None);
+                self.marks.track_points.clear();
+                self.marks.signals.clear();
+                self.interaction.crosshair.set(None);
                 Task::none()
             }
             Message::RefreshCache => {
@@ -976,37 +949,36 @@ impl Overlay {
                 Task::none()
             }
             Message::TogglePredictions => {
-                shared.display.show_predictions = !shared.display.show_predictions;
+                self.display.show_predictions = !self.display.show_predictions;
                 Task::none()
             }
             Message::ToggleGrid => {
-                shared.display.show_grid = !shared.display.show_grid;
+                self.display.show_grid = !self.display.show_grid;
                 Task::none()
             }
             Message::ToggleCrosshair => {
-                shared.display.show_crosshair = !shared.display.show_crosshair;
+                self.display.show_crosshair = !self.display.show_crosshair;
                 Task::none()
             }
             Message::ToggleAbsoluteAxes => {
-                shared.display.absolute_axes = !shared.display.absolute_axes;
+                self.display.absolute_axes = !self.display.absolute_axes;
                 Task::none()
             }
             Message::DeleteInRect(rect) => {
-                shared.marks.track_points.retain(|p| !rect.contains(*p));
-                shared.marks.signals.retain(|p| !rect.contains(*p));
+                self.marks.track_points.retain(|p| !rect.contains(*p));
+                self.marks.signals.retain(|p| !rect.contains(*p));
                 Task::none()
             }
             Message::MarkCentroid(rect) => {
-                shared.marks.signals.extend(
-                    shared
-                        .spectrogram
+                self.marks.signals.extend(
+                    self.spectrogram
                         .as_ref()
                         .and_then(|spec| signal::centroid(spec, rect)),
                 );
                 Task::none()
             }
             Message::SaveSignals => {
-                let Some(spectrogram) = &shared.spectrogram else {
+                let Some(spectrogram) = &self.spectrogram else {
                     log::error!("No spectrogram loaded, cannot save signals");
                     return Task::none();
                 };
@@ -1017,10 +989,10 @@ impl Overlay {
                 let start_time = spectrogram.start_time();
                 let start_mjd = start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
-                let suggested = signals_filename(start_time, center_freq, &shared.marks.signals)
+                let suggested = signals_filename(start_time, center_freq, &self.marks.signals)
                     .unwrap_or_else(|| "out.dat".to_owned());
                 let mut output = String::new();
-                for sig in &shared.marks.signals {
+                for sig in &self.marks.signals {
                     let mjd = start_mjd + sig.0.x as f64 / 86400.0;
                     let freq = center_freq + sig.0.y as f64;
                     output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));
@@ -1045,7 +1017,7 @@ impl Overlay {
             }
         };
 
-        let cache_task = self.check_cache(shared, app);
+        let cache_task = self.check_cache(app);
         Task::batch([cache_task, msg_task])
     }
 }
@@ -1099,11 +1071,7 @@ impl Chart<super::Message> for PlotChart<'_> {
     type State = ();
 
     fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, chart: ChartBuilder<DB>) {
-        match self
-            .rfplot
-            .overlay
-            .build_chart(chart, &self.rfplot.shared, self.app)
-        {
+        match self.rfplot.shared.build_chart(chart, self.app) {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -1123,19 +1091,13 @@ impl Chart<super::Message> for PlotChart<'_> {
             height: bounds.height - self.rfplot.shared.plot_area_margin,
         };
         match event {
-            canvas::Event::Mouse(event) => {
-                self.rfplot
-                    .overlay
-                    .handle_mouse(event, bounds, cursor, &self.rfplot.shared)
-            }
+            canvas::Event::Mouse(event) => self.rfplot.shared.handle_mouse(event, bounds, cursor),
             canvas::Event::Keyboard(event) => {
                 if let keyboard::Event::ModifiersChanged(modifiers) = event {
                     self.rfplot.shared.interaction.modifiers.set(*modifiers);
                     return (Status::Ignored, None);
                 }
-                self.rfplot
-                    .overlay
-                    .handle_keyboard(event, bounds, cursor, &self.rfplot.shared)
+                self.rfplot.shared.handle_keyboard(event, bounds, cursor)
             }
             _ => {
                 log::debug!("{:?}", event);

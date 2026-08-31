@@ -12,8 +12,10 @@ use image::RgbaImage;
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{
+    async_cache::AsyncCache,
     coord::{data_absolute, data_normalized, plot_area},
     menu::MenuItem,
+    orbit,
     spectrogram::Spectrogram,
     util::DebugRgbaImage,
 };
@@ -128,6 +130,8 @@ pub(crate) struct SharedState {
     pub marks: Marks,
     #[serde(skip)]
     pub interaction: Interaction,
+    #[serde(skip)]
+    pub prediction_cache: AsyncCache<overlay::PredictionKey, orbit::Predictions>,
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
@@ -184,7 +188,6 @@ fn gpu_done_stream(
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RFPlot {
     shared: SharedState,
-    overlay: overlay::Overlay,
     id: Uuid,
     #[serde(skip)]
     initial_view: Option<Box<InitialView>>,
@@ -209,7 +212,6 @@ impl RFPlot {
         let id = Uuid::new_v4();
         Self {
             shared,
-            overlay: overlay::Overlay::default(),
             id,
             initial_view: None,
             loading_state: LoadingState::default(),
@@ -240,8 +242,8 @@ impl RFPlot {
         };
         // Trigger a prediction cache check
         let cache_task = self
-            .overlay
-            .update(overlay::Message::RefreshCache, &mut self.shared, app)
+            .shared
+            .update(overlay::Message::RefreshCache, app)
             .map(Message::Overlay)
             .map(WindowOut::Msg);
         Task::batch(vec![config_task, cache_task])
@@ -374,7 +376,7 @@ impl Window<Message> for RFPlot {
             .height(Length::Fill)
             .into();
 
-        let status = self.overlay.status(&self.shared, app);
+        let status = self.shared.status(app);
 
         let mut stack = widget::stack![spectrogram, plot_overlay];
         if let Some(status) = status {
@@ -444,10 +446,7 @@ impl Window<Message> for RFPlot {
         };
         let result = match message {
             Message::Control(message) => self.shared.controls.update(message),
-            Message::Overlay(message) => self
-                .overlay
-                .update(message, &mut self.shared, app)
-                .map(Message::Overlay),
+            Message::Overlay(message) => self.shared.update(message, app).map(Message::Overlay),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
                 Task::none()
@@ -468,8 +467,8 @@ impl Window<Message> for RFPlot {
                     self.gpu_watcher = Some(GpuDoneWatcher { spec_id, notify });
                     self.loading_state = LoadingState::GpuUploading;
 
-                    self.overlay
-                        .update(overlay::Message::SpectrogramUpdated, &mut self.shared, app)
+                    self.shared
+                        .update(overlay::Message::SpectrogramUpdated, app)
                         .map(Message::Overlay)
                 }
                 Err(err) => {
