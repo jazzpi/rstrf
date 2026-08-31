@@ -34,8 +34,8 @@ mod shader;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Control(control::Message),
-    Overlay(overlay::Message),
+    View(control::Message),
+    Marks(overlay::Message),
     PickSpectrogram,
     LoadSpectrogram(Vec<PathBuf>),
     SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
@@ -50,13 +50,13 @@ pub enum Message {
 
 impl From<control::Message> for Message {
     fn from(message: control::Message) -> Self {
-        Message::Control(message)
+        Message::View(message)
     }
 }
 
 impl From<overlay::Message> for Message {
     fn from(message: overlay::Message) -> Self {
-        Message::Overlay(message)
+        Message::Marks(message)
     }
 }
 
@@ -244,7 +244,7 @@ impl RFPlot {
         let cache_task = self
             .state
             .update(overlay::Message::RefreshCache, app)
-            .map(Message::Overlay)
+            .map(Message::Marks)
             .map(WindowOut::Msg);
         Task::batch(vec![config_task, cache_task])
     }
@@ -442,14 +442,14 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
                 return Task::done(WindowOut::Effect(WindowEffect::ReloadCatalog));
             }
-            Message::Control(control::Message::ResetView) => {
+            Message::View(control::Message::ResetView) => {
                 self.state.marks = Default::default();
             }
             _ => (),
         };
         let result = match message {
-            Message::Control(message) => self.state.controls.update(message),
-            Message::Overlay(message) => self.state.update(message, app).map(Message::Overlay),
+            Message::View(message) => self.state.controls.update(message),
+            Message::Marks(message) => self.state.update(message, app).map(Message::Marks),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
                 Task::none()
@@ -472,7 +472,7 @@ impl Window<Message> for RFPlot {
 
                     self.state
                         .update(overlay::Message::SpectrogramUpdated, app)
-                        .map(Message::Overlay)
+                        .map(Message::Marks)
                 }
                 Err(err) => {
                     log::error!("Failed to load spectrogram: {err}");
