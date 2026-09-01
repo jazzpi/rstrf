@@ -98,6 +98,7 @@ impl Controls {
         );
         // Reapply zoom_max
         self.set_scale(self.log_scale);
+        self.snap_to_bounds();
     }
 
     fn set_scale(&mut self, log_scale: Vec2) {
@@ -588,6 +589,22 @@ mod tests {
             &mut c,
             Message::ZoomDeltaY(plot_area::Point::new(0.0, 0.0), -1000.0),
         );
+        assert_bounds_in_unit_square(c.bounds());
+    }
+
+    #[test]
+    fn set_data_bounds_snaps_view_when_span_shrinks() {
+        let mut c = Controls::default();
+        c.set_data_bounds(10_000.0, 1_000_000.0);
+        update(&mut c, Message::UpdateZoomX(8.0));
+        update(&mut c, Message::UpdateZoomY(8.0));
+        update(
+            &mut c,
+            Message::PanningDelta(plot_area::Vector::new(-10.0, -10.0)),
+        );
+        // A much smaller span shrinks zoom_max below the current log_scale, so the
+        // clamp in set_scale grows the view back out around the still-pinned center.
+        c.set_data_bounds(60.0, 10_000.0);
         assert_bounds_in_unit_square(c.bounds());
     }
 
