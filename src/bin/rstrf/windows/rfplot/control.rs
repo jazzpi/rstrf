@@ -1,4 +1,3 @@
-use glam::Vec2;
 use iced::{
     Element, Length, Task,
     alignment::Vertical,
@@ -6,10 +5,7 @@ use iced::{
 };
 use rstrf::{
     colormap::Colormap,
-    coord::{
-        DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataNormalized,
-        data_absolute, data_normalized, plot_area,
-    },
+    coord::{DataNormalizedToDataAbsolute, data_absolute, data_normalized, plot_area},
     spectrogram::Spectrogram,
 };
 use serde::{Deserialize, Serialize};
@@ -17,16 +13,10 @@ use strum::IntoEnumIterator;
 
 use crate::{
     widgets::{Icon, ToolbarButton, toolbar},
-    windows::rfplot,
+    windows::rfplot::{self, viewport::Viewport},
 };
 
 const ZOOM_MIN: f32 = 0.0;
-const ZOOM_MAX: f32 = 8.0;
-
-const MIN_FREQ_SPAN_HZ: f32 = 10e3;
-const MIN_TIME_SPAN_S: f32 = 60.0;
-
-const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
 const SIGMA_MIN: f32 = 0.1;
 const SIGMA_MAX: f32 = 20.0;
@@ -36,10 +26,7 @@ const TRACK_BW_MAX: f32 = 100e3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Controls {
-    /// Per-axis zoom ceiling
-    zoom_max: Vec2,
-    log_scale: Vec2,
-    center: data_normalized::Point,
+    viewport: Viewport,
     /// Possible power range
     power_bounds: (f32, f32),
     /// Current power range for display
@@ -76,7 +63,7 @@ impl Controls {
     pub fn set_spectrogram(&mut self, spec: &Spectrogram) {
         self.set_power_bounds(spec.power_bounds);
         let data = spec.bounds();
-        self.set_data_bounds(data.0.width, data.0.height);
+        self.viewport.set_data_bounds(data.0.width, data.0.height);
     }
 
     fn set_power_bounds(&mut self, bounds: (f32, f32)) {
@@ -91,40 +78,12 @@ impl Controls {
         };
     }
 
-    fn set_data_bounds(&mut self, total_time_s: f32, total_bw_hz: f32) {
-        self.zoom_max = Vec2::new(
-            (total_time_s / MIN_TIME_SPAN_S).log2().max(ZOOM_MIN),
-            (total_bw_hz / MIN_FREQ_SPAN_HZ).log2().max(ZOOM_MIN),
-        );
-        // Reapply zoom_max
-        self.set_scale(self.log_scale);
-        self.snap_to_bounds();
-    }
-
-    fn set_scale(&mut self, log_scale: Vec2) {
-        self.log_scale = log_scale.clamp(Vec2::splat(ZOOM_MIN), self.zoom_max);
-    }
-
     pub fn size(&self) -> data_normalized::Size {
-        data_normalized::Size::new(
-            1.0 / 2.0_f32.powf(self.log_scale.x),
-            1.0 / 2.0_f32.powf(self.log_scale.y),
-        )
+        self.viewport.size()
     }
 
     pub fn bounds(&self) -> data_normalized::Rectangle {
-        let size = self.size();
-        data_normalized::Rectangle::new(
-            data_normalized::Point::new(
-                self.center.0.x - size.0.width / 2.0,
-                self.center.0.y - size.0.height / 2.0,
-            ),
-            size,
-        )
-    }
-
-    pub fn data_normalized(&self) -> PlotAreaToDataNormalized {
-        PlotAreaToDataNormalized::new(&self.bounds())
+        self.viewport.bounds()
     }
 
     pub fn power_range(&self) -> (f32, f32) {
@@ -266,11 +225,13 @@ impl Controls {
             && let Some(spectrogram) = &state.spectrogram
         {
             let bounds = self.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
+            let zoom_max = self.viewport.zoom_max();
+            let log_scale = self.viewport.log_scale();
             result = result.push(
                 widget::grid![
                     Self::control(
                         "Zoom Time",
-                        slider(ZOOM_MIN..=self.zoom_max.x, self.log_scale.x, |z| {
+                        slider(ZOOM_MIN..=zoom_max.x, log_scale.x, |z| {
                             Message::UpdateZoomX(z).into()
                         })
                         .step(0.01f32)
@@ -279,7 +240,7 @@ impl Controls {
                     ),
                     Self::control(
                         "Zoom Freq",
-                        slider(ZOOM_MIN..=self.zoom_max.y, self.log_scale.y, |z| {
+                        slider(ZOOM_MIN..=zoom_max.y, log_scale.y, |z| {
                             Message::UpdateZoomY(z).into()
                         })
                         .step(0.01f32)
@@ -341,45 +302,14 @@ impl Controls {
 
     pub fn update(&mut self, message: Message) -> Task<rfplot::Message> {
         match message {
-            Message::UpdateZoomX(zoom_x) => {
-                self.log_scale.x = zoom_x.clamp(ZOOM_MIN, self.zoom_max.x);
-            }
-            Message::UpdateZoomY(zoom_y) => {
-                self.log_scale.y = zoom_y.clamp(ZOOM_MIN, self.zoom_max.y);
-            }
-            Message::PanningDelta(delta) => {
-                self.center -= delta * self.data_normalized();
-            }
-            Message::ZoomDelta(plot_pos, delta) => {
-                let delta = delta * ZOOM_WHEEL_SCALE;
-
-                let old_data = plot_pos * self.data_normalized();
-                let prev_zoom = self.log_scale;
-                self.set_scale(prev_zoom + Vec2::splat(delta));
-                let new_data = plot_pos * self.data_normalized();
-                self.center += old_data - new_data;
-            }
-            Message::ZoomDeltaX(plot_pos, delta) => {
-                let delta = delta * ZOOM_WHEEL_SCALE;
-                let old_x = (plot_pos * self.data_normalized()).0.x;
-                self.set_scale(self.log_scale.with_x(self.log_scale.x + delta));
-                let new_x = (plot_pos * self.data_normalized()).0.x;
-                self.center.0.x += old_x - new_x;
-            }
-            Message::ZoomDeltaY(plot_pos, delta) => {
-                let delta = delta * ZOOM_WHEEL_SCALE;
-                let old_y = (plot_pos * self.data_normalized()).0.y;
-                self.set_scale(self.log_scale.with_y(self.log_scale.y + delta));
-                let new_y = (plot_pos * self.data_normalized()).0.y;
-                self.center.0.y += old_y - new_y;
-            }
-            Message::ResetView => {
-                self.log_scale = Vec2::new(ZOOM_MIN, ZOOM_MIN);
-                self.center = data_normalized::Point::new(0.5, 0.5);
-            }
-            Message::ZoomToRect(rect) => {
-                self.set_view_from_rect_dn(&rect);
-            }
+            Message::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
+            Message::UpdateZoomY(zoom_y) => self.viewport.set_zoom_y(zoom_y),
+            Message::PanningDelta(delta) => self.viewport.pan_by(delta),
+            Message::ZoomDelta(plot_pos, delta) => self.viewport.zoom_at(plot_pos, delta),
+            Message::ZoomDeltaX(plot_pos, delta) => self.viewport.zoom_x_at(plot_pos, delta),
+            Message::ZoomDeltaY(plot_pos, delta) => self.viewport.zoom_y_at(plot_pos, delta),
+            Message::ResetView => self.viewport.reset(),
+            Message::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
             Message::UpdateMinPower(min_power) => {
                 self.power_range.0 = min_power.min(self.power_range.1);
             }
@@ -396,7 +326,6 @@ impl Controls {
             Message::UpdateColormap(colormap) => self.colormap = colormap,
             Message::UpdateAveragePlotting(average) => self.average_plotting = average,
         }
-        self.snap_to_bounds();
         Task::none()
     }
 
@@ -406,17 +335,7 @@ impl Controls {
         rect: &data_absolute::Rectangle,
         spec_bounds: &data_absolute::Rectangle,
     ) {
-        let to_norm = DataAbsoluteToDataNormalized::new(spec_bounds);
-        let norm_rect = *rect * to_norm;
-        self.set_view_from_rect_dn(&norm_rect);
-    }
-
-    pub fn set_view_from_rect_dn(&mut self, rect: &data_normalized::Rectangle) {
-        let width = rect.0.width.max(1e-6);
-        let height = rect.0.height.max(1e-6);
-        self.set_scale(Vec2::new(1.0_f32 / width, 1.0_f32 / height).log2());
-        self.center = data_normalized::Point::new(rect.0.x + width / 2.0, rect.0.y + height / 2.0);
-        self.snap_to_bounds();
+        self.viewport.set_view_from_rect_da(rect, spec_bounds);
     }
 
     /// Override the displayed power range. Clamps to current power_bounds.
@@ -428,34 +347,12 @@ impl Controls {
             self.power_range.1 = z.clamp(self.power_bounds.0, self.power_bounds.1);
         }
     }
-
-    /// Ensure that the current view bounds are within [0, 1] in both axes.
-    fn snap_to_bounds(&mut self) {
-        let bounds = self.bounds().0;
-        let dx = if bounds.x < 0.0 {
-            -bounds.x
-        } else if bounds.x + bounds.width > 1.0 {
-            1.0 - (bounds.x + bounds.width)
-        } else {
-            0.0
-        };
-        let dy = if bounds.y < 0.0 {
-            -bounds.y
-        } else if bounds.y + bounds.height > 1.0 {
-            1.0 - (bounds.y + bounds.height)
-        } else {
-            0.0
-        };
-        self.center.0.x += dx;
-        self.center.0.y += dy;
-    }
 }
 
 impl Default for Controls {
     fn default() -> Self {
         Self {
-            log_scale: Vec2::new(ZOOM_MIN, ZOOM_MIN),
-            center: data_normalized::Point::new(0.5, 0.5),
+            viewport: Viewport::default(),
             power_bounds: (0.0, 0.0),
             power_range: (0.0, 0.0),
             signal_sigma: 5.0,
@@ -463,7 +360,6 @@ impl Default for Controls {
             show_controls: true,
             colormap: Default::default(),
             average_plotting: false,
-            zoom_max: Vec2::splat(ZOOM_MAX),
         }
     }
 }
@@ -471,141 +367,9 @@ impl Default for Controls {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstrf::coord::plot_area;
-
-    #[test]
-    fn default_size_is_full_view() {
-        let c = Controls::default();
-        assert!((c.size().0.width - 1.0).abs() < 1e-6);
-        assert!((c.size().0.height - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn default_bounds_covers_unit_square() {
-        let c = Controls::default();
-        let b = c.bounds();
-        assert!((b.0.x - 0.0).abs() < 1e-6);
-        assert!((b.0.y - 0.0).abs() < 1e-6);
-        assert!((b.0.width - 1.0).abs() < 1e-6);
-        assert!((b.0.height - 1.0).abs() < 1e-6);
-    }
 
     fn update(c: &mut Controls, msg: Message) {
         let _ = c.update(msg);
-    }
-
-    #[test]
-    fn update_zoom_x_changes_width() {
-        let mut c = Controls::default();
-        update(&mut c, Message::UpdateZoomX(2.0));
-        // 1 / 2^2 = 0.25
-        assert!((c.size().0.width - 0.25).abs() < 1e-6);
-        assert!((c.size().0.height - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn reset_view_restores_full_view() {
-        let mut c = Controls::default();
-        update(&mut c, Message::UpdateZoomX(5.0));
-        update(&mut c, Message::UpdateZoomY(3.0));
-        update(&mut c, Message::ResetView);
-        assert!((c.size().0.width - 1.0).abs() < 1e-6);
-        assert!((c.size().0.height - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn pan_large_delta_snaps_back_in_bounds() {
-        let mut c = Controls::default();
-        update(
-            &mut c,
-            Message::PanningDelta(plot_area::Vector::new(10.0, 0.0)),
-        );
-        let b = c.bounds();
-        assert!(b.0.x >= -1e-5, "x={}", b.0.x);
-        assert!(
-            b.0.x + b.0.width <= 1.0 + 1e-5,
-            "right edge={}",
-            b.0.x + b.0.width
-        );
-    }
-
-    fn assert_bounds_in_unit_square(b: data_normalized::Rectangle) {
-        assert!(b.0.x >= -1e-5, "x={}", b.0.x);
-        assert!(
-            b.0.x + b.0.width <= 1.0 + 1e-5,
-            "right edge={}",
-            b.0.x + b.0.width
-        );
-        assert!(b.0.y >= -1e-5, "y={}", b.0.y);
-        assert!(
-            b.0.y + b.0.height <= 1.0 + 1e-5,
-            "top edge={}",
-            b.0.y + b.0.height
-        );
-    }
-
-    #[test]
-    fn zoom_delta_snaps_back_in_bounds() {
-        let mut c = Controls::default();
-        update(&mut c, Message::UpdateZoomX(6.0));
-        update(&mut c, Message::UpdateZoomY(6.0));
-        update(
-            &mut c,
-            Message::PanningDelta(plot_area::Vector::new(-10.0, -10.0)),
-        );
-        // Zoom out anchored at the corner opposite the one the view is now pinned
-        // against, pushing the pinned corner further past the [0, 1] bound.
-        update(
-            &mut c,
-            Message::ZoomDelta(plot_area::Point::new(0.0, 0.0), -1000.0),
-        );
-        assert_bounds_in_unit_square(c.bounds());
-    }
-
-    #[test]
-    fn zoom_delta_x_snaps_back_in_bounds() {
-        let mut c = Controls::default();
-        update(&mut c, Message::UpdateZoomX(6.0));
-        update(
-            &mut c,
-            Message::PanningDelta(plot_area::Vector::new(-10.0, 0.0)),
-        );
-        update(
-            &mut c,
-            Message::ZoomDeltaX(plot_area::Point::new(0.0, 0.0), -1000.0),
-        );
-        assert_bounds_in_unit_square(c.bounds());
-    }
-
-    #[test]
-    fn zoom_delta_y_snaps_back_in_bounds() {
-        let mut c = Controls::default();
-        update(&mut c, Message::UpdateZoomY(6.0));
-        update(
-            &mut c,
-            Message::PanningDelta(plot_area::Vector::new(0.0, -10.0)),
-        );
-        update(
-            &mut c,
-            Message::ZoomDeltaY(plot_area::Point::new(0.0, 0.0), -1000.0),
-        );
-        assert_bounds_in_unit_square(c.bounds());
-    }
-
-    #[test]
-    fn set_data_bounds_snaps_view_when_span_shrinks() {
-        let mut c = Controls::default();
-        c.set_data_bounds(10_000.0, 1_000_000.0);
-        update(&mut c, Message::UpdateZoomX(8.0));
-        update(&mut c, Message::UpdateZoomY(8.0));
-        update(
-            &mut c,
-            Message::PanningDelta(plot_area::Vector::new(-10.0, -10.0)),
-        );
-        // A much smaller span shrinks zoom_max below the current log_scale, so the
-        // clamp in set_scale grows the view back out around the still-pinned center.
-        c.set_data_bounds(60.0, 10_000.0);
-        assert_bounds_in_unit_square(c.bounds());
     }
 
     #[test]

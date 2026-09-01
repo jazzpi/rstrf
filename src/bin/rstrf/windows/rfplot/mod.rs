@@ -31,6 +31,7 @@ use crate::{
 pub mod control;
 pub mod overlay;
 mod shader;
+mod viewport;
 
 #[derive(Debug, Clone)]
 pub enum Message {
