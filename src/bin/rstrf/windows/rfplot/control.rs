@@ -91,198 +91,6 @@ impl Controls {
         self.average_plotting
     }
 
-    fn control<'a>(
-        label: &'static str,
-        control: impl Into<Element<'a, rfplot::Message>>,
-        value: impl Into<String>,
-    ) -> Row<'a, rfplot::Message> {
-        widget::row![
-            text(label).width(Length::FillPortion(3)),
-            widget::container(control).width(Length::FillPortion(5)),
-            text(value.into()).width(Length::FillPortion(2)),
-        ]
-        .spacing(4)
-        .align_y(Vertical::Center)
-    }
-
-    pub fn view(&self, state: &super::State) -> Element<'_, rfplot::Message> {
-        let colormaps = Colormap::iter()
-            .map(|c| ToolbarButton::LabeledIcon {
-                icon: Icon::Colormap(c),
-                label: c.into(),
-                tooltip: c.into(),
-                msg: Message::UpdateColormap(c).into(),
-                enabled: true,
-                style: widget::button::primary,
-            })
-            .collect();
-        let buttons = toolbar([
-            ToolbarButton::Icon {
-                icon: Icon::Sliders,
-                tooltip: "Toggle controls",
-                msg: Message::SetControlsVisible(!self.show_controls).into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::ZoomReset,
-                tooltip: "Reset view & clear marks",
-                msg: Message::ResetView.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::TogglePredictions,
-                tooltip: "Toggle predictions",
-                msg: rfplot::overlay::Message::TogglePredictions.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::Grid,
-                tooltip: "Toggle grid",
-                msg: rfplot::overlay::Message::ToggleGrid.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::ToggleAbsolute,
-                tooltip: "Toggle absolute/relative axes",
-                msg: rfplot::overlay::Message::ToggleAbsoluteAxes.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::Crosshair,
-                tooltip: "Toggle crosshair",
-                msg: rfplot::overlay::Message::ToggleCrosshair.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::MarkTrackpoint,
-                tooltip: "Mark track points",
-                msg: rfplot::overlay::Message::MarkTrackpoints.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::MarkSignal,
-                tooltip: "Mark signals",
-                msg: rfplot::overlay::Message::MarkSignals.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::Delete,
-                tooltip: "Clear signals & track points",
-                msg: rfplot::overlay::Message::ClearAll.into(),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::Save,
-                tooltip: "Save signals to out.dat",
-                msg: rfplot::overlay::Message::SaveSignals.into(),
-                enabled: !state.marks.signals.is_empty(),
-                style: widget::button::primary,
-            },
-            ToolbarButton::Icon {
-                icon: Icon::Screenshot,
-                tooltip: "Save screenshot",
-                msg: rfplot::Message::CaptureScreenshot(None),
-                enabled: true,
-                style: widget::button::primary,
-            },
-            ToolbarButton::Submenu {
-                toplevel: Box::new(ToolbarButton::Icon {
-                    icon: Icon::Colormap(state.controls.colormap),
-                    tooltip: "Colormap",
-                    msg: rfplot::Message::Nop,
-                    enabled: true,
-                    style: widget::button::primary,
-                }),
-                submenu: colormaps,
-            },
-        ]);
-        let mut result = widget::column![buttons].spacing(8);
-        if self.show_controls
-            && let Some(spectrogram) = &state.spectrogram
-        {
-            let bounds = self.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
-            let zoom_max = self.viewport.zoom_max();
-            let log_scale = self.viewport.log_scale();
-            let power_bounds = self.power.bounds();
-            let power_range = self.power.range();
-            result = result.push(
-                widget::grid![
-                    Self::control(
-                        "Zoom Time",
-                        slider(ZOOM_MIN..=zoom_max.x, log_scale.x, |z| {
-                            Message::UpdateZoomX(z).into()
-                        })
-                        .step(0.01f32)
-                        .width(Length::Fill),
-                        format!("{:.0} s", bounds.0.width),
-                    ),
-                    Self::control(
-                        "Zoom Freq",
-                        slider(ZOOM_MIN..=zoom_max.y, log_scale.y, |z| {
-                            Message::UpdateZoomY(z).into()
-                        })
-                        .step(0.01f32)
-                        .width(Length::Fill),
-                        format!("{:.0} kHz", bounds.0.height / 1000.0),
-                    ),
-                    Self::control(
-                        "Min Power",
-                        slider(power_bounds.0..=power_bounds.1, power_range.0, |p| {
-                            Message::UpdateMinPower(p).into()
-                        })
-                        .step(0.1f32)
-                        .width(Length::Fill),
-                        format!("{:.1} dB", power_range.0),
-                    ),
-                    Self::control(
-                        "Max Power",
-                        slider(power_bounds.0..=power_bounds.1, power_range.1, |p| {
-                            Message::UpdateMaxPower(p).into()
-                        })
-                        .step(0.1f32)
-                        .width(Length::Fill),
-                        format!("{:.1} dB", power_range.1),
-                    ),
-                    Self::control(
-                        "Signal Thresh",
-                        slider(SIGMA_MIN..=SIGMA_MAX, self.signal_sigma, |s| {
-                            Message::UpdateSignalSigma(s).into()
-                        })
-                        .step(0.1f32)
-                        .width(Length::Fill),
-                        format!("{:.1}", self.signal_sigma),
-                    ),
-                    Self::control(
-                        "Track BW",
-                        slider(TRACK_BW_MIN..=TRACK_BW_MAX, self.track_bw, |b| {
-                            Message::UpdateTrackBW(b).into()
-                        })
-                        .step(100.0f32)
-                        .width(Length::Fill),
-                        format!("{:.1} kHz", self.track_bw / 1000.0),
-                    ),
-                ]
-                .columns(2)
-                .spacing(8)
-                .height(Length::Shrink),
-            );
-        }
-        widget::container(result)
-            .padding(8)
-            .width(Length::Fill)
-            .style(widget::container::bordered_box)
-            .into()
-    }
-
     pub fn update(&mut self, message: Message) -> Task<rfplot::Message> {
         match message {
             Message::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
@@ -335,6 +143,199 @@ impl Default for Controls {
             average_plotting: false,
         }
     }
+}
+
+fn control<'a>(
+    label: &'static str,
+    control: impl Into<Element<'a, rfplot::Message>>,
+    value: impl Into<String>,
+) -> Row<'a, rfplot::Message> {
+    widget::row![
+        text(label).width(Length::FillPortion(3)),
+        widget::container(control).width(Length::FillPortion(5)),
+        text(value.into()).width(Length::FillPortion(2)),
+    ]
+    .spacing(4)
+    .align_y(Vertical::Center)
+}
+
+pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
+    let controls = &state.controls;
+    let colormaps = Colormap::iter()
+        .map(|c| ToolbarButton::LabeledIcon {
+            icon: Icon::Colormap(c),
+            label: c.into(),
+            tooltip: c.into(),
+            msg: Message::UpdateColormap(c).into(),
+            enabled: true,
+            style: widget::button::primary,
+        })
+        .collect();
+    let buttons = toolbar([
+        ToolbarButton::Icon {
+            icon: Icon::Sliders,
+            tooltip: "Toggle controls",
+            msg: Message::SetControlsVisible(!controls.show_controls).into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::ZoomReset,
+            tooltip: "Reset view & clear marks",
+            msg: Message::ResetView.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::TogglePredictions,
+            tooltip: "Toggle predictions",
+            msg: rfplot::overlay::Message::TogglePredictions.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::Grid,
+            tooltip: "Toggle grid",
+            msg: rfplot::overlay::Message::ToggleGrid.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::ToggleAbsolute,
+            tooltip: "Toggle absolute/relative axes",
+            msg: rfplot::overlay::Message::ToggleAbsoluteAxes.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::Crosshair,
+            tooltip: "Toggle crosshair",
+            msg: rfplot::overlay::Message::ToggleCrosshair.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::MarkTrackpoint,
+            tooltip: "Mark track points",
+            msg: rfplot::overlay::Message::MarkTrackpoints.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::MarkSignal,
+            tooltip: "Mark signals",
+            msg: rfplot::overlay::Message::MarkSignals.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::Delete,
+            tooltip: "Clear signals & track points",
+            msg: rfplot::overlay::Message::ClearAll.into(),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::Save,
+            tooltip: "Save signals to out.dat",
+            msg: rfplot::overlay::Message::SaveSignals.into(),
+            enabled: !state.marks.signals.is_empty(),
+            style: widget::button::primary,
+        },
+        ToolbarButton::Icon {
+            icon: Icon::Screenshot,
+            tooltip: "Save screenshot",
+            msg: rfplot::Message::CaptureScreenshot(None),
+            enabled: true,
+            style: widget::button::primary,
+        },
+        ToolbarButton::Submenu {
+            toplevel: Box::new(ToolbarButton::Icon {
+                icon: Icon::Colormap(controls.colormap),
+                tooltip: "Colormap",
+                msg: rfplot::Message::Nop,
+                enabled: true,
+                style: widget::button::primary,
+            }),
+            submenu: colormaps,
+        },
+    ]);
+    let mut result = widget::column![buttons].spacing(8);
+    if controls.show_controls
+        && let Some(spectrogram) = &state.spectrogram
+    {
+        let bounds = controls.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
+        let zoom_max = controls.viewport.zoom_max();
+        let log_scale = controls.viewport.log_scale();
+        let power_bounds = controls.power.bounds();
+        let power_range = controls.power.range();
+        result = result.push(
+            widget::grid![
+                control(
+                    "Zoom Time",
+                    slider(ZOOM_MIN..=zoom_max.x, log_scale.x, |z| {
+                        Message::UpdateZoomX(z).into()
+                    })
+                    .step(0.01f32)
+                    .width(Length::Fill),
+                    format!("{:.0} s", bounds.0.width),
+                ),
+                control(
+                    "Zoom Freq",
+                    slider(ZOOM_MIN..=zoom_max.y, log_scale.y, |z| {
+                        Message::UpdateZoomY(z).into()
+                    })
+                    .step(0.01f32)
+                    .width(Length::Fill),
+                    format!("{:.0} kHz", bounds.0.height / 1000.0),
+                ),
+                control(
+                    "Min Power",
+                    slider(power_bounds.0..=power_bounds.1, power_range.0, |p| {
+                        Message::UpdateMinPower(p).into()
+                    })
+                    .step(0.1f32)
+                    .width(Length::Fill),
+                    format!("{:.1} dB", power_range.0),
+                ),
+                control(
+                    "Max Power",
+                    slider(power_bounds.0..=power_bounds.1, power_range.1, |p| {
+                        Message::UpdateMaxPower(p).into()
+                    })
+                    .step(0.1f32)
+                    .width(Length::Fill),
+                    format!("{:.1} dB", power_range.1),
+                ),
+                control(
+                    "Signal Thresh",
+                    slider(SIGMA_MIN..=SIGMA_MAX, controls.signal_sigma, |s| {
+                        Message::UpdateSignalSigma(s).into()
+                    })
+                    .step(0.1f32)
+                    .width(Length::Fill),
+                    format!("{:.1}", controls.signal_sigma),
+                ),
+                control(
+                    "Track BW",
+                    slider(TRACK_BW_MIN..=TRACK_BW_MAX, controls.track_bw, |b| {
+                        Message::UpdateTrackBW(b).into()
+                    })
+                    .step(100.0f32)
+                    .width(Length::Fill),
+                    format!("{:.1} kHz", controls.track_bw / 1000.0),
+                ),
+            ]
+            .columns(2)
+            .spacing(8)
+            .height(Length::Shrink),
+        );
+    }
+    widget::container(result)
+        .padding(8)
+        .width(Length::Fill)
+        .style(widget::container::bordered_box)
+        .into()
 }
 
 #[cfg(test)]

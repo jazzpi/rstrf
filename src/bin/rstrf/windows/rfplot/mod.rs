@@ -407,7 +407,7 @@ impl Window<Message> for RFPlot {
             .into();
         }
 
-        let controls = self.state.controls.view(&self.state).map(Message::from);
+        let controls = control::view(&self.state).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)
