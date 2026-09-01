@@ -1071,7 +1071,7 @@ impl Chart<super::Message> for PlotChart<'_> {
     type State = ();
 
     fn build_chart<DB: DrawingBackend>(&self, _state: &Self::State, chart: ChartBuilder<DB>) {
-        match self.rfplot.state.build_chart(chart, self.app) {
+        match self.state.build_chart(chart, self.app) {
             Ok(()) => (),
             Err(e) => log::error!("Error building chart: {:?}", e),
         }
@@ -1085,19 +1085,19 @@ impl Chart<super::Message> for PlotChart<'_> {
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
         let bounds = Rectangle {
-            x: bounds.x + self.rfplot.state.plot_area_margin,
+            x: bounds.x + self.state.plot_area_margin,
             y: bounds.y,
-            width: bounds.width - self.rfplot.state.plot_area_margin,
-            height: bounds.height - self.rfplot.state.plot_area_margin,
+            width: bounds.width - self.state.plot_area_margin,
+            height: bounds.height - self.state.plot_area_margin,
         };
         match event {
-            canvas::Event::Mouse(event) => self.rfplot.state.handle_mouse(event, bounds, cursor),
+            canvas::Event::Mouse(event) => self.state.handle_mouse(event, bounds, cursor),
             canvas::Event::Keyboard(event) => {
                 if let keyboard::Event::ModifiersChanged(modifiers) = event {
-                    self.rfplot.state.interaction.modifiers.set(*modifiers);
+                    self.state.interaction.modifiers.set(*modifiers);
                     return (Status::Ignored, None);
                 }
-                self.rfplot.state.handle_keyboard(event, bounds, cursor)
+                self.state.handle_keyboard(event, bounds, cursor)
             }
             _ => {
                 log::debug!("{:?}", event);
@@ -1113,7 +1113,7 @@ impl Chart<super::Message> for PlotChart<'_> {
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if cursor.is_over(bounds) {
-            match self.rfplot.state.interaction.mouse_state.get() {
+            match self.state.interaction.mouse_state.get() {
                 MouseState::Idle => mouse::Interaction::Idle,
                 MouseState::Panning(_) => mouse::Interaction::Grabbing,
                 MouseState::DrawingRect { .. } | MouseState::Marking(_) => {

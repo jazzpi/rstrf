@@ -273,7 +273,7 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
 }
 
 struct PlotChart<'a> {
-    rfplot: &'a RFPlot,
+    state: &'a State,
     app: &'a AppShared,
 }
 
@@ -371,10 +371,13 @@ impl Window<Message> for RFPlot {
             left: self.state.plot_area_margin,
         })
         .into();
-        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart { rfplot: self, app })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart {
+            state: &self.state,
+            app,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
 
         let status = self.state.status(app);
 
