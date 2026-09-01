@@ -528,6 +528,69 @@ mod tests {
         );
     }
 
+    fn assert_bounds_in_unit_square(b: data_normalized::Rectangle) {
+        assert!(b.0.x >= -1e-5, "x={}", b.0.x);
+        assert!(
+            b.0.x + b.0.width <= 1.0 + 1e-5,
+            "right edge={}",
+            b.0.x + b.0.width
+        );
+        assert!(b.0.y >= -1e-5, "y={}", b.0.y);
+        assert!(
+            b.0.y + b.0.height <= 1.0 + 1e-5,
+            "top edge={}",
+            b.0.y + b.0.height
+        );
+    }
+
+    #[test]
+    fn zoom_delta_snaps_back_in_bounds() {
+        let mut c = Controls::default();
+        update(&mut c, Message::UpdateZoomX(6.0));
+        update(&mut c, Message::UpdateZoomY(6.0));
+        update(
+            &mut c,
+            Message::PanningDelta(plot_area::Vector::new(-10.0, -10.0)),
+        );
+        // Zoom out anchored at the corner opposite the one the view is now pinned
+        // against, pushing the pinned corner further past the [0, 1] bound.
+        update(
+            &mut c,
+            Message::ZoomDelta(plot_area::Point::new(0.0, 0.0), -1000.0),
+        );
+        assert_bounds_in_unit_square(c.bounds());
+    }
+
+    #[test]
+    fn zoom_delta_x_snaps_back_in_bounds() {
+        let mut c = Controls::default();
+        update(&mut c, Message::UpdateZoomX(6.0));
+        update(
+            &mut c,
+            Message::PanningDelta(plot_area::Vector::new(-10.0, 0.0)),
+        );
+        update(
+            &mut c,
+            Message::ZoomDeltaX(plot_area::Point::new(0.0, 0.0), -1000.0),
+        );
+        assert_bounds_in_unit_square(c.bounds());
+    }
+
+    #[test]
+    fn zoom_delta_y_snaps_back_in_bounds() {
+        let mut c = Controls::default();
+        update(&mut c, Message::UpdateZoomY(6.0));
+        update(
+            &mut c,
+            Message::PanningDelta(plot_area::Vector::new(0.0, -10.0)),
+        );
+        update(
+            &mut c,
+            Message::ZoomDeltaY(plot_area::Point::new(0.0, 0.0), -1000.0),
+        );
+        assert_bounds_in_unit_square(c.bounds());
+    }
+
     #[test]
     fn set_power_bounds_initializes_range() {
         let mut c = Controls::default();
