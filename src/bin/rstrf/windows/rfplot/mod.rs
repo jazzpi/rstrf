@@ -225,7 +225,10 @@ impl State {
             control::Message::ZoomDeltaY(plot_pos, delta) => {
                 self.viewport.zoom_y_at(plot_pos, delta)
             }
-            control::Message::ResetView => self.viewport.reset(),
+            control::Message::ResetView => {
+                self.viewport.reset();
+                self.marks = Default::default();
+            }
             control::Message::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
             control::Message::UpdateMinPower(min_power) => self.power.set_min(min_power),
             control::Message::UpdateMaxPower(max_power) => self.power.set_max(max_power),
@@ -525,10 +528,7 @@ impl Window<Message> for RFPlot {
         message: Message,
         app: &AppShared,
     ) -> Task<WindowOut<Message>> {
-        // Messages handled before the generic dispatch below, either because they produce a
-        // WindowEffect, or because they mutate state that the generic dispatch doesn't touch (but
-        // still needs to run for, e.g. ResetView also resetting zoom/center via Controls::update).
-        match message {
+        let result = match message {
             Message::GpuUploadDone => {
                 self.loading_state = LoadingState::Idle;
                 self.gpu_watcher = None;
@@ -539,6 +539,7 @@ impl Window<Message> for RFPlot {
                         spec.absolute_bounds(),
                     )));
                 }
+                Task::none()
             }
             Message::SaveScreenshot(img, path) => {
                 match img.0.save(&path) {
@@ -553,12 +554,6 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
                 return Task::done(WindowOut::Effect(WindowEffect::ReloadCatalog));
             }
-            Message::View(control::Message::ResetView) => {
-                self.state.marks = Default::default();
-            }
-            _ => (),
-        };
-        let result = match message {
             Message::View(message) => self.state.update_view(message),
             Message::Marks(message) => self.state.update(message, app).map(Message::Marks),
             Message::LoadProgress { loaded, total } => {
@@ -641,10 +636,6 @@ impl Window<Message> for RFPlot {
             }),
             Message::SetView(rect) => self.state.update_view(control::Message::ZoomToRect(rect)),
             Message::Nop => Task::none(),
-            // Handled by the outer match
-            Message::GpuUploadDone
-            | Message::SaveScreenshot(_, _)
-            | Message::LoadSpectrogram(_) => unreachable!(),
         };
         result.map(WindowOut::Msg)
     }
