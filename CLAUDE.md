@@ -57,8 +57,9 @@ AppModel
   ├── shared_state: AppShared — satellites, frequencies, config, Space-Track client
   ├── windows: HashMap<window::Id, AnyWindow>
   │     ├── RFPlot window (windows/rfplot/)
-  │     │     ├── Controls, Spectrogram
-  │     │     ├── Overlay (overlay.rs) — axes, satellite curves, crosshair, marks
+  │     │     ├── state: State (mod.rs) — controls, spectrogram, display, marks, interaction, prediction cache
+  │     │     ├── overlay.rs — chart building (axes, satellite curves, crosshair, marks) and
+  │     │     │     mouse/keyboard handling, as inherent methods on `State`
   │     │     └── shader::Program (shader.rs + shader.wgsl) — wgpu GPU render
   │     ├── SatManager window (windows/sat_manager.rs) — TLE loading, frequency editing, Space-Track sync
   │     └── preferences::Window (windows/preferences.rs) — Config editing (theme, site coords, credentials)
@@ -75,7 +76,7 @@ AppModel
 
 **RFPlot rendering is a two-layer stack:**
 1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers; colormap lookup in fragment shader (`shader.wgsl`)
-2. `ChartWidget` (plotters-iced2) — draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
+2. `ChartWidget` (plotters-iced2) — wraps `PlotChart<'a>`, a view-model struct borrowing `&RFPlot` and `&AppShared` so the `Chart` trait impl can reach both; its methods delegate to inherent methods on `State` (`build_chart`, `handle_mouse`, `handle_keyboard`, defined in `overlay.rs`). Draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
 
 **Marks:** Track points and signals are stored as `data_absolute::Point` slices. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `overlay.rs`.
 
@@ -85,10 +86,10 @@ AppModel
 
 **Coordinate type safety (`coord.rs`):** The `duplicate` macro generates newtyped point types (`screen::Point`, `plot_area::Point`, `data_normalized::Point`, `data_absolute::Point`) and typed transform structs for all 12 pairwise combinations. Coordinate conversion is `point * transform`. This makes coordinate space errors compile errors.
 
-**Serde for persistence:** `Config`, `RFPlot`, `SatManager`, `Controls`, `Overlay`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
+**Serde for persistence:** `Config`, `RFPlot`, `SatManager`, `Controls`, `State`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
 
 **Async I/O:** All file loading and Space-Track API calls use `Task::future(async { ... })`. CPU-intensive work uses `tokio::task::spawn_blocking`.
 
 **Clippy allow:** `filter_map_bool_then` is suppressed globally in `Cargo.toml`.
 
-**Mouse/interaction state via `Cell` (`overlay.rs`):** Transient per-frame UI state that only the view needs (crosshair position, mouse drag state, keyboard modifiers) is stored in `Cell<T>` fields on `Overlay` and mutated directly from `mouse_interaction`/event handlers, rather than round-tripped through `Message` variants. A `Message::Refresh` no-op is dispatched to trigger a redraw after such a `Cell` mutation.
+**Mouse/interaction state via `Cell` (`mod.rs`/`overlay.rs`):** Transient per-frame UI state that only the view needs (crosshair position, mouse drag state, keyboard modifiers) is stored in `Cell<T>` fields on `State`'s `Interaction` sub-struct (`mod.rs`) and mutated directly from `handle_mouse`/`handle_keyboard` (inherent methods on `State`, defined in `overlay.rs`) and from `PlotChart`'s `Chart::update` impl, rather than round-tripped through `Message` variants. A `Message::Refresh` no-op is dispatched to trigger a redraw after such a `Cell` mutation.
