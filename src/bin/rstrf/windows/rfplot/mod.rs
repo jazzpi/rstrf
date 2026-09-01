@@ -13,6 +13,7 @@ use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{
     async_cache::AsyncCache,
+    colormap::Colormap,
     coord::{data_absolute, data_normalized, plot_area},
     menu::MenuItem,
     orbit,
@@ -25,13 +26,15 @@ use uuid::Uuid;
 use crate::{
     app::{AppEvent, AppShared},
     io_service,
-    windows::{Window, WindowEffect, WindowOut, rfplot::control::Controls},
+    windows::{Window, WindowEffect, WindowOut},
 };
 
 pub mod control;
 pub mod overlay;
 mod shader;
 mod viewport;
+
+use viewport::Viewport;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -93,6 +96,9 @@ pub(crate) struct Display {
     show_grid: bool,
     show_crosshair: bool,
     absolute_axes: bool,
+    show_controls: bool,
+    colormap: Colormap,
+    average_plotting: bool,
 }
 
 impl Default for Display {
@@ -102,6 +108,9 @@ impl Default for Display {
             show_grid: false,
             show_crosshair: false,
             absolute_axes: true,
+            show_controls: true,
+            colormap: Default::default(),
+            average_plotting: false,
         }
     }
 }
@@ -161,6 +170,23 @@ impl PowerRange {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub(crate) struct Detection {
+    /// Threshold for signal detection
+    signal_sigma: f32,
+    /// Bandwidth around track points
+    track_bw: f32,
+}
+
+impl Default for Detection {
+    fn default() -> Self {
+        Self {
+            signal_sigma: 5.0,
+            track_bw: 10e3,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Interaction {
     crosshair: Cell<Option<data_absolute::Point>>,
@@ -170,7 +196,9 @@ pub(crate) struct Interaction {
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct State {
-    pub controls: Controls,
+    pub viewport: Viewport,
+    pub power: PowerRange,
+    pub detection: Detection,
     pub spectrogram_files: Vec<PathBuf>,
     #[serde(skip)]
     pub spectrogram: Option<Spectrogram>,
@@ -182,6 +210,35 @@ pub(crate) struct State {
     pub interaction: Interaction,
     #[serde(skip)]
     pub prediction_cache: AsyncCache<overlay::PredictionKey, orbit::Predictions>,
+}
+
+impl State {
+    pub fn update_view(&mut self, message: control::Message) -> Task<Message> {
+        match message {
+            control::Message::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
+            control::Message::UpdateZoomY(zoom_y) => self.viewport.set_zoom_y(zoom_y),
+            control::Message::PanningDelta(delta) => self.viewport.pan_by(delta),
+            control::Message::ZoomDelta(plot_pos, delta) => self.viewport.zoom_at(plot_pos, delta),
+            control::Message::ZoomDeltaX(plot_pos, delta) => {
+                self.viewport.zoom_x_at(plot_pos, delta)
+            }
+            control::Message::ZoomDeltaY(plot_pos, delta) => {
+                self.viewport.zoom_y_at(plot_pos, delta)
+            }
+            control::Message::ResetView => self.viewport.reset(),
+            control::Message::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
+            control::Message::UpdateMinPower(min_power) => self.power.set_min(min_power),
+            control::Message::UpdateMaxPower(max_power) => self.power.set_max(max_power),
+            control::Message::UpdateSignalSigma(sigma) => self.detection.signal_sigma = sigma,
+            control::Message::UpdateTrackBW(bw) => self.detection.track_bw = bw,
+            control::Message::SetControlsVisible(visible) => self.display.show_controls = visible,
+            control::Message::UpdateColormap(colormap) => self.display.colormap = colormap,
+            control::Message::UpdateAveragePlotting(average) => {
+                self.display.average_plotting = average
+            }
+        }
+        Task::none()
+    }
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
@@ -282,8 +339,7 @@ impl RFPlot {
     pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
         let config_task = if matches!(event, AppEvent::ConfigUpdated) {
             self.state
-                .controls
-                .update(control::Message::UpdateAveragePlotting(
+                .update_view(control::Message::UpdateAveragePlotting(
                     app.config.average_plotting,
                 ))
                 .map(WindowOut::Msg)
@@ -300,7 +356,7 @@ impl RFPlot {
     }
 }
 
-fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialView) {
+fn apply_initial_view(state: &mut State, spec: &Spectrogram, iv: &InitialView) {
     let spec_bounds = spec.bounds();
     let length_secs = spec_bounds.0.width as f64;
     let bw = spec_bounds.0.height as f64;
@@ -317,9 +373,11 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
             data_absolute::Point::new(t_min, f_min),
             data_absolute::Size::new(t_max - t_min, f_max - f_min),
         );
-        controls.set_view_from_rect_da(&view_rect, &spec_bounds);
+        state
+            .viewport
+            .set_view_from_rect_da(&view_rect, &spec_bounds);
     }
-    controls.set_power_range(iv.zmin, iv.zmax);
+    state.power.set_range(iv.zmin, iv.zmax);
 }
 
 struct PlotChart<'a> {
@@ -331,15 +389,13 @@ impl Window<Message> for RFPlot {
     fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
         let cmap_task = self
             .state
-            .controls
-            .update(control::Message::UpdateColormap(
+            .update_view(control::Message::UpdateColormap(
                 app.config.default_colormap,
             ))
             .map(WindowOut::Msg);
         let average_task = self
             .state
-            .controls
-            .update(control::Message::UpdateAveragePlotting(
+            .update_view(control::Message::UpdateAveragePlotting(
                 app.config.average_plotting,
             ))
             .map(WindowOut::Msg);
@@ -503,7 +559,7 @@ impl Window<Message> for RFPlot {
             _ => (),
         };
         let result = match message {
-            Message::View(message) => self.state.controls.update(message),
+            Message::View(message) => self.state.update_view(message),
             Message::Marks(message) => self.state.update(message, app).map(Message::Marks),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
@@ -512,9 +568,13 @@ impl Window<Message> for RFPlot {
             Message::SpectrogramLoaded(result) => match result {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
-                    self.state.controls.set_spectrogram(&spec);
+                    self.state.power.set_bounds(spec.power_bounds);
+                    let data = spec.bounds();
+                    self.state
+                        .viewport
+                        .set_data_bounds(data.0.width, data.0.height);
                     if let Some(iv) = self.initial_view.take() {
-                        apply_initial_view(&mut self.state.controls, &spec, &iv);
+                        apply_initial_view(&mut self.state, &spec, &iv);
                     }
                     let spec_id = spec.id;
                     self.state.spectrogram = Some(spec);
@@ -579,10 +639,7 @@ impl Window<Message> for RFPlot {
                     None => Message::Nop,
                 }
             }),
-            Message::SetView(rect) => self
-                .state
-                .controls
-                .update(control::Message::ZoomToRect(rect)),
+            Message::SetView(rect) => self.state.update_view(control::Message::ZoomToRect(rect)),
             Message::Nop => Task::none(),
             // Handled by the outer match
             Message::GpuUploadDone
@@ -674,10 +731,7 @@ mod tests {
             .marks
             .signals
             .push(data_absolute::Point::new(3.0, 4.0));
-        let _ = rfplot
-            .state
-            .controls
-            .update(control::Message::UpdateZoomX(5.0));
+        let _ = rfplot.state.update_view(control::Message::UpdateZoomX(5.0));
 
         let app = AppShared::default();
         let _ = rfplot.update(
@@ -688,7 +742,17 @@ mod tests {
 
         assert!(rfplot.state.marks.track_points.is_empty());
         assert!(rfplot.state.marks.signals.is_empty());
-        assert!((rfplot.state.controls.size().0.width - 1.0).abs() < 1e-6);
-        assert!((rfplot.state.controls.size().0.height - 1.0).abs() < 1e-6);
+        assert!((rfplot.state.viewport.size().0.width - 1.0).abs() < 1e-6);
+        assert!((rfplot.state.viewport.size().0.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn set_controls_visible_changes_visibility() {
+        let mut state = State::default();
+        assert!(state.display.show_controls);
+        let _ = state.update_view(control::Message::SetControlsVisible(false));
+        assert!(!state.display.show_controls);
+        let _ = state.update_view(control::Message::SetControlsVisible(true));
+        assert!(state.display.show_controls);
     }
 }

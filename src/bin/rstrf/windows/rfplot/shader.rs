@@ -68,10 +68,10 @@ use iced::{
     widget::shader,
 };
 use itertools::{Itertools, izip};
-use rstrf::{colormap::Colormap, spectrogram::Spectrogram};
+use rstrf::{colormap::Colormap, coord::data_normalized, spectrogram::Spectrogram};
 use uuid::Uuid;
 
-use super::{Controls, Message, RFPlot};
+use super::{Message, RFPlot};
 
 const MIPMAP_FACTOR: usize = 4;
 /// Due to the mipmap, the size of the `spec_data` buffer must increase by
@@ -381,13 +381,13 @@ impl Pipeline {
                 self.mipmap.as_ref(),
                 id,
                 spectrogram,
-                primitive.controls.colormap(),
+                primitive.colormap,
                 physical_size,
-                primitive.controls.average_plotting(),
+                primitive.average_plotting,
             )
         });
 
-        let bounds = primitive.controls.bounds();
+        let bounds = primitive.bounds;
         let pixel_height = bounds.0.height / viewport_bounds.height * spectrogram.nchan as f32;
         let max_level = (spectrogram.nchan as f32 / 256.0)
             .log(MIPMAP_FACTOR as f32)
@@ -418,14 +418,14 @@ impl Pipeline {
 
         for chunk in primitive_data.buffers.spectrogram.iter_mut() {
             let uniforms = Uniforms {
-                power_bounds: primitive.controls.power_range().into(),
+                power_bounds: primitive.power_range.into(),
                 time_bounds: vec2(xmin, xmax),
                 freq_bounds: vec2(vmin, vmax),
                 nslices: chunk.nslices,
                 nchan,
                 pixel_height,
                 viewport_width: viewport_bounds.width,
-                average: primitive.controls.average_plotting() as u32,
+                average: primitive.average_plotting as u32,
                 buf_offset: buf_offset_chan as u32 * chunk.nslices,
             };
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
@@ -444,10 +444,10 @@ impl Pipeline {
                 &self.pipeline,
                 self.mipmap.as_ref(),
                 spectrogram,
-                primitive.controls.average_plotting(),
+                primitive.average_plotting,
             );
             primitive_data.spectrogram_id = spectrogram.id;
-            primitive_data.average = primitive.controls.average_plotting();
+            primitive_data.average = primitive.average_plotting;
             if let Some(notify) = &primitive.gpu_notify {
                 notify.notify_one();
             }
@@ -460,16 +460,16 @@ impl Pipeline {
             );
         }
 
-        if primitive_data.colormap != primitive.controls.colormap() {
+        if primitive_data.colormap != primitive.colormap {
             queue.write_buffer(
                 &primitive_data.buffers.colormap,
                 0,
-                bytemuck::cast_slice(primitive.controls.colormap().buffer()),
+                bytemuck::cast_slice(primitive.colormap.buffer()),
             );
-            primitive_data.colormap = primitive.controls.colormap();
+            primitive_data.colormap = primitive.colormap;
         }
 
-        let average = primitive.controls.average_plotting();
+        let average = primitive.average_plotting;
         if primitive_data.average != average {
             match &self.mipmap {
                 Some(compute) => Self::redispatch_mipmaps(
@@ -989,7 +989,10 @@ impl Pipeline {
 #[derive(Debug)]
 pub struct Primitive {
     id: uuid::Uuid,
-    controls: Controls,
+    bounds: data_normalized::Rectangle,
+    power_range: (f32, f32),
+    colormap: Colormap,
+    average_plotting: bool,
     spectrogram: Option<Spectrogram>,
     gpu_notify: Option<Arc<tokio::sync::Notify>>,
 }
@@ -997,13 +1000,19 @@ pub struct Primitive {
 impl Primitive {
     fn new(
         id: uuid::Uuid,
-        controls: Controls,
+        bounds: data_normalized::Rectangle,
+        power_range: (f32, f32),
+        colormap: Colormap,
+        average_plotting: bool,
         spectrogram: Option<Spectrogram>,
         gpu_notify: Option<Arc<tokio::sync::Notify>>,
     ) -> Self {
         Self {
             id,
-            controls,
+            bounds,
+            power_range,
+            colormap,
+            average_plotting,
             spectrogram,
             gpu_notify,
         }
@@ -1047,7 +1056,10 @@ impl shader::Program<Message> for RFPlot {
     ) -> Self::Primitive {
         Primitive::new(
             self.id,
-            self.state.controls,
+            self.state.viewport.bounds(),
+            self.state.power.range(),
+            self.state.display.colormap,
+            self.state.display.average_plotting,
             self.state.spectrogram.clone(),
             self.gpu_notify.clone(),
         )

@@ -162,7 +162,7 @@ impl State {
         let Some(spectrogram) = &self.spectrogram else {
             return Err("No spectrogram loaded".to_string());
         };
-        let view_norm = self.controls.bounds();
+        let view_norm = self.viewport.bounds();
         let bounds = view_norm * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
@@ -329,7 +329,7 @@ impl State {
                 clamp_line_to_plot(
                     &bounds,
                     self.marks.track_points.iter().map(|pos| {
-                        data_absolute::Point::new(pos.0.x, pos.0.y + self.controls.track_bw() / 2.0)
+                        data_absolute::Point::new(pos.0.x, pos.0.y + self.detection.track_bw / 2.0)
                     }),
                 )
                 .map(|v| v.into()),
@@ -346,7 +346,7 @@ impl State {
                 clamp_line_to_plot(
                     &bounds,
                     self.marks.track_points.iter().map(|pos| {
-                        data_absolute::Point::new(pos.0.x, pos.0.y - self.controls.track_bw() / 2.0)
+                        data_absolute::Point::new(pos.0.x, pos.0.y - self.detection.track_bw / 2.0)
                     }),
                 )
                 .map(|v| v.into()),
@@ -409,7 +409,7 @@ impl State {
                 ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
             )];
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
-                * PlotAreaToDataAbsolute::new(&self.controls.bounds(), &spectrogram.bounds());
+                * PlotAreaToDataAbsolute::new(&self.viewport.bounds(), &spectrogram.bounds());
             let crosshair_text = if self.display.absolute_axes {
                 let t = spectrogram.start_time() + sec_to_duration(crosshair.0.x);
                 format!(
@@ -442,7 +442,7 @@ impl State {
         } = self.interaction.mouse_state.get()
         {
             let pa_to_da =
-                PlotAreaToDataAbsolute::new(&self.controls.bounds(), &spectrogram.bounds());
+                PlotAreaToDataAbsolute::new(&self.viewport.bounds(), &spectrogram.bounds());
             let c1: (f32, f32) = (corner1 * pa_to_da).into();
             let c2: (f32, f32) = (corner2 * pa_to_da).into();
             let (fill_color, border_color) = match action {
@@ -537,7 +537,7 @@ impl State {
                 && let Some(spectrogram) = &self.spectrogram
             {
                 let pos = plot_pos
-                    * PlotAreaToDataAbsolute::new(&self.controls.bounds(), &spectrogram.bounds());
+                    * PlotAreaToDataAbsolute::new(&self.viewport.bounds(), &spectrogram.bounds());
                 self.interaction.crosshair.set(Some(pos));
             } else {
                 self.interaction.crosshair.set(None);
@@ -561,7 +561,7 @@ impl State {
                             pos,
                             &DataAbsoluteToScreen::new(
                                 &screen::Size(bounds.size()),
-                                &self.controls.bounds(),
+                                &self.viewport.bounds(),
                                 &spectrogram.bounds(),
                             ),
                             &self.marks.track_points,
@@ -611,7 +611,7 @@ impl State {
                     self.interaction.mouse_state.set(MouseState::Idle);
                     if let Some(spectrogram) = &self.spectrogram {
                         let pa_to_da = PlotAreaToDataAbsolute::new(
-                            &self.controls.bounds(),
+                            &self.viewport.bounds(),
                             &spectrogram.bounds(),
                         );
                         let c1 = corner1 * pa_to_da;
@@ -646,7 +646,7 @@ impl State {
                     };
                     let da_pos = plot_pos
                         * PlotAreaToDataAbsolute::new(
-                            &self.controls.bounds(),
+                            &self.viewport.bounds(),
                             &spectrogram.bounds(),
                         );
                     let msg = match kind {
@@ -898,8 +898,8 @@ impl State {
                     };
                     let spectrogram = spectrogram.clone();
                     let track_points = self.marks.track_points.clone();
-                    let sigma = self.controls.signal_sigma();
-                    let track_bw = self.controls.track_bw();
+                    let sigma = self.detection.signal_sigma;
+                    let track_bw = self.detection.track_bw;
                     Task::future(async move {
                         tokio::task::spawn_blocking(move || {
                             let signals = signal::find_signals(
