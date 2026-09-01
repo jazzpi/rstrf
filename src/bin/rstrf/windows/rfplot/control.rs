@@ -13,7 +13,7 @@ use strum::IntoEnumIterator;
 
 use crate::{
     widgets::{Icon, ToolbarButton, toolbar},
-    windows::rfplot::{self, viewport::Viewport},
+    windows::rfplot::{self, PowerRange, viewport::Viewport},
 };
 
 const ZOOM_MIN: f32 = 0.0;
@@ -27,10 +27,7 @@ const TRACK_BW_MAX: f32 = 100e3;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Controls {
     viewport: Viewport,
-    /// Possible power range
-    power_bounds: (f32, f32),
-    /// Current power range for display
-    power_range: (f32, f32),
+    power: PowerRange,
     /// Threshold for signal detection
     signal_sigma: f32,
     /// Bandwidth around track points
@@ -61,21 +58,9 @@ pub enum Message {
 
 impl Controls {
     pub fn set_spectrogram(&mut self, spec: &Spectrogram) {
-        self.set_power_bounds(spec.power_bounds);
+        self.power.set_bounds(spec.power_bounds);
         let data = spec.bounds();
         self.viewport.set_data_bounds(data.0.width, data.0.height);
-    }
-
-    fn set_power_bounds(&mut self, bounds: (f32, f32)) {
-        self.power_bounds = bounds;
-        self.power_range = if self.power_range == (0.0, 0.0) {
-            bounds
-        } else {
-            (
-                self.power_range.0.clamp(bounds.0, bounds.1),
-                self.power_range.1.clamp(bounds.0, bounds.1),
-            )
-        };
     }
 
     pub fn size(&self) -> data_normalized::Size {
@@ -87,7 +72,7 @@ impl Controls {
     }
 
     pub fn power_range(&self) -> (f32, f32) {
-        self.power_range
+        self.power.range()
     }
 
     pub fn signal_sigma(&self) -> f32 {
@@ -227,6 +212,8 @@ impl Controls {
             let bounds = self.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
             let zoom_max = self.viewport.zoom_max();
             let log_scale = self.viewport.log_scale();
+            let power_bounds = self.power.bounds();
+            let power_range = self.power.range();
             result = result.push(
                 widget::grid![
                     Self::control(
@@ -249,25 +236,21 @@ impl Controls {
                     ),
                     Self::control(
                         "Min Power",
-                        slider(
-                            self.power_bounds.0..=self.power_bounds.1,
-                            self.power_range.0,
-                            |p| Message::UpdateMinPower(p).into(),
-                        )
+                        slider(power_bounds.0..=power_bounds.1, power_range.0, |p| {
+                            Message::UpdateMinPower(p).into()
+                        })
                         .step(0.1f32)
                         .width(Length::Fill),
-                        format!("{:.1} dB", self.power_range.0),
+                        format!("{:.1} dB", power_range.0),
                     ),
                     Self::control(
                         "Max Power",
-                        slider(
-                            self.power_bounds.0..=self.power_bounds.1,
-                            self.power_range.1,
-                            |p| Message::UpdateMaxPower(p).into(),
-                        )
+                        slider(power_bounds.0..=power_bounds.1, power_range.1, |p| {
+                            Message::UpdateMaxPower(p).into()
+                        })
                         .step(0.1f32)
                         .width(Length::Fill),
-                        format!("{:.1} dB", self.power_range.1),
+                        format!("{:.1} dB", power_range.1),
                     ),
                     Self::control(
                         "Signal Thresh",
@@ -310,12 +293,8 @@ impl Controls {
             Message::ZoomDeltaY(plot_pos, delta) => self.viewport.zoom_y_at(plot_pos, delta),
             Message::ResetView => self.viewport.reset(),
             Message::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
-            Message::UpdateMinPower(min_power) => {
-                self.power_range.0 = min_power.min(self.power_range.1);
-            }
-            Message::UpdateMaxPower(max_power) => {
-                self.power_range.1 = max_power.max(self.power_range.0);
-            }
+            Message::UpdateMinPower(min_power) => self.power.set_min(min_power),
+            Message::UpdateMaxPower(max_power) => self.power.set_max(max_power),
             Message::UpdateSignalSigma(sigma) => {
                 self.signal_sigma = sigma;
             }
@@ -338,14 +317,9 @@ impl Controls {
         self.viewport.set_view_from_rect_da(rect, spec_bounds);
     }
 
-    /// Override the displayed power range. Clamps to current power_bounds.
+    /// Override the displayed power range. Clamps to the current power bounds.
     pub fn set_power_range(&mut self, zmin: Option<f32>, zmax: Option<f32>) {
-        if let Some(z) = zmin {
-            self.power_range.0 = z.clamp(self.power_bounds.0, self.power_bounds.1);
-        }
-        if let Some(z) = zmax {
-            self.power_range.1 = z.clamp(self.power_bounds.0, self.power_bounds.1);
-        }
+        self.power.set_range(zmin, zmax);
     }
 }
 
@@ -353,8 +327,7 @@ impl Default for Controls {
     fn default() -> Self {
         Self {
             viewport: Viewport::default(),
-            power_bounds: (0.0, 0.0),
-            power_range: (0.0, 0.0),
+            power: PowerRange::default(),
             signal_sigma: 5.0,
             track_bw: 10e3,
             show_controls: true,
@@ -370,33 +343,6 @@ mod tests {
 
     fn update(c: &mut Controls, msg: Message) {
         let _ = c.update(msg);
-    }
-
-    #[test]
-    fn set_power_bounds_initializes_range() {
-        let mut c = Controls::default();
-        c.set_power_bounds((-50.0, -10.0));
-        assert_eq!(c.power_range(), (-50.0, -10.0));
-    }
-
-    #[test]
-    fn set_power_bounds_clamps_existing_range() {
-        let mut c = Controls::default();
-        c.set_power_bounds((-50.0, -10.0));
-        c.set_power_bounds((-30.0, -20.0));
-        let (lo, hi) = c.power_range();
-        assert!(lo >= -30.0 && lo <= -20.0, "lo={}", lo);
-        assert!(hi >= -30.0 && hi <= -20.0, "hi={}", hi);
-    }
-
-    #[test]
-    fn update_min_power_cannot_exceed_max() {
-        let mut c = Controls::default();
-        c.set_power_bounds((-50.0, -10.0));
-        update(&mut c, Message::UpdateMaxPower(-20.0));
-        update(&mut c, Message::UpdateMinPower(-10.0));
-        let (lo, hi) = c.power_range();
-        assert!(lo <= hi, "lo={} > hi={}", lo, hi);
     }
 
     #[test]

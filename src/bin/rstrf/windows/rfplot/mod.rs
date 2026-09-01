@@ -112,6 +112,55 @@ pub(crate) struct Marks {
     signals: Vec<data_absolute::Point>,
 }
 
+/// The displayable power range, clamped to the possible range of the loaded spectrogram.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub(crate) struct PowerRange {
+    /// Possible power range
+    bounds: (f32, f32),
+    /// Current power range for display
+    range: (f32, f32),
+}
+
+impl PowerRange {
+    pub fn set_bounds(&mut self, bounds: (f32, f32)) {
+        self.bounds = bounds;
+        self.range = if self.range == (0.0, 0.0) {
+            bounds
+        } else {
+            (
+                self.range.0.clamp(bounds.0, bounds.1),
+                self.range.1.clamp(bounds.0, bounds.1),
+            )
+        };
+    }
+
+    pub fn set_min(&mut self, min: f32) {
+        self.range.0 = min.min(self.range.1);
+    }
+
+    pub fn set_max(&mut self, max: f32) {
+        self.range.1 = max.max(self.range.0);
+    }
+
+    /// Override the displayed power range. Clamps to the current bounds.
+    pub fn set_range(&mut self, min: Option<f32>, max: Option<f32>) {
+        if let Some(v) = min {
+            self.range.0 = v.clamp(self.bounds.0, self.bounds.1);
+        }
+        if let Some(v) = max {
+            self.range.1 = v.clamp(self.bounds.0, self.bounds.1);
+        }
+    }
+
+    pub fn bounds(&self) -> (f32, f32) {
+        self.bounds
+    }
+
+    pub fn range(&self) -> (f32, f32) {
+        self.range
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Interaction {
     crosshair: Cell<Option<data_absolute::Point>>,
@@ -584,6 +633,33 @@ mod tests {
     use rstrf::coord::data_absolute;
 
     use crate::{app::AppShared, windows::Window};
+
+    #[test]
+    fn set_power_bounds_initializes_range() {
+        let mut p = PowerRange::default();
+        p.set_bounds((-50.0, -10.0));
+        assert_eq!(p.range(), (-50.0, -10.0));
+    }
+
+    #[test]
+    fn set_power_bounds_clamps_existing_range() {
+        let mut p = PowerRange::default();
+        p.set_bounds((-50.0, -10.0));
+        p.set_bounds((-30.0, -20.0));
+        let (lo, hi) = p.range();
+        assert!(lo >= -30.0 && lo <= -20.0, "lo={}", lo);
+        assert!(hi >= -30.0 && hi <= -20.0, "hi={}", hi);
+    }
+
+    #[test]
+    fn update_min_power_cannot_exceed_max() {
+        let mut p = PowerRange::default();
+        p.set_bounds((-50.0, -10.0));
+        p.set_max(-20.0);
+        p.set_min(-10.0);
+        let (lo, hi) = p.range();
+        assert!(lo <= hi, "lo={} > hi={}", lo, hi);
+    }
 
     #[test]
     fn reset_view_clears_marks_and_zoom() {
