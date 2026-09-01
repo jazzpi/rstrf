@@ -416,7 +416,9 @@ impl Window<Message> for RFPlot {
         message: Message,
         app: &AppShared,
     ) -> Task<WindowOut<Message>> {
-        // Handle messages that (can) trigger WindowEffect effects first
+        // Messages handled before the generic dispatch below, either because they produce a
+        // WindowEffect, or because they mutate state that the generic dispatch doesn't touch (but
+        // still needs to run for, e.g. ResetView also resetting zoom/center via Controls::update).
         match message {
             Message::GpuUploadDone => {
                 self.loading_state = LoadingState::Idle;
@@ -569,5 +571,44 @@ impl Window<Message> for RFPlot {
                 .map(|s| s.start_time().to_string())
                 .unwrap_or("Loading...".to_string())
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstrf::coord::data_absolute;
+
+    use crate::{app::AppShared, windows::Window};
+
+    #[test]
+    fn reset_view_clears_marks_and_zoom() {
+        let mut rfplot = RFPlot::new();
+        rfplot
+            .state
+            .marks
+            .track_points
+            .push(data_absolute::Point::new(1.0, 2.0));
+        rfplot
+            .state
+            .marks
+            .signals
+            .push(data_absolute::Point::new(3.0, 4.0));
+        let _ = rfplot
+            .state
+            .controls
+            .update(control::Message::UpdateZoomX(5.0));
+
+        let app = AppShared::default();
+        let _ = rfplot.update(
+            window::Id::unique(),
+            Message::View(control::Message::ResetView),
+            &app,
+        );
+
+        assert!(rfplot.state.marks.track_points.is_empty());
+        assert!(rfplot.state.marks.signals.is_empty());
+        assert!((rfplot.state.controls.size().0.width - 1.0).abs() < 1e-6);
+        assert!((rfplot.state.controls.size().0.height - 1.0).abs() < 1e-6);
     }
 }
