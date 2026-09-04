@@ -2,8 +2,13 @@
 
 ## New features
 - **Color predictions by classification**. Classified TLEs are now shown in orange, secret TLEs
-  are shown in red. **Note**: rSTRF uses the classification field in the TLE to determine the
-  color (`25544U` vs `25544C` vs `25544S`).
+  are shown in red. **Note**: There are two ways for rSTRF to determine
+  classifcation status. Both differ from STRF:
+  - If the TLE (or OMM) has the classification status set, rSTRF uses that for
+    the color (`25544U` vs `25544C` vs `25544S`).
+  - If you pass an additional `-s /path/to/classfd.tle` (for e.g. the McCants TLEs), rSTRF will
+    override the classification status of all satellites in that file to
+    classified (i.e. render them in orange).
 - **Disable save signals button when no signals are marked**.
 
 ## Performance improvements

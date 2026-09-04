@@ -41,6 +41,7 @@ pub struct AppShared {
     pub freq_range: Option<(u64, u64)>,
 
     pub catalog_path: Option<PathBuf>,
+    pub classfd_path: Option<PathBuf>,
     pub freqs_path: Option<PathBuf>,
     pub initial_freqs: HashMap<u64, Vec<f64>>,
 }
@@ -160,7 +161,7 @@ impl AppModel {
 
         let window_size = Some(iced::Size::new(flags.width as f32, flags.height as f32));
 
-        let (catalog_path, freqs_path, initial_freqs, site_id) = match flags.command {
+        let (catalog_path, classfd_path, freqs_path, initial_freqs, site_id) = match flags.command {
             Some(Command::Plot(args)) => {
                 tasks.push(Task::done(Message::ReloadCatalog));
                 let a = args.clone();
@@ -170,6 +171,7 @@ impl AppModel {
                 );
                 (
                     args.catalog.clone(),
+                    args.classfd.clone(),
                     args.freqs.clone(),
                     HashMap::new(),
                     args.site_id,
@@ -180,6 +182,7 @@ impl AppModel {
                 tasks.push(
                     Self::load_catalog(
                         Some(args.catalog.clone()),
+                        args.classfd.clone(),
                         args.freqs.clone(),
                         frequencies.clone(),
                     )
@@ -200,6 +203,7 @@ impl AppModel {
                 );
                 (
                     Some(args.catalog.clone()),
+                    args.classfd.clone(),
                     args.freqs.clone(),
                     frequencies,
                     None,
@@ -207,7 +211,7 @@ impl AppModel {
             }
             None => {
                 tasks.push(Task::done(Message::OpenRFPlot));
-                (None, None, HashMap::new(), None)
+                (None, None, None, HashMap::new(), None)
             }
         };
 
@@ -218,6 +222,7 @@ impl AppModel {
                     .freq_range
                     .map(|v| (v[0].round() as u64, v[1].round() as u64)),
                 catalog_path,
+                classfd_path,
                 freqs_path,
                 initial_freqs,
                 site_id,
@@ -587,6 +592,7 @@ impl AppModel {
 
     fn load_catalog(
         catalog: Option<PathBuf>,
+        classfd: Option<PathBuf>,
         freqs: Option<PathBuf>,
         initial_freqs: Transmitters,
     ) -> Task<(Vec<(Satellite, bool)>, Transmitters)> {
@@ -603,7 +609,7 @@ impl AppModel {
                     }
                 }
             }
-            let satellites = if let Some(p) = catalog {
+            let mut satellites = if let Some(p) = catalog {
                 match rstrf::orbit::load_catalog(&p, frequencies.clone()).await {
                     Ok(sats) => sats.into_iter().map(|s| (s, true)).collect(),
                     Err(e) => {
@@ -614,6 +620,24 @@ impl AppModel {
             } else {
                 Vec::new()
             };
+            let classfd = if let Some(p) = classfd {
+                match rstrf::orbit::load_catalog(&p, frequencies.clone()).await {
+                    Ok(sats) => sats
+                        .into_iter()
+                        .map(|mut s| {
+                            s.elements.classification = sgp4::Classification::Classified;
+                            (s, true)
+                        })
+                        .collect(),
+                    Err(e) => {
+                        log::error!("Failed to load catalog: {e:?}");
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            satellites.extend(classfd);
             (satellites, frequencies)
         })
     }
@@ -631,6 +655,7 @@ impl AppModel {
     fn reload_catalog(&mut self) -> Task<Message> {
         Self::load_catalog(
             self.shared_state.catalog_path.clone(),
+            self.shared_state.classfd_path.clone(),
             self.shared_state.freqs_path.clone(),
             self.shared_state.initial_freqs.clone(),
         )

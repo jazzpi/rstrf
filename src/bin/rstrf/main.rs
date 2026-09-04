@@ -47,6 +47,9 @@ pub struct PlotArgs {
     /// Catalog file (TLE, OMM JSON or OMM CSV)
     #[arg(short = 'c', long)]
     pub catalog: Option<PathBuf>,
+    /// Classified catalog file (TLE, OMM JSON or OMM CSV)
+    #[arg(short = 's', long)]
+    pub classfd: Option<PathBuf>,
     /// Path to frequencies.txt
     #[arg(short = 'F', long, value_name = "FREQLIST")]
     pub freqs: Option<PathBuf>,
@@ -83,6 +86,9 @@ pub struct PassPngArgs {
     /// Catalog file (TLE, OMM JSON or OMM CSV)
     #[arg(short = 'c', long)]
     pub catalog: PathBuf,
+    /// Classified catalog file (TLE, OMM JSON or OMM CSV)
+    #[arg(short = 's', long)]
+    pub classfd: Option<PathBuf>,
     /// Satellite to generate pass images for
     #[arg(short = 'i', long)]
     pub norad_id: u64,
