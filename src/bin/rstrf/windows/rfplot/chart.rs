@@ -14,6 +14,7 @@ use plotters::coord::{
     ranged1d::{KeyPointHint, NoDefaultFormatting, ValueFormatter},
 };
 use plotters::prelude::*;
+use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters_iced2::Chart;
 use rstrf::{
     chart::{ReferenceMode, ReferencedTicks, datetime_referenced_ticks},
@@ -235,7 +236,10 @@ impl State {
                             .draw_series(vec![Text::new(
                                 format!("{:06}", id),
                                 (first_time, first_freq),
-                                ("sans-serif", 12).into_font().color(&color),
+                                ("sans-serif", 12)
+                                    .into_font()
+                                    .color(&color)
+                                    .pos(Pos::new(HPos::Left, VPos::Bottom)),
                             )])
                             .map_err(|e| {
                                 format!("Could not draw label for satellite {}: {:?}", id, e)

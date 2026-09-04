@@ -11,6 +11,11 @@
     classified (i.e. render them in orange).
 - **Disable save signals button when no signals are marked**.
 
+## Bug fixes
+- **Render NORAD ID above satellite prediction**. Previously it was rendered
+  below the prediction, which more often than not led to the prediction line
+  going through the NORAD ID.
+
 ## Performance improvements
 - **Mipmapped spectrogram rendering**. This should significantly improve rendering performance
   for spectrograms with high channel counts when zoomed out, at the cost of slightly increased
