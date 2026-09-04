@@ -25,6 +25,11 @@
   predictions on every update (effectively every mouse move). Now, it only checks when something
   may have actually changed. This probably won't make a huge difference.
 
+## Other changes
+There was a lot of refactoring done under the hood (which unblocked the "disable
+save button" feature). This shouldn't be noticeable from a user perspective, but
+hopefully it will make further development easier.
+
 # v0.3.4
 
 ## New features
