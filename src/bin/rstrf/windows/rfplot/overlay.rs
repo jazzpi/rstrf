@@ -35,20 +35,22 @@ use rfd::AsyncFileDialog;
 
 use crate::{app::AppShared, windows::rfplot::MarkAction};
 
-use super::{MouseState, PlotChart, RectAction, State, control};
+use super::{
+    DisplayMsg, MarksMsg, MouseState, PlotChart, PredictionsMsg, RectAction, State, ViewMsg,
+};
 
 /// All inputs that determine the satellite pass predictions.
 ///
 /// To avoid having to explicitly keep track of when the predictions are stale, we use this as the
-/// key for an `AsyncCache`, and check the cached predictions against the current key on every
-/// `update()` call.
+/// key for an `AsyncCache` and compare the stored predictions against a freshly built key whenever
+/// one of the inputs may have changed.
 ///
 /// This involves creating a copy of the key & comparing it, so we don't want the key to be too big.
 /// Thus, we don't include the full `Satellite` structs and instead just include the satellite IDs.
 /// That breaks the automatic staleness detection if the satellites are changed (e.g. new TLEs
 /// loaded or transmitters modified), and these cases need to be handled manually (via
-/// `Message::RefreshCache`). This is a bit annoying, but keeping the full satellite data in the key
-/// comes with a severe performance penalty for large catalogs.
+/// `PredictionsMsg::RefreshCache`). This is a bit annoying, but keeping the full satellite data in
+/// the key comes with a severe performance penalty for large catalogs.
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct PredictionKey {
     satellites: Vec<u64>,
@@ -85,33 +87,6 @@ fn prediction_color(classification: Option<sgp4::Classification>) -> RGBColor {
         Some(sgp4::Classification::Classified) => ORANGE,
         Some(sgp4::Classification::Unclassified) | None => GREEN,
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    /// No-op to force a redraw
-    Refresh,
-    MarkTrackpoints,
-    MarkSignals,
-    AddTrackPoint(data_absolute::Point),
-    AddSignal(data_absolute::Point),
-    DeleteMark(MarkAction, data_absolute::Point),
-    ClearAll,
-    FindSignals,
-    FoundSignals(Vec<data_absolute::Point>),
-    SpectrogramUpdated,
-    /// Force a prediction cache check without any other side effects.
-    RefreshCache,
-    PredictionsReady(PredictionKey, orbit::Predictions),
-    PredictionFailed,
-    TogglePredictions,
-    ToggleGrid,
-    ToggleCrosshair,
-    ToggleAbsoluteAxes,
-    DeleteInRect(data_absolute::Rectangle),
-    MarkCentroid(data_absolute::Rectangle),
-    SaveSignals,
-    WriteSignals(String, Option<std::path::PathBuf>),
 }
 
 fn clamp_line_to_plot(
@@ -477,7 +452,6 @@ impl State {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
-        use control::Message as CMessage;
         let Some(cursor_pos) = cursor.position() else {
             return (Status::Ignored, None);
         };
@@ -505,27 +479,27 @@ impl State {
                 if modifiers.shift() {
                     return (
                         Status::Captured,
-                        Some(CMessage::ZoomDeltaX(plot_pos, *delta).into()),
+                        Some(ViewMsg::ZoomDeltaX(plot_pos, *delta).into()),
                     );
                 } else if modifiers.control() {
                     return (
                         Status::Captured,
-                        Some(CMessage::ZoomDeltaY(plot_pos, *delta).into()),
+                        Some(ViewMsg::ZoomDeltaY(plot_pos, *delta).into()),
                     );
                 }
                 return (
                     Status::Captured,
-                    Some(CMessage::ZoomDelta(plot_pos, *delta).into()),
+                    Some(ViewMsg::ZoomDelta(plot_pos, *delta).into()),
                 );
             } else if cursor.is_over(y_axis) {
                 return (
                     Status::Captured,
-                    Some(CMessage::ZoomDeltaY(plot_pos, *delta).into()),
+                    Some(ViewMsg::ZoomDeltaY(plot_pos, *delta).into()),
                 );
             } else if cursor.is_over(x_axis) {
                 return (
                     Status::Captured,
-                    Some(CMessage::ZoomDeltaX(plot_pos, *delta).into()),
+                    Some(ViewMsg::ZoomDeltaX(plot_pos, *delta).into()),
                 );
             }
         }
@@ -570,7 +544,7 @@ impl State {
                     {
                         return (
                             Status::Captured,
-                            Some(Message::DeleteMark(action, point).into()),
+                            Some(MarksMsg::DeleteMark(action, point).into()),
                         );
                     }
                     return (Status::Captured, None);
@@ -592,7 +566,7 @@ impl State {
                     if modifiers.control() {
                         delta.0.x = 0.0;
                     }
-                    return (Status::Captured, Some(CMessage::PanningDelta(delta).into()));
+                    return (Status::Captured, Some(ViewMsg::PanningDelta(delta).into()));
                 }
                 _ => {}
             },
@@ -605,7 +579,7 @@ impl State {
                         corner1,
                         corner2: plot_pos,
                     });
-                    return (Status::Captured, Some(Message::Refresh.into()));
+                    return (Status::Captured, Some(super::Message::Refresh));
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     self.interaction.mouse_state.set(MouseState::Idle);
@@ -624,12 +598,12 @@ impl State {
                             ),
                         );
                         let msg: super::Message = match action {
-                            RectAction::Delete => Message::DeleteInRect(rect).into(),
-                            RectAction::Zoom => control::Message::ZoomToRect(
+                            RectAction::Delete => MarksMsg::DeleteInRect(rect).into(),
+                            RectAction::Zoom => ViewMsg::ZoomToRect(
                                 rect * DataAbsoluteToDataNormalized::new(&spectrogram.bounds()),
                             )
                             .into(),
-                            RectAction::MarkCentroid => Message::MarkCentroid(rect).into(),
+                            RectAction::MarkCentroid => MarksMsg::MarkCentroid(rect).into(),
                         };
                         return (Status::Captured, Some(msg));
                     }
@@ -650,8 +624,8 @@ impl State {
                             &spectrogram.bounds(),
                         );
                     let msg = match kind {
-                        MarkAction::Trackpoint => Message::AddTrackPoint(da_pos).into(),
-                        MarkAction::Signal => Message::AddSignal(da_pos).into(),
+                        MarkAction::Trackpoint => MarksMsg::AddTrackPoint(da_pos).into(),
+                        MarkAction::Signal => MarksMsg::AddSignal(da_pos).into(),
                     };
                     return (Status::Captured, Some(msg));
                 } else if matches!(event, mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -664,7 +638,7 @@ impl State {
         };
 
         let msg = if update_crosshair {
-            Some(Message::Refresh.into())
+            Some(super::Message::Refresh)
         } else {
             None
         };
@@ -696,48 +670,48 @@ impl State {
                     MouseState::Panning(_) => (),
                     MouseState::DrawingRect { .. } => {
                         self.interaction.mouse_state.set(MouseState::Idle);
-                        return (Status::Captured, Some(Message::Refresh.into()));
+                        return (Status::Captured, Some(super::Message::Refresh));
                     }
                     MouseState::Marking(_) => self.interaction.mouse_state.set(MouseState::Idle),
                 }
             }
             keyboard::Key::Character("s") => {
-                return (Status::Captured, Some(Message::MarkTrackpoints.into()));
+                return (Status::Captured, Some(MarksMsg::MarkTrackpoints.into()));
             }
             keyboard::Key::Character("d") if modifiers.shift() => {
-                return (Status::Captured, Some(Message::MarkSignals.into()));
+                return (Status::Captured, Some(MarksMsg::MarkSignals.into()));
             }
             keyboard::Key::Character("r") => {
-                return (Status::Captured, Some(control::Message::ResetView.into()));
+                return (Status::Captured, Some(ViewMsg::ResetView.into()));
             }
             keyboard::Key::Character("f") => {
-                return (Status::Captured, Some(Message::FindSignals.into()));
+                return (Status::Captured, Some(MarksMsg::FindSignals.into()));
             }
             keyboard::Key::Character("p") => {
-                return (Status::Captured, Some(Message::TogglePredictions.into()));
+                return (Status::Captured, Some(DisplayMsg::TogglePredictions.into()));
             }
             keyboard::Key::Named(Named::ArrowLeft) => {
                 return (
                     Status::Captured,
-                    Some(control::Message::PanningDelta(plot_area::Vector::new(pan, 0.0)).into()),
+                    Some(ViewMsg::PanningDelta(plot_area::Vector::new(pan, 0.0)).into()),
                 );
             }
             keyboard::Key::Named(Named::ArrowRight) => {
                 return (
                     Status::Captured,
-                    Some(control::Message::PanningDelta(plot_area::Vector::new(-pan, 0.0)).into()),
+                    Some(ViewMsg::PanningDelta(plot_area::Vector::new(-pan, 0.0)).into()),
                 );
             }
             keyboard::Key::Named(Named::ArrowUp) => {
                 return (
                     Status::Captured,
-                    Some(control::Message::PanningDelta(plot_area::Vector::new(0.0, -pan)).into()),
+                    Some(ViewMsg::PanningDelta(plot_area::Vector::new(0.0, -pan)).into()),
                 );
             }
             keyboard::Key::Named(Named::ArrowDown) => {
                 return (
                     Status::Captured,
-                    Some(control::Message::PanningDelta(plot_area::Vector::new(0.0, pan)).into()),
+                    Some(ViewMsg::PanningDelta(plot_area::Vector::new(0.0, pan)).into()),
                 );
             }
             _ => (),
@@ -810,7 +784,7 @@ impl State {
 
     /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
     /// recomputation.
-    fn check_cache(&mut self, app: &AppShared) -> Task<Message> {
+    fn check_cache(&mut self, app: &AppShared) -> Task<super::Message> {
         let Some(key) = prediction_key(self, app) else {
             self.prediction_cache.reset();
             return Task::none();
@@ -825,20 +799,21 @@ impl State {
                 })
                 .await;
                 match result {
-                    Ok(predictions) => Message::PredictionsReady(key_for_msg, predictions),
+                    Ok(predictions) => {
+                        PredictionsMsg::PredictionsReady(key_for_msg, predictions).into()
+                    }
                     Err(e) => {
                         log::error!("Failed to predict satellite passes: {}", e);
-                        Message::PredictionFailed
+                        PredictionsMsg::PredictionFailed.into()
                     }
                 }
             })
         })
     }
 
-    pub fn update(&mut self, message: Message, app: &AppShared) -> Task<Message> {
+    pub fn update_marks(&mut self, message: MarksMsg, app: &AppShared) -> Task<super::Message> {
         match message {
-            Message::Refresh => Task::none(),
-            Message::MarkTrackpoints => {
+            MarksMsg::MarkTrackpoints => {
                 if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
                     self.interaction
                         .mouse_state
@@ -846,7 +821,7 @@ impl State {
                 }
                 Task::none()
             }
-            Message::MarkSignals => {
+            MarksMsg::MarkSignals => {
                 if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
                     self.interaction
                         .mouse_state
@@ -854,7 +829,7 @@ impl State {
                 }
                 Task::none()
             }
-            Message::AddTrackPoint(pos) => {
+            MarksMsg::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
                 match self
                     .marks
@@ -866,12 +841,12 @@ impl State {
                 }
                 Task::none()
             }
-            Message::AddSignal(pos) => {
+            MarksMsg::AddSignal(pos) => {
                 log::debug!("Manually adding signal at position: {:?}", pos);
                 self.marks.signals.push(pos);
                 Task::none()
             }
-            Message::DeleteMark(action, point) => {
+            MarksMsg::DeleteMark(action, point) => {
                 log::debug!("Deleting {:?} mark at position: {:?}", action, point);
                 let collection = match action {
                     MarkAction::Trackpoint => &mut self.marks.track_points,
@@ -882,12 +857,25 @@ impl State {
                 }
                 Task::none()
             }
-            Message::ClearAll => {
+            MarksMsg::DeleteInRect(rect) => {
+                self.marks.track_points.retain(|p| !rect.contains(*p));
+                self.marks.signals.retain(|p| !rect.contains(*p));
+                Task::none()
+            }
+            MarksMsg::MarkCentroid(rect) => {
+                self.marks.signals.extend(
+                    self.spectrogram
+                        .as_ref()
+                        .and_then(|spec| signal::centroid(spec, rect)),
+                );
+                Task::none()
+            }
+            MarksMsg::ClearAll => {
                 self.marks.track_points.clear();
                 self.marks.signals.clear();
                 Task::none()
             }
-            Message::FindSignals => {
+            MarksMsg::FindSignals => {
                 if self.marks.track_points.len() < 2 {
                     Task::none()
                 } else {
@@ -917,66 +905,18 @@ impl State {
                                     signals
                                 }
                             };
-                            Message::FoundSignals(signals)
+                            MarksMsg::FoundSignals(signals).into()
                         })
                         .await
                         .unwrap()
                     })
                 }
             }
-            Message::FoundSignals(signals) => {
+            MarksMsg::FoundSignals(signals) => {
                 self.marks.signals = signals;
                 Task::none()
             }
-            Message::SpectrogramUpdated => {
-                self.marks.track_points.clear();
-                self.marks.signals.clear();
-                self.interaction.crosshair.set(None);
-                self.check_cache(app)
-            }
-            Message::RefreshCache => {
-                self.prediction_cache.reset();
-                self.check_cache(app)
-            }
-            Message::PredictionsReady(key, predictions) => {
-                log::debug!("Using {} satellite predictions", predictions.n_satellites());
-                self.prediction_cache.store(key, predictions);
-                Task::none()
-            }
-            Message::PredictionFailed => {
-                log::error!("Prediction failed");
-                Task::none()
-            }
-            Message::TogglePredictions => {
-                self.display.show_predictions = !self.display.show_predictions;
-                Task::none()
-            }
-            Message::ToggleGrid => {
-                self.display.show_grid = !self.display.show_grid;
-                Task::none()
-            }
-            Message::ToggleCrosshair => {
-                self.display.show_crosshair = !self.display.show_crosshair;
-                Task::none()
-            }
-            Message::ToggleAbsoluteAxes => {
-                self.display.absolute_axes = !self.display.absolute_axes;
-                Task::none()
-            }
-            Message::DeleteInRect(rect) => {
-                self.marks.track_points.retain(|p| !rect.contains(*p));
-                self.marks.signals.retain(|p| !rect.contains(*p));
-                Task::none()
-            }
-            Message::MarkCentroid(rect) => {
-                self.marks.signals.extend(
-                    self.spectrogram
-                        .as_ref()
-                        .and_then(|spec| signal::centroid(spec, rect)),
-                );
-                Task::none()
-            }
-            Message::SaveSignals => {
+            MarksMsg::SaveSignals => {
                 let Some(spectrogram) = &self.spectrogram else {
                     log::error!("No spectrogram loaded, cannot save signals");
                     return Task::none();
@@ -1002,16 +942,52 @@ impl State {
                         .save_file()
                         .await
                         .map(|f| f.path().to_path_buf());
-                    Message::WriteSignals(output, path)
+                    MarksMsg::WriteSignals(output, path).into()
                 })
             }
-            Message::WriteSignals(_, None) => Task::none(),
-            Message::WriteSignals(output, Some(path)) => {
+            MarksMsg::WriteSignals(_, None) => Task::none(),
+            MarksMsg::WriteSignals(output, Some(path)) => {
                 let n = output.lines().count();
                 match std::fs::write(&path, &output) {
                     Ok(()) => log::info!("Wrote {n} signals to {path:?}"),
                     Err(e) => log::error!("Failed to write {path:?}: {e}"),
                 }
+                Task::none()
+            }
+            MarksMsg::SpectrogramUpdated => {
+                self.marks.track_points.clear();
+                self.marks.signals.clear();
+                self.interaction.crosshair.set(None);
+                self.check_cache(app)
+            }
+            MarksMsg::UpdateSignalSigma(sigma) => {
+                self.detection.signal_sigma = sigma;
+                Task::none()
+            }
+            MarksMsg::UpdateTrackBW(bw) => {
+                self.detection.track_bw = bw;
+                Task::none()
+            }
+        }
+    }
+
+    pub fn update_predictions(
+        &mut self,
+        message: PredictionsMsg,
+        app: &AppShared,
+    ) -> Task<super::Message> {
+        match message {
+            PredictionsMsg::RefreshCache => {
+                self.prediction_cache.reset();
+                self.check_cache(app)
+            }
+            PredictionsMsg::PredictionsReady(key, predictions) => {
+                log::debug!("Using {} satellite predictions", predictions.n_satellites());
+                self.prediction_cache.store(key, predictions);
+                Task::none()
+            }
+            PredictionsMsg::PredictionFailed => {
+                log::error!("Prediction failed");
                 Task::none()
             }
         }

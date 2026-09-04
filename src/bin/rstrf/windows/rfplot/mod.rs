@@ -38,12 +38,22 @@ use viewport::Viewport;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    View(control::Message),
-    Marks(overlay::Message),
+    View(ViewMsg),
+    Display(DisplayMsg),
+    Marks(MarksMsg),
+    Predictions(PredictionsMsg),
+    /// No-op that forces a redraw.
+    ///
+    /// For simplicity, we handle keyboard/mouse interaction in `Chart::update()` through `Cell`s.
+    /// This allows us to emit a message anyways (which is what triggers a redraw).
+    Refresh,
     PickSpectrogram,
     LoadSpectrogram(Vec<PathBuf>),
     SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
-    LoadProgress { loaded: usize, total: usize },
+    LoadProgress {
+        loaded: usize,
+        total: usize,
+    },
     GpuUploadDone,
     SetView(data_normalized::Rectangle),
     CaptureScreenshot(Option<PathBuf>),
@@ -52,15 +62,83 @@ pub enum Message {
     Nop,
 }
 
-impl From<control::Message> for Message {
-    fn from(message: control::Message) -> Self {
+/// Which part of the data space is on screen: the x/y viewport and the power (colour) range.
+#[derive(Debug, Clone)]
+pub enum ViewMsg {
+    UpdateZoomX(f32),
+    UpdateZoomY(f32),
+    PanningDelta(plot_area::Vector),
+    ZoomDelta(plot_area::Point, f32),
+    ZoomDeltaX(plot_area::Point, f32),
+    ZoomDeltaY(plot_area::Point, f32),
+    ResetView,
+    ZoomToRect(data_normalized::Rectangle),
+    UpdateMinPower(f32),
+    UpdateMaxPower(f32),
+}
+
+/// How the plot is presented: which layers are drawn, and in what style.
+#[derive(Debug, Clone)]
+pub enum DisplayMsg {
+    TogglePredictions,
+    ToggleGrid,
+    ToggleCrosshair,
+    ToggleAbsoluteAxes,
+    SetControlsVisible(bool),
+    UpdateColormap(Colormap),
+    UpdateAveragePlotting(bool),
+}
+
+/// Track points and signals, plus the detection parameters that produce them.
+#[derive(Debug, Clone)]
+pub enum MarksMsg {
+    MarkTrackpoints,
+    MarkSignals,
+    AddTrackPoint(data_absolute::Point),
+    AddSignal(data_absolute::Point),
+    DeleteMark(MarkAction, data_absolute::Point),
+    DeleteInRect(data_absolute::Rectangle),
+    MarkCentroid(data_absolute::Rectangle),
+    ClearAll,
+    FindSignals,
+    FoundSignals(Vec<data_absolute::Point>),
+    SaveSignals,
+    WriteSignals(String, Option<PathBuf>),
+    SpectrogramUpdated,
+    UpdateSignalSigma(f32),
+    UpdateTrackBW(f32),
+}
+
+/// The satellite pass prediction cache.
+#[derive(Debug, Clone)]
+pub enum PredictionsMsg {
+    /// Force a prediction cache check without any other side effects.
+    RefreshCache,
+    PredictionsReady(overlay::PredictionKey, orbit::Predictions),
+    PredictionFailed,
+}
+
+impl From<ViewMsg> for Message {
+    fn from(message: ViewMsg) -> Self {
         Message::View(message)
     }
 }
 
-impl From<overlay::Message> for Message {
-    fn from(message: overlay::Message) -> Self {
+impl From<DisplayMsg> for Message {
+    fn from(message: DisplayMsg) -> Self {
+        Message::Display(message)
+    }
+}
+
+impl From<MarksMsg> for Message {
+    fn from(message: MarksMsg) -> Self {
         Message::Marks(message)
+    }
+}
+
+impl From<PredictionsMsg> for Message {
+    fn from(message: PredictionsMsg) -> Self {
+        Message::Predictions(message)
     }
 }
 
@@ -213,34 +291,35 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub fn update_view(&mut self, message: control::Message) -> Task<Message> {
+    pub fn update_view(&mut self, message: ViewMsg) {
         match message {
-            control::Message::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
-            control::Message::UpdateZoomY(zoom_y) => self.viewport.set_zoom_y(zoom_y),
-            control::Message::PanningDelta(delta) => self.viewport.pan_by(delta),
-            control::Message::ZoomDelta(plot_pos, delta) => self.viewport.zoom_at(plot_pos, delta),
-            control::Message::ZoomDeltaX(plot_pos, delta) => {
-                self.viewport.zoom_x_at(plot_pos, delta)
-            }
-            control::Message::ZoomDeltaY(plot_pos, delta) => {
-                self.viewport.zoom_y_at(plot_pos, delta)
-            }
-            control::Message::ResetView => {
+            ViewMsg::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
+            ViewMsg::UpdateZoomY(zoom_y) => self.viewport.set_zoom_y(zoom_y),
+            ViewMsg::PanningDelta(delta) => self.viewport.pan_by(delta),
+            ViewMsg::ZoomDelta(plot_pos, delta) => self.viewport.zoom_at(plot_pos, delta),
+            ViewMsg::ZoomDeltaX(plot_pos, delta) => self.viewport.zoom_x_at(plot_pos, delta),
+            ViewMsg::ZoomDeltaY(plot_pos, delta) => self.viewport.zoom_y_at(plot_pos, delta),
+            ViewMsg::ResetView => {
                 self.viewport.reset();
                 self.marks = Default::default();
             }
-            control::Message::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
-            control::Message::UpdateMinPower(min_power) => self.power.set_min(min_power),
-            control::Message::UpdateMaxPower(max_power) => self.power.set_max(max_power),
-            control::Message::UpdateSignalSigma(sigma) => self.detection.signal_sigma = sigma,
-            control::Message::UpdateTrackBW(bw) => self.detection.track_bw = bw,
-            control::Message::SetControlsVisible(visible) => self.display.show_controls = visible,
-            control::Message::UpdateColormap(colormap) => self.display.colormap = colormap,
-            control::Message::UpdateAveragePlotting(average) => {
-                self.display.average_plotting = average
-            }
+            ViewMsg::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
+            ViewMsg::UpdateMinPower(min_power) => self.power.set_min(min_power),
+            ViewMsg::UpdateMaxPower(max_power) => self.power.set_max(max_power),
         }
-        Task::none()
+    }
+
+    pub fn update_display(&mut self, message: DisplayMsg) {
+        let display = &mut self.display;
+        match message {
+            DisplayMsg::TogglePredictions => display.show_predictions = !display.show_predictions,
+            DisplayMsg::ToggleGrid => display.show_grid = !display.show_grid,
+            DisplayMsg::ToggleCrosshair => display.show_crosshair = !display.show_crosshair,
+            DisplayMsg::ToggleAbsoluteAxes => display.absolute_axes = !display.absolute_axes,
+            DisplayMsg::SetControlsVisible(visible) => display.show_controls = visible,
+            DisplayMsg::UpdateColormap(colormap) => display.colormap = colormap,
+            DisplayMsg::UpdateAveragePlotting(average) => display.average_plotting = average,
+        }
     }
 }
 
@@ -340,22 +419,15 @@ impl RFPlot {
 
     // TODO
     pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
-        let config_task = if matches!(event, AppEvent::ConfigUpdated) {
-            self.state
-                .update_view(control::Message::UpdateAveragePlotting(
-                    app.config.average_plotting,
-                ))
-                .map(WindowOut::Msg)
-        } else {
-            Task::none()
-        };
-        // Trigger a prediction cache check
-        let cache_task = self
-            .state
-            .update(overlay::Message::RefreshCache, app)
-            .map(Message::Marks)
-            .map(WindowOut::Msg);
-        Task::batch(vec![config_task, cache_task])
+        if matches!(event, AppEvent::ConfigUpdated) {
+            self.state.update_display(DisplayMsg::UpdateAveragePlotting(
+                app.config.average_plotting,
+            ));
+        }
+        // Trigger a prediction refresh (in case we e.g. changed the site coordinates)
+        self.state
+            .update_predictions(PredictionsMsg::RefreshCache, app)
+            .map(WindowOut::Msg)
     }
 }
 
@@ -390,19 +462,12 @@ struct PlotChart<'a> {
 
 impl Window<Message> for RFPlot {
     fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
-        let cmap_task = self
-            .state
-            .update_view(control::Message::UpdateColormap(
-                app.config.default_colormap,
-            ))
-            .map(WindowOut::Msg);
-        let average_task = self
-            .state
-            .update_view(control::Message::UpdateAveragePlotting(
-                app.config.average_plotting,
-            ))
-            .map(WindowOut::Msg);
-        let spec_task = if self.state.spectrogram_files.is_empty() {
+        self.state
+            .update_display(DisplayMsg::UpdateColormap(app.config.default_colormap));
+        self.state.update_display(DisplayMsg::UpdateAveragePlotting(
+            app.config.average_plotting,
+        ));
+        if self.state.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
@@ -410,8 +475,7 @@ impl Window<Message> for RFPlot {
                 Message::LoadSpectrogram(self.state.spectrogram_files.clone()),
                 app,
             )
-        };
-        Task::batch(vec![cmap_task, average_task, spec_task])
+        }
     }
 
     fn menu_bar(&self) -> Vec<MenuItem<WindowOut<Message>>> {
@@ -554,8 +618,17 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
                 return Task::done(WindowOut::Effect(WindowEffect::ReloadCatalog));
             }
-            Message::View(message) => self.state.update_view(message),
-            Message::Marks(message) => self.state.update(message, app).map(Message::Marks),
+            Message::View(message) => {
+                self.state.update_view(message);
+                Task::none()
+            }
+            Message::Display(message) => {
+                self.state.update_display(message);
+                Task::none()
+            }
+            Message::Marks(message) => self.state.update_marks(message, app),
+            Message::Predictions(message) => self.state.update_predictions(message, app),
+            Message::Refresh => Task::none(),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
                 Task::none()
@@ -580,9 +653,7 @@ impl Window<Message> for RFPlot {
                     self.gpu_watcher = Some(GpuDoneWatcher { spec_id, notify });
                     self.loading_state = LoadingState::GpuUploading;
 
-                    self.state
-                        .update(overlay::Message::SpectrogramUpdated, app)
-                        .map(Message::Marks)
+                    self.state.update_marks(MarksMsg::SpectrogramUpdated, app)
                 }
                 Err(err) => {
                     log::error!("Failed to load spectrogram: {err}");
@@ -634,7 +705,10 @@ impl Window<Message> for RFPlot {
                     None => Message::Nop,
                 }
             }),
-            Message::SetView(rect) => self.state.update_view(control::Message::ZoomToRect(rect)),
+            Message::SetView(rect) => {
+                self.state.update_view(ViewMsg::ZoomToRect(rect));
+                Task::none()
+            }
             Message::Nop => Task::none(),
         };
         result.map(WindowOut::Msg)
@@ -722,12 +796,12 @@ mod tests {
             .marks
             .signals
             .push(data_absolute::Point::new(3.0, 4.0));
-        let _ = rfplot.state.update_view(control::Message::UpdateZoomX(5.0));
+        rfplot.state.update_view(ViewMsg::UpdateZoomX(5.0));
 
         let app = AppShared::default();
         let _ = rfplot.update(
             window::Id::unique(),
-            Message::View(control::Message::ResetView),
+            Message::View(ViewMsg::ResetView),
             &app,
         );
 
@@ -741,9 +815,9 @@ mod tests {
     fn set_controls_visible_changes_visibility() {
         let mut state = State::default();
         assert!(state.display.show_controls);
-        let _ = state.update_view(control::Message::SetControlsVisible(false));
+        state.update_display(DisplayMsg::SetControlsVisible(false));
         assert!(!state.display.show_controls);
-        let _ = state.update_view(control::Message::SetControlsVisible(true));
+        state.update_display(DisplayMsg::SetControlsVisible(true));
         assert!(state.display.show_controls);
     }
 }
