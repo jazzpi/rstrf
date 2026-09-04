@@ -57,9 +57,16 @@ AppModel
   ├── shared_state: AppShared — satellites, frequencies, config, Space-Track client
   ├── windows: HashMap<window::Id, AnyWindow>
   │     ├── RFPlot window (windows/rfplot/)
-  │     │     ├── state: State (mod.rs) — controls, spectrogram, display, marks, interaction, prediction cache
-  │     │     ├── overlay.rs — chart building (axes, satellite curves, crosshair, marks) and
-  │     │     │     mouse/keyboard handling, as inherent methods on `State`
+  │     │     ├── state: State (mod.rs) — viewport, power, detection, spectrogram, display,
+  │     │     │     marks, interaction, prediction cache; plus Message and the update handlers
+  │     │     ├── viewport.rs — Viewport: zoom/pan math, clamping, snap-to-bounds
+  │     │     ├── marks.rs — Marks (track points + signals), MarkAction
+  │     │     ├── predictions.rs — PredictionKey and the pass-prediction cache
+  │     │     ├── chart.rs — PlotChart and the plotters-iced2 Chart impl (axes, satellite
+  │     │     │     curves, crosshair, marks)
+  │     │     ├── interaction.rs — Interaction/MouseState/RectAction and the mouse and
+  │     │     │     keyboard handlers
+  │     │     ├── toolbar.rs — the toolbar and the collapsible controls panel
   │     │     └── shader::Program (shader.rs + shader.wgsl) — wgpu GPU render
   │     ├── SatManager window (windows/sat_manager.rs) — TLE loading, frequency editing, Space-Track sync
   │     └── preferences::Window (windows/preferences.rs) — Config editing (theme, site coords, credentials)
@@ -76,9 +83,9 @@ AppModel
 
 **RFPlot rendering is a two-layer stack:**
 1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers; colormap lookup in fragment shader (`shader.wgsl`)
-2. `ChartWidget` (plotters-iced2) — wraps `PlotChart<'a>`, a view-model struct borrowing `&RFPlot` and `&AppShared` so the `Chart` trait impl can reach both; its methods delegate to inherent methods on `State` (`build_chart`, `handle_mouse`, `handle_keyboard`, defined in `overlay.rs`). Draws axes, grid, Doppler curves (green), track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
+2. `ChartWidget` (plotters-iced2) — wraps `PlotChart<'a>` (`chart.rs`), a view-model struct borrowing `&State` and `&AppShared` so the `Chart` trait impl can reach both; its methods delegate to inherent methods on `State` (`build_chart` in `chart.rs`, `handle_mouse`/`handle_keyboard` in `interaction.rs`). Draws axes, grid, Doppler curves coloured by TLE classification, track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
 
-**Marks:** Track points and signals are stored as `data_absolute::Point` slices. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `overlay.rs`.
+**Marks (`marks.rs`):** `Marks` owns two `Vec<data_absolute::Point>`. Track points are kept sorted by time — `insert_track_point` is the only way in, and the fields are private to the module so the ordering cannot be broken from outside. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `interaction.rs`.
 
 ## Key Patterns
 
@@ -86,10 +93,12 @@ AppModel
 
 **Coordinate type safety (`coord.rs`):** The `duplicate` macro generates newtyped point types (`screen::Point`, `plot_area::Point`, `data_normalized::Point`, `data_absolute::Point`) and typed transform structs for all 12 pairwise combinations. Coordinate conversion is `point * transform`. This makes coordinate space errors compile errors.
 
-**Serde for persistence:** `Config`, `RFPlot`, `SatManager`, `Controls`, `State`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
+**Serde for persistence:** `Config`, `RFPlot`, `SatManager`, `State`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
 
 **Async I/O:** All file loading and Space-Track API calls use `Task::future(async { ... })`. CPU-intensive work uses `tokio::task::spawn_blocking`.
 
 **Clippy allow:** `filter_map_bool_then` is suppressed globally in `Cargo.toml`.
 
-**Mouse/interaction state via `Cell` (`mod.rs`/`overlay.rs`):** Transient per-frame UI state that only the view needs (crosshair position, mouse drag state, keyboard modifiers) is stored in `Cell<T>` fields on `State`'s `Interaction` sub-struct (`mod.rs`) and mutated directly from `handle_mouse`/`handle_keyboard` (inherent methods on `State`, defined in `overlay.rs`) and from `PlotChart`'s `Chart::update` impl, rather than round-tripped through `Message` variants. A `Message::Refresh` no-op is dispatched to trigger a redraw after such a `Cell` mutation.
+**Mouse/interaction state via `Cell` (`interaction.rs`):** Transient per-frame UI state that only the view needs (crosshair position, mouse drag state, keyboard modifiers) is stored in `Cell<T>` fields on `State`'s `Interaction` sub-struct and mutated directly from `handle_mouse`/`handle_keyboard` (inherent methods on `State`) and from `PlotChart`'s `Chart::update` impl, rather than round-tripped through `Message` variants. A `Message::Refresh` no-op is dispatched afterwards: `Chart::update` cannot request a repaint, and iced only redraws when a message is published.
+
+**One component per window:** Everything below the window level is data plus functions over it, not a sub-component. `rfplot::Message` groups its variants by the part of `State` they mutate (`View`, `Display`, `Marks`, `Predictions`), each routed to a `State::update_*` method; views (`toolbar::view`, `chart.rs`) and input handlers are free to read across the whole of `State`, since they are read-only and follow layout rather than ownership.
