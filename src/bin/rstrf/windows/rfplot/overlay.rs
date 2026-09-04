@@ -291,7 +291,7 @@ impl State {
         }
 
         chart
-            .draw_series(self.marks.track_points.iter().filter_map(|pos| {
+            .draw_series(self.marks.track_points().iter().filter_map(|pos| {
                 if bounds.contains(*pos) {
                     Some(Circle::new(pos.into(), 5, YELLOW.filled()))
                 } else {
@@ -303,7 +303,7 @@ impl State {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    self.marks.track_points.iter().map(|pos| {
+                    self.marks.track_points().iter().map(|pos| {
                         data_absolute::Point::new(pos.0.x, pos.0.y + self.detection.track_bw / 2.0)
                     }),
                 )
@@ -320,7 +320,7 @@ impl State {
             .draw_series(LineSeries::new(
                 clamp_line_to_plot(
                     &bounds,
-                    self.marks.track_points.iter().map(|pos| {
+                    self.marks.track_points().iter().map(|pos| {
                         data_absolute::Point::new(pos.0.x, pos.0.y - self.detection.track_bw / 2.0)
                     }),
                 )
@@ -335,7 +335,7 @@ impl State {
             })?;
 
         chart
-            .draw_series(self.marks.signals.iter().filter_map(|pos| {
+            .draw_series(self.marks.signals().iter().filter_map(|pos| {
                 if bounds.contains(*pos) {
                     Some(Circle::new(pos.into(), 5, WHITE.filled()))
                 } else {
@@ -538,8 +538,8 @@ impl State {
                                 &self.viewport.bounds(),
                                 &spectrogram.bounds(),
                             ),
-                            &self.marks.track_points,
-                            &self.marks.signals,
+                            self.marks.track_points(),
+                            self.marks.signals(),
                         )
                     {
                         return (
@@ -831,52 +831,37 @@ impl State {
             }
             MarksMsg::AddTrackPoint(pos) => {
                 log::debug!("Adding track point at position: {:?}", pos);
-                match self
-                    .marks
-                    .track_points
-                    .binary_search_by(|p| p.0.x.partial_cmp(&pos.0.x).unwrap())
-                {
-                    Ok(idx) => self.marks.track_points[idx] = pos,
-                    Err(idx) => self.marks.track_points.insert(idx, pos),
-                }
+                self.marks.insert_track_point(pos);
                 Task::none()
             }
             MarksMsg::AddSignal(pos) => {
                 log::debug!("Manually adding signal at position: {:?}", pos);
-                self.marks.signals.push(pos);
+                self.marks.signals_mut().push(pos);
                 Task::none()
             }
             MarksMsg::DeleteMark(action, point) => {
                 log::debug!("Deleting {:?} mark at position: {:?}", action, point);
-                let collection = match action {
-                    MarkAction::Trackpoint => &mut self.marks.track_points,
-                    MarkAction::Signal => &mut self.marks.signals,
-                };
-                if let Some(idx) = collection.iter().position(|p| *p == point) {
-                    collection.remove(idx);
-                }
+                self.marks.remove(action, point);
                 Task::none()
             }
             MarksMsg::DeleteInRect(rect) => {
-                self.marks.track_points.retain(|p| !rect.contains(*p));
-                self.marks.signals.retain(|p| !rect.contains(*p));
+                self.marks.retain(|p| !rect.contains(*p));
                 Task::none()
             }
             MarksMsg::MarkCentroid(rect) => {
-                self.marks.signals.extend(
-                    self.spectrogram
-                        .as_ref()
-                        .and_then(|spec| signal::centroid(spec, rect)),
-                );
+                let centroid = self
+                    .spectrogram
+                    .as_ref()
+                    .and_then(|spec| signal::centroid(spec, rect));
+                self.marks.signals_mut().extend(centroid);
                 Task::none()
             }
             MarksMsg::ClearAll => {
-                self.marks.track_points.clear();
-                self.marks.signals.clear();
+                self.marks.clear();
                 Task::none()
             }
             MarksMsg::FindSignals => {
-                if self.marks.track_points.len() < 2 {
+                if self.marks.track_points().len() < 2 {
                     Task::none()
                 } else {
                     let Some(spectrogram) = &self.spectrogram else {
@@ -884,7 +869,7 @@ impl State {
                         return Task::none();
                     };
                     let spectrogram = spectrogram.clone();
-                    let track_points = self.marks.track_points.clone();
+                    let track_points = self.marks.track_points().to_vec();
                     let sigma = self.detection.signal_sigma;
                     let track_bw = self.detection.track_bw;
                     Task::future(async move {
@@ -913,7 +898,7 @@ impl State {
                 }
             }
             MarksMsg::FoundSignals(signals) => {
-                self.marks.signals = signals;
+                *self.marks.signals_mut() = signals;
                 Task::none()
             }
             MarksMsg::SaveSignals => {
@@ -928,10 +913,10 @@ impl State {
                 let start_time = spectrogram.start_time();
                 let start_mjd = start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
                 let center_freq = spectrogram.freq as f64;
-                let suggested = signals_filename(start_time, center_freq, &self.marks.signals)
+                let suggested = signals_filename(start_time, center_freq, self.marks.signals())
                     .unwrap_or_else(|| "out.dat".to_owned());
                 let mut output = String::new();
-                for sig in &self.marks.signals {
+                for sig in self.marks.signals() {
                     let mjd = start_mjd + sig.0.x as f64 / 86400.0;
                     let freq = center_freq + sig.0.y as f64;
                     output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));
@@ -955,8 +940,7 @@ impl State {
                 Task::none()
             }
             MarksMsg::SpectrogramUpdated => {
-                self.marks.track_points.clear();
-                self.marks.signals.clear();
+                self.marks.clear();
                 self.interaction.crosshair.set(None);
                 self.check_cache(app)
             }

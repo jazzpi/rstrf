@@ -112,7 +112,7 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
             icon: Icon::Save,
             tooltip: "Save signals to out.dat",
             msg: MarksMsg::SaveSignals.into(),
-            enabled: !state.marks.signals.is_empty(),
+            enabled: !state.marks.signals().is_empty(),
             style: widget::button::primary,
         },
         ToolbarButton::Icon {
