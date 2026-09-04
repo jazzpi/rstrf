@@ -1060,7 +1060,7 @@ impl shader::Program<Message> for RFPlot {
             self.state.power.range(),
             self.state.display.colormap,
             self.state.display.average_plotting,
-            self.state.spectrogram.clone(),
+            self.state.spectrogram().cloned(),
             self.gpu_notify.clone(),
         )
     }

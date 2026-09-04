@@ -29,7 +29,7 @@ pub(crate) struct PredictionKey {
 }
 
 fn prediction_key(state: &State, app: &AppShared) -> Option<PredictionKey> {
-    let spectrogram = state.spectrogram.as_ref()?;
+    let spectrogram = state.spectrogram()?;
     let site = app.site()?;
     let satellites = app.active_satellite_ids();
     if satellites.is_empty() {

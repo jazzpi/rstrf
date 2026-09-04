@@ -137,7 +137,7 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
     ]);
     let mut result = widget::column![buttons].spacing(8);
     if state.display.show_controls
-        && let Some(spectrogram) = &state.spectrogram
+        && let Some(spectrogram) = &state.spectrogram()
     {
         let bounds =
             state.viewport.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());

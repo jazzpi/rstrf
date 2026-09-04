@@ -245,7 +245,7 @@ pub(crate) struct State {
     pub detection: Detection,
     pub spectrogram_files: Vec<PathBuf>,
     #[serde(skip)]
-    pub spectrogram: Option<Spectrogram>,
+    spectrogram: Option<Spectrogram>,
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
     pub display: Display,
@@ -257,6 +257,19 @@ pub(crate) struct State {
 }
 
 impl State {
+    pub fn spectrogram(&self) -> Option<&Spectrogram> {
+        self.spectrogram.as_ref()
+    }
+
+    pub fn set_spectrogram(&mut self, spectrogram: Option<Spectrogram>, paths: Vec<PathBuf>) {
+        let spec = spectrogram.as_ref().unwrap();
+        self.power.set_bounds(spec.power_bounds);
+        let data = spec.bounds();
+        self.viewport.set_data_bounds(data.0.width, data.0.height);
+        self.spectrogram = spectrogram;
+        self.spectrogram_files = paths;
+    }
+
     pub fn update_view(&mut self, message: ViewMsg) {
         match message {
             ViewMsg::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
@@ -565,7 +578,11 @@ impl RFPlot {
     }
 }
 
-fn apply_initial_view(state: &mut State, spec: &Spectrogram, iv: &InitialView) {
+fn apply_initial_view(state: &mut State, iv: &InitialView) {
+    let Some(spec) = state.spectrogram() else {
+        log::error!("Tried to apply initial view but no spectrogram is loaded");
+        return;
+    };
     let spec_bounds = spec.bounds();
     let length_secs = spec_bounds.0.width as f64;
     let bw = spec_bounds.0.height as f64;
@@ -649,7 +666,7 @@ impl Window<Message> for RFPlot {
 
         // The plot is implemented as a stack of two layers: the spectrogram itself (see
         // `shader.rs`) and the overlay (see `overlay.rs`).
-        if self.state.spectrogram.is_none() {
+        if self.state.spectrogram().is_none() {
             return container(
                 button("Open Spectrogram")
                     .style(button::primary)
@@ -726,7 +743,7 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::Idle;
                 self.gpu_watcher = None;
                 self.gpu_notify = None;
-                if let Some(spec) = &self.state.spectrogram {
+                if let Some(spec) = &self.state.spectrogram() {
                     return Task::done(WindowOut::Effect(WindowEffect::PlotReady(
                         id,
                         spec.absolute_bounds(),
@@ -765,17 +782,11 @@ impl Window<Message> for RFPlot {
             Message::SpectrogramLoaded(result) => match result {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
-                    self.state.power.set_bounds(spec.power_bounds);
-                    let data = spec.bounds();
-                    self.state
-                        .viewport
-                        .set_data_bounds(data.0.width, data.0.height);
-                    if let Some(iv) = self.initial_view.take() {
-                        apply_initial_view(&mut self.state, &spec, &iv);
-                    }
                     let spec_id = spec.id;
-                    self.state.spectrogram = Some(spec);
-                    self.state.spectrogram_files = paths;
+                    self.state.set_spectrogram(Some(spec), paths);
+                    if let Some(iv) = self.initial_view.take() {
+                        apply_initial_view(&mut self.state, &iv);
+                    }
 
                     let notify = Arc::new(tokio::sync::Notify::new());
                     self.gpu_notify = Some(notify.clone());
@@ -870,8 +881,7 @@ impl Window<Message> for RFPlot {
         format!(
             "Plot: {}",
             self.state
-                .spectrogram
-                .as_ref()
+                .spectrogram()
                 .map(|s| s.start_time().to_string())
                 .unwrap_or("Loading...".to_string())
         )
