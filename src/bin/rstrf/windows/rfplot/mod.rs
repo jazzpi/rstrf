@@ -32,6 +32,7 @@ use crate::{
 pub mod control;
 mod marks;
 pub mod overlay;
+mod predictions;
 mod shader;
 mod viewport;
 
@@ -116,7 +117,7 @@ pub enum MarksMsg {
 pub enum PredictionsMsg {
     /// Force a prediction cache check without any other side effects.
     RefreshCache,
-    PredictionsReady(overlay::PredictionKey, orbit::Predictions),
+    PredictionsReady(predictions::PredictionKey, orbit::Predictions),
     PredictionFailed,
 }
 
@@ -277,7 +278,7 @@ pub(crate) struct State {
     #[serde(skip)]
     pub interaction: Interaction,
     #[serde(skip)]
-    pub prediction_cache: AsyncCache<overlay::PredictionKey, orbit::Predictions>,
+    pub prediction_cache: AsyncCache<predictions::PredictionKey, orbit::Predictions>,
 }
 
 impl State {
