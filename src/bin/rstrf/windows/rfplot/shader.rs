@@ -373,17 +373,14 @@ impl Pipeline {
         };
 
         let is_new_entry = !self.instances.contains_key(&primitive.id);
-        let primitive_data = self.instances.entry(primitive.id).or_insert_with_key(|id| {
+        let primitive_data = self.instances.entry(primitive.id).or_insert_with(|| {
             Self::create_buffers(
                 device,
                 queue,
                 &self.pipeline,
                 self.mipmap.as_ref(),
-                id,
-                spectrogram,
-                primitive.colormap,
+                primitive,
                 physical_size,
-                primitive.average_plotting,
             )
         });
 
@@ -496,16 +493,14 @@ impl Pipeline {
         queue: &wgpu::Queue,
         pipeline: &wgpu::RenderPipeline,
         mipmap_pipeline: Option<&wgpu::ComputePipeline>,
-        id: &Uuid,
-        spectrogram: &Spectrogram,
-        colormap: Colormap,
+        primitive: &Primitive,
         physical_size: Size<u32>,
-        average: bool,
     ) -> PrimitiveData {
-        let prefix = format!("spectrogram.{}", id);
+        let spectrogram = primitive.spectrogram.as_ref().unwrap();
+        let prefix = format!("spectrogram.{}", primitive.id);
         let colormap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(format!("{prefix}.buffer.colormap").as_str()),
-            contents: bytemuck::cast_slice(colormap.buffer()),
+            contents: bytemuck::cast_slice(primitive.colormap.buffer()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -526,7 +521,7 @@ impl Pipeline {
             pipeline,
             mipmap_pipeline,
             spectrogram,
-            average,
+            primitive.average_plotting,
         );
 
         PrimitiveData {
@@ -536,8 +531,8 @@ impl Pipeline {
                 spectrogram,
             },
             spectrogram_id,
-            colormap,
-            average,
+            colormap: primitive.colormap,
+            average: primitive.average_plotting,
             depth: Self::create_depth_target(device, physical_size, &prefix),
         }
     }
