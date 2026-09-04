@@ -29,11 +29,11 @@ use crate::{
 };
 
 mod chart;
-pub mod control;
 mod interaction;
 mod marks;
 mod predictions;
 mod shader;
+mod toolbar;
 mod viewport;
 
 use chart::PlotChart;
@@ -659,7 +659,7 @@ impl Window<Message> for RFPlot {
             .into();
         }
 
-        let controls = control::view(&self.state).map(Message::from);
+        let controls = toolbar::view(&self.state).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)

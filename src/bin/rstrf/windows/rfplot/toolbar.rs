@@ -1,3 +1,5 @@
+//! The toolbar and the collapsible controls panel above the plot.
+
 use iced::{
     Element, Length,
     alignment::Vertical,
