@@ -1,10 +1,9 @@
-use std::{cell::Cell, path::PathBuf, pin::Pin, sync::Arc};
+use std::{path::PathBuf, pin::Pin, sync::Arc};
 
 use futures_util::{SinkExt, Stream};
 use iced::{
     Element, Length, Padding, Subscription, Task,
     alignment::{Horizontal, Vertical},
-    keyboard,
     widget::{self, button, container},
     window,
 };
@@ -16,7 +15,7 @@ use rstrf::{
     colormap::Colormap,
     coord::{data_absolute, data_normalized, plot_area},
     menu::MenuItem,
-    orbit,
+    orbit, signal,
     spectrogram::Spectrogram,
     util::DebugRgbaImage,
 };
@@ -29,14 +28,17 @@ use crate::{
     windows::{Window, WindowEffect, WindowOut},
 };
 
+mod chart;
 pub mod control;
+mod interaction;
 mod marks;
-pub mod overlay;
 mod predictions;
 mod shader;
 mod viewport;
 
-use marks::{MarkAction, Marks};
+use chart::PlotChart;
+use interaction::{Interaction, MouseState, RectAction};
+use marks::{MarkAction, Marks, signals_filename};
 use viewport::Viewport;
 
 #[derive(Debug, Clone)]
@@ -145,26 +147,6 @@ impl From<PredictionsMsg> for Message {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum RectAction {
-    Delete,
-    Zoom,
-    MarkCentroid,
-}
-
-#[derive(Default, Clone, Copy, Debug)]
-pub enum MouseState {
-    #[default]
-    Idle,
-    Panning(plot_area::Point),
-    DrawingRect {
-        action: RectAction,
-        corner1: plot_area::Point,
-        corner2: plot_area::Point,
-    },
-    Marking(MarkAction),
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Display {
     show_predictions: bool,
@@ -256,13 +238,6 @@ impl Default for Detection {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct Interaction {
-    crosshair: Cell<Option<data_absolute::Point>>,
-    mouse_state: Cell<MouseState>,
-    modifiers: Cell<keyboard::Modifiers>,
-}
-
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct State {
     pub viewport: Viewport,
@@ -310,6 +285,174 @@ impl State {
             DisplayMsg::SetControlsVisible(visible) => display.show_controls = visible,
             DisplayMsg::UpdateColormap(colormap) => display.colormap = colormap,
             DisplayMsg::UpdateAveragePlotting(average) => display.average_plotting = average,
+        }
+    }
+}
+
+impl State {
+    pub fn update_marks(&mut self, message: MarksMsg, app: &AppShared) -> Task<Message> {
+        match message {
+            MarksMsg::MarkTrackpoints => {
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
+                    self.interaction
+                        .mouse_state
+                        .set(MouseState::Marking(MarkAction::Trackpoint));
+                }
+                Task::none()
+            }
+            MarksMsg::MarkSignals => {
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
+                    self.interaction
+                        .mouse_state
+                        .set(MouseState::Marking(MarkAction::Signal));
+                }
+                Task::none()
+            }
+            MarksMsg::AddTrackPoint(pos) => {
+                log::debug!("Adding track point at position: {:?}", pos);
+                self.marks.insert_track_point(pos);
+                Task::none()
+            }
+            MarksMsg::AddSignal(pos) => {
+                log::debug!("Manually adding signal at position: {:?}", pos);
+                self.marks.signals_mut().push(pos);
+                Task::none()
+            }
+            MarksMsg::DeleteMark(action, point) => {
+                log::debug!("Deleting {:?} mark at position: {:?}", action, point);
+                self.marks.remove(action, point);
+                Task::none()
+            }
+            MarksMsg::DeleteInRect(rect) => {
+                self.marks.retain(|p| !rect.contains(*p));
+                Task::none()
+            }
+            MarksMsg::MarkCentroid(rect) => {
+                let centroid = self
+                    .spectrogram
+                    .as_ref()
+                    .and_then(|spec| signal::centroid(spec, rect));
+                self.marks.signals_mut().extend(centroid);
+                Task::none()
+            }
+            MarksMsg::ClearAll => {
+                self.marks.clear();
+                Task::none()
+            }
+            MarksMsg::FindSignals => {
+                if self.marks.track_points().len() < 2 {
+                    Task::none()
+                } else {
+                    let Some(spectrogram) = &self.spectrogram else {
+                        log::error!("No spectrogram loaded, cannot find signals");
+                        return Task::none();
+                    };
+                    let spectrogram = spectrogram.clone();
+                    let track_points = self.marks.track_points().to_vec();
+                    let sigma = self.detection.signal_sigma;
+                    let track_bw = self.detection.track_bw;
+                    Task::future(async move {
+                        tokio::task::spawn_blocking(move || {
+                            let signals = signal::find_signals(
+                                &spectrogram,
+                                &track_points,
+                                track_bw,
+                                signal::SignalDetectionMethod::FitTrace { sigma },
+                            );
+                            let signals = match signals {
+                                Err(e) => {
+                                    log::error!("Error finding signals: {}", e);
+                                    Vec::new()
+                                }
+                                Ok(signals) => {
+                                    log::info!("Found {} signal peaks", signals.len());
+                                    signals
+                                }
+                            };
+                            MarksMsg::FoundSignals(signals).into()
+                        })
+                        .await
+                        .unwrap()
+                    })
+                }
+            }
+            MarksMsg::FoundSignals(signals) => {
+                *self.marks.signals_mut() = signals;
+                Task::none()
+            }
+            MarksMsg::SaveSignals => {
+                let Some(spectrogram) = &self.spectrogram else {
+                    log::error!("No spectrogram loaded, cannot save signals");
+                    return Task::none();
+                };
+                let Some(site_id) = app.site_id else {
+                    log::error!("No site configured, cannot save signals");
+                    return Task::none();
+                };
+                let start_time = spectrogram.start_time();
+                let start_mjd = start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
+                let center_freq = spectrogram.freq as f64;
+                let suggested = signals_filename(start_time, center_freq, self.marks.signals())
+                    .unwrap_or_else(|| "out.dat".to_owned());
+                let mut output = String::new();
+                for sig in self.marks.signals() {
+                    let mjd = start_mjd + sig.0.x as f64 / 86400.0;
+                    let freq = center_freq + sig.0.y as f64;
+                    output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));
+                }
+                Task::future(async move {
+                    let path = AsyncFileDialog::new()
+                        .set_file_name(suggested.as_str())
+                        .save_file()
+                        .await
+                        .map(|f| f.path().to_path_buf());
+                    MarksMsg::WriteSignals(output, path).into()
+                })
+            }
+            MarksMsg::WriteSignals(_, None) => Task::none(),
+            MarksMsg::WriteSignals(output, Some(path)) => {
+                let n = output.lines().count();
+                match std::fs::write(&path, &output) {
+                    Ok(()) => log::info!("Wrote {n} signals to {path:?}"),
+                    Err(e) => log::error!("Failed to write {path:?}: {e}"),
+                }
+                Task::none()
+            }
+            MarksMsg::SpectrogramUpdated => {
+                self.marks.clear();
+                self.interaction.crosshair.set(None);
+                self.check_cache(app)
+            }
+            MarksMsg::UpdateSignalSigma(sigma) => {
+                self.detection.signal_sigma = sigma;
+                Task::none()
+            }
+            MarksMsg::UpdateTrackBW(bw) => {
+                self.detection.track_bw = bw;
+                Task::none()
+            }
+        }
+    }
+
+    pub fn update_predictions(
+        &mut self,
+        message: PredictionsMsg,
+        app: &AppShared,
+    ) -> Task<Message> {
+        match message {
+            PredictionsMsg::RefreshCache => {
+                self.prediction_cache.reset();
+                self.check_cache(app)
+            }
+            PredictionsMsg::PredictionsReady(key, predictions) => {
+                log::debug!("Using {} satellite predictions", predictions.n_satellites());
+                self.prediction_cache.store(key, predictions);
+                Task::none()
+            }
+            PredictionsMsg::PredictionFailed => {
+                log::error!("Prediction failed");
+                Task::none()
+            }
         }
     }
 }
@@ -444,11 +587,6 @@ fn apply_initial_view(state: &mut State, spec: &Spectrogram, iv: &InitialView) {
             .set_view_from_rect_da(&view_rect, &spec_bounds);
     }
     state.power.set_range(iv.zmin, iv.zmax);
-}
-
-struct PlotChart<'a> {
-    state: &'a State,
-    app: &'a AppShared,
 }
 
 impl Window<Message> for RFPlot {
