@@ -1,3 +1,20 @@
+# vNext
+
+## New features
+- **Color predictions by classification**. Classified TLEs are now shown in orange, secret TLEs
+  are shown in red. **Note**: rSTRF uses the classification field in the TLE to determine the
+  color (`25544U` vs `25544C` vs `25544S`).
+- **Disable save signals button when no signals are marked**.
+
+## Performance improvements
+- **Mipmapped spectrogram rendering**. This should significantly improve rendering performance
+  for spectrograms with high channel counts when zoomed out, at the cost of slightly increased
+  GPU memory usage (~33% increase). **Note**: Only the frequency axis is mipmapped currently.
+  So rendering very long spectrograms may still be laggy.
+- **Rarer prediction cache checks**. Previously, rSTRF would check if it needs to update the
+  predictions on every update (effectively every mouse move). Now, it only checks when something
+  may have actually changed. This probably won't make a huge difference.
+
 # v0.3.4
 
 ## New features
