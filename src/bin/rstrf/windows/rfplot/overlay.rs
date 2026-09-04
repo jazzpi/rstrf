@@ -809,8 +809,7 @@ impl State {
     }
 
     /// Checks whether the prediction cache is stale for the current inputs. If so, starts an async
-    /// recomputation. Called at the top of every `update()` so any incoming message acts as a
-    /// trigger.
+    /// recomputation.
     fn check_cache(&mut self, app: &AppShared) -> Task<Message> {
         let Some(key) = prediction_key(self, app) else {
             self.prediction_cache.reset();
@@ -837,7 +836,7 @@ impl State {
     }
 
     pub fn update(&mut self, message: Message, app: &AppShared) -> Task<Message> {
-        let msg_task = match message {
+        match message {
             Message::Refresh => Task::none(),
             Message::MarkTrackpoints => {
                 if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
@@ -933,11 +932,11 @@ impl State {
                 self.marks.track_points.clear();
                 self.marks.signals.clear();
                 self.interaction.crosshair.set(None);
-                Task::none()
+                self.check_cache(app)
             }
             Message::RefreshCache => {
                 self.prediction_cache.reset();
-                Task::none()
+                self.check_cache(app)
             }
             Message::PredictionsReady(key, predictions) => {
                 log::debug!("Using {} satellite predictions", predictions.n_satellites());
@@ -1015,10 +1014,7 @@ impl State {
                 }
                 Task::none()
             }
-        };
-
-        let cache_task = self.check_cache(app);
-        Task::batch([cache_task, msg_task])
+        }
     }
 }
 
