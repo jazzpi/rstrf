@@ -1,4 +1,4 @@
-# vNext
+# v0.4.0
 
 ## New features
 - **Color predictions by classification**. Classified TLEs are now shown in orange, secret TLEs
