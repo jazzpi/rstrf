@@ -28,24 +28,35 @@ pub async fn load_frequencies(path: &std::path::PathBuf) -> anyhow::Result<Trans
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        anyhow::ensure!(
-            parts.len() == 2,
-            "Expected 2 columns in frequencies file, got: {}",
-            line
-        );
-        let norad_id: u64 = parts[0]
-            .parse()
-            .with_context(|| format!("Failed to parse NORAD ID from {}", parts[0]))?;
-        let freq: f64 = parts[1]
-            .parse()
-            .with_context(|| format!("Failed to parse frequency from {}", parts[1]))?;
-        freqs
-            .entry(norad_id)
-            .or_insert_with(Vec::new)
-            .push(freq * 1e6);
+        match parse_frequencies_line(line) {
+            Ok((norad_id, freq)) => {
+                freqs
+                    .entry(norad_id)
+                    .or_insert_with(Vec::new)
+                    .push(freq * 1e6);
+            }
+            Err(err) => {
+                log::error!("Failed to parse frequencies.txt line: {:?}", err)
+            }
+        }
     }
     Ok(freqs)
+}
+
+pub fn parse_frequencies_line(line: &str) -> anyhow::Result<(u64, f64)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    anyhow::ensure!(
+        parts.len() == 2,
+        "Expected 2 columns in frequencies file, got: {}",
+        line
+    );
+    let norad_id: u64 = parts[0]
+        .parse()
+        .with_context(|| format!("Failed to parse NORAD ID from {}", parts[0]))?;
+    let freq: f64 = parts[1]
+        .parse()
+        .with_context(|| format!("Failed to parse frequency from {}", parts[1]))?;
+    Ok((norad_id, freq))
 }
 
 /// Loads orbital elements from the given file

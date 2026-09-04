@@ -15,6 +15,9 @@
 - **Render NORAD ID above satellite prediction**. Previously it was rendered
   below the prediction, which more often than not led to the prediction line
   going through the NORAD ID.
+- **Parse partially-correct `frequencies.txt` files**. Previously, an error on a
+  single line (e.g. due to an Alpha-5 ID) meant rSTRF rejected the entire file.
+  Now, it will only reject that line.
 
 ## Performance improvements
 - **Mipmapped spectrogram rendering**. This should significantly improve rendering performance
