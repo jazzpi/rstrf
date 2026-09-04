@@ -92,12 +92,26 @@ cargo run --release -- plot \
   /path/to/rffft_data/2026-02-19T00\:00\:01_0000{00..59}.bin \
   -c /path/to/bulk.tle \
   -F /path/to/frequencies.txt \
-  --zmin -38 \
+  --zmin -38 --zmax 10 \
   -C 4801
 ```
 
+You can pass a second, classified catalog with `-s`/`--classfd` (e.g. the
+McCants TLEs). Satellites from that file are always rendered as classified,
+regardless of their own classification status. **Note**: rSTRF does *not*
+automatically read `$ST_TLEDIR/bulk.tle`/`$ST_TLEDIR/classfd.tle` automatically.
+If you want to use them, you must pass them via `-c`/`-s`.
+
 You can also restrict the initial view with `--fmin`/`--fmax` (Hz) and
 `--tmin`/`--tmax` (seconds since the start of the spectrogram).
+
+There is also `--freq-range FMIN FMAX` (Hz) to only load a given frequency
+range. This differs from `--fmin`/`--fmax`: those flags only restrict the
+initial view, but rSTRF still loads the entire spectrogram. So you can still
+zoom out/pan around later. `--freq-range` does not allow that, but loading a
+reduced dataset means reduced memory usage and likely faster rendering.
+
+`-W`/`-H` set the initial window size (default 800x600).
 
 For more usage information, see `cargo run --release -- plot -h`.
 
@@ -117,7 +131,7 @@ tooltip. Additionally, you can use the following hotkeys:
 - `s` -> Add trackpoint
 - `f` -> Find signals around trackpoints ([see below](#signal-export))
 - `D` -> Manually mark a signal ([see below](#signal-export))
-- `C` -> Mark a signal at centroid of the rectangle ([see below](#signal-export))
+- `m` -> Mark a signal at centroid of the rectangle ([see below](#signal-export))
 - Arrow keys -> Pan (full plot width/height)
 - `SHIFT` + arrow keys -> Pan (half plot width/height)
 
@@ -149,7 +163,8 @@ from `$ST_COSPAR` or the `-C` command-line argument.
 The `pass-png` subcommand batch-generates a PNG for each pass of a given
 satellite over the spectrogram, without opening the GUI. Select the satellite by
 its NORAD ID (`-i`) and one or more transmitter frequencies (`-f`, repeatable,
-in Hz) — or load a `frequencies.txt` with `-F`. Output files are named
+in Hz) — or load a `frequencies.txt` with `-F`. As with `plot`, you can pass a
+second, classified catalog with `-s`/`--classfd`. Output files are named
 `<prefix>_000.png`, `<prefix>_001.png`, ...
 
 ```sh
@@ -159,11 +174,13 @@ cargo run --release -- pass-png \
   -i 25544 \
   -f 435.5e6 \
   -o /path/to/output/pass \
-  --zmin -38
+  --zmin -38 --zmax 10
 ```
 
-You can set the image size with `-W`/`-H` (default 800x600). For more usage
-information, see `cargo run --release -- pass-png -h`.
+You can set the image size with `-W`/`-H` (default 800x600), and reduce
+memory usage by only loading part of the frequency range with `--freq-range
+FMIN FMAX` (Hz). For more usage information, see
+`cargo run --release -- pass-png -h`.
 
 **NOTE**: For technical reasons, rSTRF opens a plot window and navigates to each
 pass, then saves a screenshot of the full window.

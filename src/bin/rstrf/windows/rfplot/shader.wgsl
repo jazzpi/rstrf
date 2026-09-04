@@ -7,6 +7,7 @@ struct Uniforms {
     nslices: u32,
     nchan: u32,
     average: u32,
+    buf_offset: u32,
 }
 
 @group(0) @binding(0) var<storage, read> color_map: array<vec4f>;
@@ -79,7 +80,7 @@ fn get_value(u: u32, v: f32) -> f32 {
     var value = select(uniforms.power_bounds.x, 0.0, uniforms.average != 0u);
     for (var f = 0u; f < n_y; f++) {
         let freq_idx = clamp(u32(freq_idx) + f, 0u, uniforms.nchan - 1u);
-        let idx = time_idx * uniforms.nchan + freq_idx;
+        let idx = uniforms.buf_offset + time_idx * uniforms.nchan + freq_idx;
         if uniforms.average != 0u {
             value += spec_data[idx];
         } else {

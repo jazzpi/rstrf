@@ -11,8 +11,11 @@ use image::RgbaImage;
 use plotters_iced2::ChartWidget;
 use rfd::AsyncFileDialog;
 use rstrf::{
-    coord::{data_normalized, plot_area},
+    async_cache::AsyncCache,
+    colormap::Colormap,
+    coord::{data_absolute, data_normalized, plot_area},
     menu::MenuItem,
+    orbit, signal,
     spectrogram::Spectrogram,
     util::DebugRgbaImage,
 };
@@ -22,21 +25,40 @@ use uuid::Uuid;
 use crate::{
     app::{AppEvent, AppShared},
     io_service,
-    windows::{Window, WindowEffect, WindowOut, rfplot::control::Controls},
+    windows::{Window, WindowEffect, WindowOut},
 };
 
-pub mod control;
-pub mod overlay;
+mod chart;
+mod interaction;
+mod marks;
+mod predictions;
 mod shader;
+mod toolbar;
+mod viewport;
+
+use chart::PlotChart;
+use interaction::{Interaction, MouseState, RectAction};
+use marks::{MarkAction, Marks, signals_filename};
+use viewport::Viewport;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Control(control::Message),
-    Overlay(overlay::Message),
+    View(ViewMsg),
+    Display(DisplayMsg),
+    Marks(MarksMsg),
+    Predictions(PredictionsMsg),
+    /// No-op that forces a redraw.
+    ///
+    /// For simplicity, we handle keyboard/mouse interaction in `Chart::update()` through `Cell`s.
+    /// This allows us to emit a message anyways (which is what triggers a redraw).
+    Refresh,
     PickSpectrogram,
     LoadSpectrogram(Vec<PathBuf>),
     SpectrogramLoaded(Result<(Vec<PathBuf>, Spectrogram), String>),
-    LoadProgress { loaded: usize, total: usize },
+    LoadProgress {
+        loaded: usize,
+        total: usize,
+    },
     GpuUploadDone,
     SetView(data_normalized::Rectangle),
     CaptureScreenshot(Option<PathBuf>),
@@ -45,52 +67,407 @@ pub enum Message {
     Nop,
 }
 
-impl From<control::Message> for Message {
-    fn from(message: control::Message) -> Self {
-        Message::Control(message)
+/// Which part of the data space is on screen: the x/y viewport and the power (colour) range.
+#[derive(Debug, Clone)]
+pub enum ViewMsg {
+    UpdateZoomX(f32),
+    UpdateZoomY(f32),
+    PanningDelta(plot_area::Vector),
+    ZoomDelta(plot_area::Point, f32),
+    ZoomDeltaX(plot_area::Point, f32),
+    ZoomDeltaY(plot_area::Point, f32),
+    ResetView,
+    ZoomToRect(data_normalized::Rectangle),
+    UpdateMinPower(f32),
+    UpdateMaxPower(f32),
+}
+
+/// How the plot is presented: which layers are drawn, and in what style.
+#[derive(Debug, Clone)]
+pub enum DisplayMsg {
+    TogglePredictions,
+    ToggleGrid,
+    ToggleCrosshair,
+    ToggleAbsoluteAxes,
+    SetControlsVisible(bool),
+    UpdateColormap(Colormap),
+    UpdateAveragePlotting(bool),
+}
+
+/// Track points and signals, plus the detection parameters that produce them.
+#[derive(Debug, Clone)]
+pub enum MarksMsg {
+    MarkTrackpoints,
+    MarkSignals,
+    AddTrackPoint(data_absolute::Point),
+    AddSignal(data_absolute::Point),
+    DeleteMark(MarkAction, data_absolute::Point),
+    DeleteInRect(data_absolute::Rectangle),
+    MarkCentroid(data_absolute::Rectangle),
+    ClearAll,
+    FindSignals,
+    FoundSignals(Vec<data_absolute::Point>),
+    SaveSignals,
+    WriteSignals(String, Option<PathBuf>),
+    SpectrogramUpdated,
+    UpdateSignalSigma(f32),
+    UpdateTrackBW(f32),
+}
+
+/// The satellite pass prediction cache.
+#[derive(Debug, Clone)]
+pub enum PredictionsMsg {
+    /// Force a prediction cache check without any other side effects.
+    RefreshCache,
+    PredictionsReady(predictions::PredictionKey, orbit::Predictions),
+    PredictionFailed,
+}
+
+impl From<ViewMsg> for Message {
+    fn from(message: ViewMsg) -> Self {
+        Message::View(message)
     }
 }
 
-impl From<overlay::Message> for Message {
-    fn from(message: overlay::Message) -> Self {
-        Message::Overlay(message)
+impl From<DisplayMsg> for Message {
+    fn from(message: DisplayMsg) -> Self {
+        Message::Display(message)
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum RectAction {
-    Delete,
-    Zoom,
-    MarkCentroid,
+impl From<MarksMsg> for Message {
+    fn from(message: MarksMsg) -> Self {
+        Message::Marks(message)
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MarkAction {
-    Trackpoint,
-    Signal,
+impl From<PredictionsMsg> for Message {
+    fn from(message: PredictionsMsg) -> Self {
+        Message::Predictions(message)
+    }
 }
 
-#[derive(Default, Clone, Copy, Debug)]
-pub enum MouseState {
-    #[default]
-    Idle,
-    Panning(plot_area::Point),
-    DrawingRect {
-        action: RectAction,
-        corner1: plot_area::Point,
-        corner2: plot_area::Point,
-    },
-    Marking(MarkAction),
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Display {
+    show_predictions: bool,
+    show_grid: bool,
+    show_crosshair: bool,
+    absolute_axes: bool,
+    show_controls: bool,
+    colormap: Colormap,
+    average_plotting: bool,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Default, Clone)]
-pub(crate) struct SharedState {
-    pub controls: Controls,
+impl Default for Display {
+    fn default() -> Self {
+        Self {
+            show_predictions: true,
+            show_grid: false,
+            show_crosshair: false,
+            absolute_axes: true,
+            show_controls: true,
+            colormap: Default::default(),
+            average_plotting: false,
+        }
+    }
+}
+
+/// The displayable power range, clamped to the possible range of the loaded spectrogram.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub(crate) struct PowerRange {
+    /// Possible power range
+    bounds: (f32, f32),
+    /// Current power range for display
+    range: (f32, f32),
+}
+
+impl PowerRange {
+    pub fn set_bounds(&mut self, bounds: (f32, f32)) {
+        self.bounds = bounds;
+        self.range = if self.range == (0.0, 0.0) {
+            bounds
+        } else {
+            (
+                self.range.0.clamp(bounds.0, bounds.1),
+                self.range.1.clamp(bounds.0, bounds.1),
+            )
+        };
+    }
+
+    pub fn set_min(&mut self, min: f32) {
+        self.range.0 = min.min(self.range.1);
+    }
+
+    pub fn set_max(&mut self, max: f32) {
+        self.range.1 = max.max(self.range.0);
+    }
+
+    /// Override the displayed power range. Clamps to the current bounds.
+    pub fn set_range(&mut self, min: Option<f32>, max: Option<f32>) {
+        if let Some(v) = min {
+            self.range.0 = v.clamp(self.bounds.0, self.bounds.1);
+        }
+        if let Some(v) = max {
+            self.range.1 = v.clamp(self.bounds.0, self.bounds.1);
+        }
+    }
+
+    pub fn bounds(&self) -> (f32, f32) {
+        self.bounds
+    }
+
+    pub fn range(&self) -> (f32, f32) {
+        self.range
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub(crate) struct Detection {
+    /// Threshold for signal detection
+    signal_sigma: f32,
+    /// Bandwidth around track points
+    track_bw: f32,
+}
+
+impl Default for Detection {
+    fn default() -> Self {
+        Self {
+            signal_sigma: 5.0,
+            track_bw: 10e3,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub(crate) struct State {
+    pub viewport: Viewport,
+    pub power: PowerRange,
+    pub detection: Detection,
     pub spectrogram_files: Vec<PathBuf>,
     #[serde(skip)]
-    pub spectrogram: Option<Spectrogram>,
+    spectrogram: Option<Spectrogram>,
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
+    pub display: Display,
+    pub marks: Marks,
+    #[serde(skip)]
+    pub interaction: Interaction,
+    #[serde(skip)]
+    pub prediction_cache: AsyncCache<predictions::PredictionKey, orbit::Predictions>,
+}
+
+impl State {
+    pub fn spectrogram(&self) -> Option<&Spectrogram> {
+        self.spectrogram.as_ref()
+    }
+
+    pub fn set_spectrogram(&mut self, spectrogram: Option<Spectrogram>, paths: Vec<PathBuf>) {
+        let spec = spectrogram.as_ref().unwrap();
+        self.power.set_bounds(spec.power_bounds);
+        let data = spec.bounds();
+        self.viewport.set_data_bounds(data.0.width, data.0.height);
+        self.spectrogram = spectrogram;
+        self.spectrogram_files = paths;
+    }
+
+    pub fn update_view(&mut self, message: ViewMsg) {
+        match message {
+            ViewMsg::UpdateZoomX(zoom_x) => self.viewport.set_zoom_x(zoom_x),
+            ViewMsg::UpdateZoomY(zoom_y) => self.viewport.set_zoom_y(zoom_y),
+            ViewMsg::PanningDelta(delta) => self.viewport.pan_by(delta),
+            ViewMsg::ZoomDelta(plot_pos, delta) => self.viewport.zoom_at(plot_pos, delta),
+            ViewMsg::ZoomDeltaX(plot_pos, delta) => self.viewport.zoom_x_at(plot_pos, delta),
+            ViewMsg::ZoomDeltaY(plot_pos, delta) => self.viewport.zoom_y_at(plot_pos, delta),
+            ViewMsg::ResetView => {
+                self.viewport.reset();
+                self.marks.clear();
+            }
+            ViewMsg::ZoomToRect(rect) => self.viewport.set_view_from_rect_dn(&rect),
+            ViewMsg::UpdateMinPower(min_power) => self.power.set_min(min_power),
+            ViewMsg::UpdateMaxPower(max_power) => self.power.set_max(max_power),
+        }
+    }
+
+    pub fn update_display(&mut self, message: DisplayMsg) {
+        let display = &mut self.display;
+        match message {
+            DisplayMsg::TogglePredictions => display.show_predictions = !display.show_predictions,
+            DisplayMsg::ToggleGrid => display.show_grid = !display.show_grid,
+            DisplayMsg::ToggleCrosshair => display.show_crosshair = !display.show_crosshair,
+            DisplayMsg::ToggleAbsoluteAxes => display.absolute_axes = !display.absolute_axes,
+            DisplayMsg::SetControlsVisible(visible) => display.show_controls = visible,
+            DisplayMsg::UpdateColormap(colormap) => display.colormap = colormap,
+            DisplayMsg::UpdateAveragePlotting(average) => display.average_plotting = average,
+        }
+    }
+}
+
+impl State {
+    pub fn update_marks(&mut self, message: MarksMsg, app: &AppShared) -> Task<Message> {
+        match message {
+            MarksMsg::MarkTrackpoints => {
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
+                    self.interaction
+                        .mouse_state
+                        .set(MouseState::Marking(MarkAction::Trackpoint));
+                }
+                Task::none()
+            }
+            MarksMsg::MarkSignals => {
+                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
+                    self.interaction
+                        .mouse_state
+                        .set(MouseState::Marking(MarkAction::Signal));
+                }
+                Task::none()
+            }
+            MarksMsg::AddTrackPoint(pos) => {
+                log::debug!("Adding track point at position: {:?}", pos);
+                self.marks.insert_track_point(pos);
+                Task::none()
+            }
+            MarksMsg::AddSignal(pos) => {
+                log::debug!("Manually adding signal at position: {:?}", pos);
+                self.marks.signals_mut().push(pos);
+                Task::none()
+            }
+            MarksMsg::DeleteMark(action, point) => {
+                log::debug!("Deleting {:?} mark at position: {:?}", action, point);
+                self.marks.remove(action, point);
+                Task::none()
+            }
+            MarksMsg::DeleteInRect(rect) => {
+                self.marks.retain(|p| !rect.contains(*p));
+                Task::none()
+            }
+            MarksMsg::MarkCentroid(rect) => {
+                let centroid = self
+                    .spectrogram
+                    .as_ref()
+                    .and_then(|spec| signal::centroid(spec, rect));
+                self.marks.signals_mut().extend(centroid);
+                Task::none()
+            }
+            MarksMsg::ClearAll => {
+                self.marks.clear();
+                Task::none()
+            }
+            MarksMsg::FindSignals => {
+                if self.marks.track_points().len() < 2 {
+                    Task::none()
+                } else {
+                    let Some(spectrogram) = &self.spectrogram else {
+                        log::error!("No spectrogram loaded, cannot find signals");
+                        return Task::none();
+                    };
+                    let spectrogram = spectrogram.clone();
+                    let track_points = self.marks.track_points().to_vec();
+                    let sigma = self.detection.signal_sigma;
+                    let track_bw = self.detection.track_bw;
+                    Task::future(async move {
+                        tokio::task::spawn_blocking(move || {
+                            let signals = signal::find_signals(
+                                &spectrogram,
+                                &track_points,
+                                track_bw,
+                                signal::SignalDetectionMethod::FitTrace { sigma },
+                            );
+                            let signals = match signals {
+                                Err(e) => {
+                                    log::error!("Error finding signals: {}", e);
+                                    Vec::new()
+                                }
+                                Ok(signals) => {
+                                    log::info!("Found {} signal peaks", signals.len());
+                                    signals
+                                }
+                            };
+                            MarksMsg::FoundSignals(signals).into()
+                        })
+                        .await
+                        .unwrap()
+                    })
+                }
+            }
+            MarksMsg::FoundSignals(signals) => {
+                *self.marks.signals_mut() = signals;
+                Task::none()
+            }
+            MarksMsg::SaveSignals => {
+                let Some(spectrogram) = &self.spectrogram else {
+                    log::error!("No spectrogram loaded, cannot save signals");
+                    return Task::none();
+                };
+                let Some(site_id) = app.site_id else {
+                    log::error!("No site configured, cannot save signals");
+                    return Task::none();
+                };
+                let start_time = spectrogram.start_time();
+                let start_mjd = start_time.timestamp_millis() as f64 / 86_400_000.0 + 40587.0;
+                let center_freq = spectrogram.freq as f64;
+                let suggested = signals_filename(start_time, center_freq, self.marks.signals())
+                    .unwrap_or_else(|| "out.dat".to_owned());
+                let mut output = String::new();
+                for sig in self.marks.signals() {
+                    let mjd = start_mjd + sig.0.x as f64 / 86400.0;
+                    let freq = center_freq + sig.0.y as f64;
+                    output.push_str(&format!("{mjd:.6} {freq:.6} 5.000000 {site_id}\n"));
+                }
+                Task::future(async move {
+                    let path = AsyncFileDialog::new()
+                        .set_file_name(suggested.as_str())
+                        .save_file()
+                        .await
+                        .map(|f| f.path().to_path_buf());
+                    MarksMsg::WriteSignals(output, path).into()
+                })
+            }
+            MarksMsg::WriteSignals(_, None) => Task::none(),
+            MarksMsg::WriteSignals(output, Some(path)) => {
+                let n = output.lines().count();
+                match std::fs::write(&path, &output) {
+                    Ok(()) => log::info!("Wrote {n} signals to {path:?}"),
+                    Err(e) => log::error!("Failed to write {path:?}: {e}"),
+                }
+                Task::none()
+            }
+            MarksMsg::SpectrogramUpdated => {
+                self.marks.clear();
+                self.interaction.crosshair.set(None);
+                self.check_cache(app)
+            }
+            MarksMsg::UpdateSignalSigma(sigma) => {
+                self.detection.signal_sigma = sigma;
+                Task::none()
+            }
+            MarksMsg::UpdateTrackBW(bw) => {
+                self.detection.track_bw = bw;
+                Task::none()
+            }
+        }
+    }
+
+    pub fn update_predictions(
+        &mut self,
+        message: PredictionsMsg,
+        app: &AppShared,
+    ) -> Task<Message> {
+        match message {
+            PredictionsMsg::RefreshCache => {
+                self.prediction_cache.reset();
+                self.check_cache(app)
+            }
+            PredictionsMsg::PredictionsReady(key, predictions) => {
+                log::debug!("Using {} satellite predictions", predictions.n_satellites());
+                self.prediction_cache.store(key, predictions);
+                Task::none()
+            }
+            PredictionsMsg::PredictionFailed => {
+                log::error!("Prediction failed");
+                Task::none()
+            }
+        }
+    }
 }
 
 /// Initial view constraints set from CLI args, applied once the spectrogram is loaded.
@@ -146,8 +523,7 @@ fn gpu_done_stream(
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RFPlot {
-    shared: SharedState,
-    overlay: overlay::Overlay,
+    state: State,
     id: Uuid,
     #[serde(skip)]
     initial_view: Option<Box<InitialView>>,
@@ -163,22 +539,15 @@ pub struct RFPlot {
     pub gpu_notify: Option<Arc<tokio::sync::Notify>>,
 }
 
-impl PartialEq for RFPlot {
-    fn eq(&self, other: &Self) -> bool {
-        self.shared == other.shared && self.overlay == other.overlay && self.id == other.id
-    }
-}
-
 impl RFPlot {
     pub fn new() -> Self {
-        let shared = SharedState {
+        let state = State {
             plot_area_margin: 75.0,
             ..Default::default()
         };
         let id = Uuid::new_v4();
         Self {
-            shared,
-            overlay: overlay::Overlay::default(),
+            state,
             id,
             initial_view: None,
             loading_state: LoadingState::default(),
@@ -190,34 +559,30 @@ impl RFPlot {
 
     pub fn with_initial_view(files: Vec<PathBuf>, view: InitialView) -> Self {
         let mut rfplot = Self::new();
-        rfplot.shared.spectrogram_files = files;
+        rfplot.state.spectrogram_files = files;
         rfplot.initial_view = Some(Box::new(view));
         rfplot
     }
 
     // TODO
     pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
-        let config_task = if matches!(event, AppEvent::ConfigUpdated) {
-            self.shared
-                .controls
-                .update(control::Message::UpdateAveragePlotting(
-                    app.config.average_plotting,
-                ))
-                .map(WindowOut::Msg)
-        } else {
-            Task::none()
-        };
-        // Trigger a prediction cache check
-        let cache_task = self
-            .overlay
-            .update(overlay::Message::RefreshCache, &self.shared, app)
-            .map(Message::Overlay)
-            .map(WindowOut::Msg);
-        Task::batch(vec![config_task, cache_task])
+        if matches!(event, AppEvent::ConfigUpdated) {
+            self.state.update_display(DisplayMsg::UpdateAveragePlotting(
+                app.config.average_plotting,
+            ));
+        }
+        // Trigger a prediction refresh (in case we e.g. changed the site coordinates)
+        self.state
+            .update_predictions(PredictionsMsg::RefreshCache, app)
+            .map(WindowOut::Msg)
     }
 }
 
-fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialView) {
+fn apply_initial_view(state: &mut State, iv: &InitialView) {
+    let Some(spec) = state.spectrogram() else {
+        log::error!("Tried to apply initial view but no spectrogram is loaded");
+        return;
+    };
     let spec_bounds = spec.bounds();
     let length_secs = spec_bounds.0.width as f64;
     let bw = spec_bounds.0.height as f64;
@@ -234,37 +599,29 @@ fn apply_initial_view(controls: &mut Controls, spec: &Spectrogram, iv: &InitialV
             data_absolute::Point::new(t_min, f_min),
             data_absolute::Size::new(t_max - t_min, f_max - f_min),
         );
-        controls.set_view_from_rect_da(&view_rect, &spec_bounds);
+        state
+            .viewport
+            .set_view_from_rect_da(&view_rect, &spec_bounds);
     }
-    controls.set_power_range(iv.zmin, iv.zmax);
+    state.power.set_range(iv.zmin, iv.zmax);
 }
 
 impl Window<Message> for RFPlot {
     fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
-        let cmap_task = self
-            .shared
-            .controls
-            .update(control::Message::UpdateColormap(
-                app.config.default_colormap,
-            ))
-            .map(WindowOut::Msg);
-        let average_task = self
-            .shared
-            .controls
-            .update(control::Message::UpdateAveragePlotting(
-                app.config.average_plotting,
-            ))
-            .map(WindowOut::Msg);
-        let spec_task = if self.shared.spectrogram_files.is_empty() {
+        self.state
+            .update_display(DisplayMsg::UpdateColormap(app.config.default_colormap));
+        self.state.update_display(DisplayMsg::UpdateAveragePlotting(
+            app.config.average_plotting,
+        ));
+        if self.state.spectrogram_files.is_empty() {
             Task::none()
         } else {
             self.update(
                 id,
-                Message::LoadSpectrogram(self.shared.spectrogram_files.clone()),
+                Message::LoadSpectrogram(self.state.spectrogram_files.clone()),
                 app,
             )
-        };
-        Task::batch(vec![cmap_task, average_task, spec_task])
+        }
     }
 
     fn menu_bar(&self) -> Vec<MenuItem<WindowOut<Message>>> {
@@ -278,7 +635,7 @@ impl Window<Message> for RFPlot {
         }]
     }
 
-    fn view(&self, app: &AppShared) -> Element<'_, WindowOut<Message>> {
+    fn view<'a>(&'a self, app: &'a AppShared) -> Element<'a, WindowOut<Message>> {
         match &self.loading_state {
             LoadingState::LoadingFiles { loaded, total } => {
                 return container(widget::text(format!(
@@ -309,7 +666,7 @@ impl Window<Message> for RFPlot {
 
         // The plot is implemented as a stack of two layers: the spectrogram itself (see
         // `shader.rs`) and the overlay (see `overlay.rs`).
-        if self.shared.spectrogram.is_none() {
+        if self.state.spectrogram().is_none() {
             return container(
                 button("Open Spectrogram")
                     .style(button::primary)
@@ -319,7 +676,7 @@ impl Window<Message> for RFPlot {
             .into();
         }
 
-        let controls = self.shared.controls.view(&self.shared).map(Message::from);
+        let controls = toolbar::view(&self.state).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)
@@ -329,16 +686,19 @@ impl Window<Message> for RFPlot {
         .padding(Padding {
             top: 0.0,
             right: 0.0,
-            bottom: self.shared.plot_area_margin,
-            left: self.shared.plot_area_margin,
+            bottom: self.state.plot_area_margin,
+            left: self.state.plot_area_margin,
         })
         .into();
-        let plot_overlay: Element<'_, Message> = ChartWidget::new(self)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart {
+            state: &self.state,
+            app,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
 
-        let status = self.overlay.status(app);
+        let status = self.state.status(app);
 
         let mut stack = widget::stack![spectrogram, plot_overlay];
         if let Some(status) = status {
@@ -378,18 +738,18 @@ impl Window<Message> for RFPlot {
         message: Message,
         app: &AppShared,
     ) -> Task<WindowOut<Message>> {
-        // Handle messages that (can) trigger WindowEffect effects first
-        match message {
+        let result = match message {
             Message::GpuUploadDone => {
                 self.loading_state = LoadingState::Idle;
                 self.gpu_watcher = None;
                 self.gpu_notify = None;
-                if let Some(spec) = &self.shared.spectrogram {
+                if let Some(spec) = &self.state.spectrogram() {
                     return Task::done(WindowOut::Effect(WindowEffect::PlotReady(
                         id,
                         spec.absolute_bounds(),
                     )));
                 }
+                Task::none()
             }
             Message::SaveScreenshot(img, path) => {
                 match img.0.save(&path) {
@@ -404,14 +764,17 @@ impl Window<Message> for RFPlot {
                 self.loading_state = LoadingState::LoadingFiles { loaded: 0, total };
                 return Task::done(WindowOut::Effect(WindowEffect::ReloadCatalog));
             }
-            _ => (),
-        };
-        let result = match message {
-            Message::Control(message) => self.shared.controls.update(message),
-            Message::Overlay(message) => self
-                .overlay
-                .update(message, &self.shared, app)
-                .map(Message::Overlay),
+            Message::View(message) => {
+                self.state.update_view(message);
+                Task::none()
+            }
+            Message::Display(message) => {
+                self.state.update_display(message);
+                Task::none()
+            }
+            Message::Marks(message) => self.state.update_marks(message, app),
+            Message::Predictions(message) => self.state.update_predictions(message, app),
+            Message::Refresh => Task::none(),
             Message::LoadProgress { loaded, total } => {
                 self.loading_state = LoadingState::LoadingFiles { loaded, total };
                 Task::none()
@@ -419,22 +782,18 @@ impl Window<Message> for RFPlot {
             Message::SpectrogramLoaded(result) => match result {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
-                    self.shared.controls.set_spectrogram(&spec);
-                    if let Some(iv) = self.initial_view.take() {
-                        apply_initial_view(&mut self.shared.controls, &spec, &iv);
-                    }
                     let spec_id = spec.id;
-                    self.shared.spectrogram = Some(spec);
-                    self.shared.spectrogram_files = paths;
+                    self.state.set_spectrogram(Some(spec), paths);
+                    if let Some(iv) = self.initial_view.take() {
+                        apply_initial_view(&mut self.state, &iv);
+                    }
 
                     let notify = Arc::new(tokio::sync::Notify::new());
                     self.gpu_notify = Some(notify.clone());
                     self.gpu_watcher = Some(GpuDoneWatcher { spec_id, notify });
                     self.loading_state = LoadingState::GpuUploading;
 
-                    self.overlay
-                        .update(overlay::Message::SpectrogramUpdated, &self.shared, app)
-                        .map(Message::Overlay)
+                    self.state.update_marks(MarksMsg::SpectrogramUpdated, app)
                 }
                 Err(err) => {
                     log::error!("Failed to load spectrogram: {err}");
@@ -486,15 +845,11 @@ impl Window<Message> for RFPlot {
                     None => Message::Nop,
                 }
             }),
-            Message::SetView(rect) => self
-                .shared
-                .controls
-                .update(control::Message::ZoomToRect(rect)),
+            Message::SetView(rect) => {
+                self.state.update_view(ViewMsg::ZoomToRect(rect));
+                Task::none()
+            }
             Message::Nop => Task::none(),
-            // Handled by the outer match
-            Message::GpuUploadDone
-            | Message::SaveScreenshot(_, _)
-            | Message::LoadSpectrogram(_) => unreachable!(),
         };
         result.map(WindowOut::Msg)
     }
@@ -525,11 +880,82 @@ impl Window<Message> for RFPlot {
     fn title(&self) -> String {
         format!(
             "Plot: {}",
-            self.shared
-                .spectrogram
-                .as_ref()
+            self.state
+                .spectrogram()
                 .map(|s| s.start_time().to_string())
                 .unwrap_or("Loading...".to_string())
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstrf::coord::data_absolute;
+
+    use crate::{app::AppShared, windows::Window};
+
+    #[test]
+    fn set_power_bounds_initializes_range() {
+        let mut p = PowerRange::default();
+        p.set_bounds((-50.0, -10.0));
+        assert_eq!(p.range(), (-50.0, -10.0));
+    }
+
+    #[test]
+    fn set_power_bounds_clamps_existing_range() {
+        let mut p = PowerRange::default();
+        p.set_bounds((-50.0, -10.0));
+        p.set_bounds((-30.0, -20.0));
+        let (lo, hi) = p.range();
+        assert!(lo >= -30.0 && lo <= -20.0, "lo={}", lo);
+        assert!(hi >= -30.0 && hi <= -20.0, "hi={}", hi);
+    }
+
+    #[test]
+    fn update_min_power_cannot_exceed_max() {
+        let mut p = PowerRange::default();
+        p.set_bounds((-50.0, -10.0));
+        p.set_max(-20.0);
+        p.set_min(-10.0);
+        let (lo, hi) = p.range();
+        assert!(lo <= hi, "lo={} > hi={}", lo, hi);
+    }
+
+    #[test]
+    fn reset_view_clears_marks_and_zoom() {
+        let mut rfplot = RFPlot::new();
+        rfplot
+            .state
+            .marks
+            .insert_track_point(data_absolute::Point::new(1.0, 2.0));
+        rfplot
+            .state
+            .marks
+            .signals_mut()
+            .push(data_absolute::Point::new(3.0, 4.0));
+        rfplot.state.update_view(ViewMsg::UpdateZoomX(5.0));
+
+        let app = AppShared::default();
+        let _ = rfplot.update(
+            window::Id::unique(),
+            Message::View(ViewMsg::ResetView),
+            &app,
+        );
+
+        assert!(rfplot.state.marks.track_points().is_empty());
+        assert!(rfplot.state.marks.signals().is_empty());
+        assert!((rfplot.state.viewport.size().0.width - 1.0).abs() < 1e-6);
+        assert!((rfplot.state.viewport.size().0.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn set_controls_visible_changes_visibility() {
+        let mut state = State::default();
+        assert!(state.display.show_controls);
+        state.update_display(DisplayMsg::SetControlsVisible(false));
+        assert!(!state.display.show_controls);
+        state.update_display(DisplayMsg::SetControlsVisible(true));
+        assert!(state.display.show_controls);
     }
 }

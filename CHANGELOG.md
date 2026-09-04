@@ -1,3 +1,38 @@
+# vNext
+
+## New features
+- **Color predictions by classification**. Classified TLEs are now shown in orange, secret TLEs
+  are shown in red. **Note**: There are two ways for rSTRF to determine
+  classifcation status. Both differ from STRF:
+  - If the TLE (or OMM) has the classification status set, rSTRF uses that for
+    the color (`25544U` vs `25544C` vs `25544S`).
+  - If you pass an additional `-s /path/to/classfd.tle` (for e.g. the McCants TLEs), rSTRF will
+    override the classification status of all satellites in that file to
+    classified (i.e. render them in orange).
+- **Disable save signals button when no signals are marked**.
+
+## Bug fixes
+- **Render NORAD ID above satellite prediction**. Previously it was rendered
+  below the prediction, which more often than not led to the prediction line
+  going through the NORAD ID.
+- **Parse partially-correct `frequencies.txt` files**. Previously, an error on a
+  single line (e.g. due to an Alpha-5 ID) meant rSTRF rejected the entire file.
+  Now, it will only reject that line.
+
+## Performance improvements
+- **Mipmapped spectrogram rendering**. This should significantly improve rendering performance
+  for spectrograms with high channel counts when zoomed out, at the cost of slightly increased
+  GPU memory usage (~33% increase). **Note**: Only the frequency axis is mipmapped currently.
+  So rendering very long spectrograms may still be laggy.
+- **Rarer prediction cache checks**. Previously, rSTRF would check if it needs to update the
+  predictions on every update (effectively every mouse move). Now, it only checks when something
+  may have actually changed. This probably won't make a huge difference.
+
+## Other changes
+There was a lot of refactoring done under the hood (which unblocked the "disable
+save button" feature). This shouldn't be noticeable from a user perspective, but
+hopefully it will make further development easier.
+
 # v0.3.4
 
 ## New features

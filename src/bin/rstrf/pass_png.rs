@@ -136,8 +136,8 @@ impl PassPngMode {
                     predict_task,
                     Task::done(app::Message::WindowMessage(
                         self.window_id,
-                        windows::Message::RFPlot(windows::rfplot::Message::Control(
-                            windows::rfplot::control::Message::SetControlsVisible(false),
+                        windows::Message::RFPlot(windows::rfplot::Message::Display(
+                            windows::rfplot::DisplayMsg::SetControlsVisible(false),
                         )),
                     )),
                 ])

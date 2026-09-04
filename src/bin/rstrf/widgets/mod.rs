@@ -118,12 +118,14 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     icon: Icon,
     tooltip_label: &'a str,
     msg: Message,
+    enabled: bool,
     style: impl Fn(&Theme, button::Status) -> button::Style + Clone + 'a,
 ) -> Element<'a, Message> {
     tooltip_button(
         responsive_icon(icon, style.clone()),
         tooltip_label,
         msg,
+        enabled,
         style,
         26,
     )
@@ -134,6 +136,7 @@ pub fn labeled_icon_button<'a, Message: Clone + 'a>(
     label: &'a str,
     tooltip_label: &'a str,
     msg: Message,
+    enabled: bool,
     style: impl Fn(&Theme, button::Status) -> button::Style + Clone + 'a,
 ) -> Element<'a, Message> {
     tooltip_button(
@@ -144,6 +147,7 @@ pub fn labeled_icon_button<'a, Message: Clone + 'a>(
         .spacing(5),
         tooltip_label,
         msg,
+        enabled,
         style,
         Length::Fill,
     )
@@ -174,6 +178,7 @@ pub fn tooltip_button<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     tooltip_label: &'a str,
     msg: Message,
+    enabled: bool,
     style: impl Fn(&Theme, button::Status) -> button::Style + Clone + 'a,
     width: impl Into<Length>,
 ) -> Element<'a, Message> {
@@ -183,7 +188,7 @@ pub fn tooltip_button<'a, Message: Clone + 'a>(
             .height(26)
             .padding(4)
             .style(style)
-            .on_press(msg),
+            .on_press_maybe(enabled.then_some(msg)),
         container(text(tooltip_label))
             .padding(5)
             .style(container::dark),
@@ -198,6 +203,7 @@ pub enum ToolbarButton<Message: Clone> {
         icon: Icon,
         tooltip: &'static str,
         msg: Message,
+        enabled: bool,
         style: fn(&Theme, button::Status) -> button::Style,
     },
     LabeledIcon {
@@ -205,6 +211,7 @@ pub enum ToolbarButton<Message: Clone> {
         label: &'static str,
         tooltip: &'static str,
         msg: Message,
+        enabled: bool,
         style: fn(&Theme, button::Status) -> button::Style,
     },
     Submenu {
@@ -220,15 +227,17 @@ impl<'a, Message: Clone + 'a> ToolbarButton<Message> {
                 icon,
                 tooltip,
                 msg,
+                enabled,
                 style,
-            } => icon_button(*icon, tooltip, msg.clone(), *style),
+            } => icon_button(*icon, tooltip, msg.clone(), *enabled, *style),
             ToolbarButton::LabeledIcon {
                 icon,
                 label,
                 tooltip,
                 msg,
+                enabled,
                 style,
-            } => labeled_icon_button(*icon, label, tooltip, msg.clone(), *style),
+            } => labeled_icon_button(*icon, label, tooltip, msg.clone(), *enabled, *style),
             ToolbarButton::Submenu { toplevel, .. } => toplevel.view(),
         }
     }

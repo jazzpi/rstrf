@@ -345,18 +345,21 @@ impl Window<Message> for SatManager {
                 icon: show_all.0,
                 tooltip: show_all.1,
                 msg: Message::ToggleAllSatellites.into(),
+                enabled: true,
                 style: button::primary,
             },
             ToolbarButton::Icon {
                 icon: Icon::ViewColumns,
                 tooltip: toggle_columns_label,
                 msg: Message::ToggleColumnControls.into(),
+                enabled: true,
                 style: button::primary,
             },
             ToolbarButton::Icon {
                 icon: Icon::Download,
                 tooltip: "Fetch orbital elements",
                 msg: Message::SpaceTrackToggle.into(),
+                enabled: true,
                 style: button::primary,
             },
         ]);
