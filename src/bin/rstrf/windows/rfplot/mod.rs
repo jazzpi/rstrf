@@ -30,10 +30,12 @@ use crate::{
 };
 
 pub mod control;
+mod marks;
 pub mod overlay;
 mod shader;
 mod viewport;
 
+use marks::{MarkAction, Marks};
 use viewport::Viewport;
 
 #[derive(Debug, Clone)]
@@ -149,12 +151,6 @@ pub enum RectAction {
     MarkCentroid,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MarkAction {
-    Trackpoint,
-    Signal,
-}
-
 #[derive(Default, Clone, Copy, Debug)]
 pub enum MouseState {
     #[default]
@@ -190,60 +186,6 @@ impl Default for Display {
             colormap: Default::default(),
             average_plotting: false,
         }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct Marks {
-    /// Sorted by time.
-    track_points: Vec<data_absolute::Point>,
-    signals: Vec<data_absolute::Point>,
-}
-
-impl Marks {
-    pub fn track_points(&self) -> &[data_absolute::Point] {
-        &self.track_points
-    }
-
-    pub fn signals(&self) -> &[data_absolute::Point] {
-        &self.signals
-    }
-
-    /// Signals carry no ordering invariant, so callers may mutate them freely.
-    pub fn signals_mut(&mut self) -> &mut Vec<data_absolute::Point> {
-        &mut self.signals
-    }
-
-    /// Inserts a track point in time order. A point at an already-marked time replaces it.
-    pub fn insert_track_point(&mut self, point: data_absolute::Point) {
-        match self
-            .track_points
-            .binary_search_by(|p| p.0.x.partial_cmp(&point.0.x).unwrap())
-        {
-            Ok(idx) => self.track_points[idx] = point,
-            Err(idx) => self.track_points.insert(idx, point),
-        }
-    }
-
-    pub fn remove(&mut self, action: MarkAction, point: data_absolute::Point) {
-        let collection = match action {
-            MarkAction::Trackpoint => &mut self.track_points,
-            MarkAction::Signal => &mut self.signals,
-        };
-        if let Some(idx) = collection.iter().position(|p| *p == point) {
-            collection.remove(idx);
-        }
-    }
-
-    /// Drops marks failing `keep` from both collections.
-    pub fn retain(&mut self, keep: impl Fn(&data_absolute::Point) -> bool) {
-        self.track_points.retain(&keep);
-        self.signals.retain(&keep);
-    }
-
-    pub fn clear(&mut self) {
-        self.track_points.clear();
-        self.signals.clear();
     }
 }
 
@@ -856,27 +798,6 @@ mod tests {
         assert!(rfplot.state.marks.signals().is_empty());
         assert!((rfplot.state.viewport.size().0.width - 1.0).abs() < 1e-6);
         assert!((rfplot.state.viewport.size().0.height - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn insert_track_point_keeps_points_sorted_by_time() {
-        let mut marks = Marks::default();
-        for x in [3.0, 1.0, 2.0] {
-            marks.insert_track_point(data_absolute::Point::new(x, 0.0));
-        }
-        let times: Vec<f32> = marks.track_points().iter().map(|p| p.0.x).collect();
-        assert_eq!(times, vec![1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn insert_track_point_replaces_point_at_same_time() {
-        let mut marks = Marks::default();
-        marks.insert_track_point(data_absolute::Point::new(1.0, 10.0));
-        marks.insert_track_point(data_absolute::Point::new(1.0, 20.0));
-        assert_eq!(
-            marks.track_points().to_vec(),
-            vec![data_absolute::Point::new(1.0, 20.0)]
-        );
     }
 
     #[test]
