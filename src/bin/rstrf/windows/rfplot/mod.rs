@@ -109,7 +109,6 @@ pub enum MarksMsg {
     FoundSignals(Vec<data_absolute::Point>),
     SaveSignals,
     WriteSignals(String, Option<PathBuf>),
-    SpectrogramUpdated,
     UpdateSignalSigma(f32),
     UpdateTrackBW(f32),
 }
@@ -261,13 +260,21 @@ impl State {
         self.spectrogram.as_ref()
     }
 
-    pub fn set_spectrogram(&mut self, spectrogram: Option<Spectrogram>, paths: Vec<PathBuf>) {
+    pub fn set_spectrogram(
+        &mut self,
+        spectrogram: Option<Spectrogram>,
+        paths: Vec<PathBuf>,
+        app: &AppShared,
+    ) -> Task<Message> {
         let spec = spectrogram.as_ref().unwrap();
         self.power.set_bounds(spec.power_bounds);
         let data = spec.bounds();
         self.viewport.set_data_bounds(data.0.width, data.0.height);
         self.spectrogram = spectrogram;
         self.spectrogram_files = paths;
+        self.marks.clear();
+        self.interaction.crosshair.set(None);
+        self.check_cache(app)
     }
 
     pub fn update_view(&mut self, message: ViewMsg) {
@@ -300,9 +307,7 @@ impl State {
             DisplayMsg::UpdateAveragePlotting(average) => display.average_plotting = average,
         }
     }
-}
 
-impl State {
     pub fn update_marks(&mut self, message: MarksMsg, app: &AppShared) -> Task<Message> {
         match message {
             MarksMsg::MarkTrackpoints => {
@@ -430,11 +435,6 @@ impl State {
                     Err(e) => log::error!("Failed to write {path:?}: {e}"),
                 }
                 Task::none()
-            }
-            MarksMsg::SpectrogramUpdated => {
-                self.marks.clear();
-                self.interaction.crosshair.set(None);
-                self.check_cache(app)
             }
             MarksMsg::UpdateSignalSigma(sigma) => {
                 self.detection.signal_sigma = sigma;
@@ -783,7 +783,7 @@ impl Window<Message> for RFPlot {
                 Ok((paths, spec)) => {
                     log::info!("Loaded spectrogram: {spec:?}");
                     let spec_id = spec.id;
-                    self.state.set_spectrogram(Some(spec), paths);
+                    let task = self.state.set_spectrogram(Some(spec), paths, app);
                     if let Some(iv) = self.initial_view.take() {
                         apply_initial_view(&mut self.state, &iv);
                     }
@@ -792,8 +792,7 @@ impl Window<Message> for RFPlot {
                     self.gpu_notify = Some(notify.clone());
                     self.gpu_watcher = Some(GpuDoneWatcher { spec_id, notify });
                     self.loading_state = LoadingState::GpuUploading;
-
-                    self.state.update_marks(MarksMsg::SpectrogramUpdated, app)
+                    task
                 }
                 Err(err) => {
                     log::error!("Failed to load spectrogram: {err}");
