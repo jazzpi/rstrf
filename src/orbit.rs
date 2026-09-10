@@ -410,6 +410,14 @@ impl Site {
             ],
         }
     }
+
+    pub fn coord_string(&self) -> String {
+        let lat = format!("{:.2}", self.latitude.abs().to_degrees());
+        let lat_dir = if self.latitude >= 0.0 { "N" } else { "S" };
+        let lon = format!("{:.2}", self.longitude.abs().to_degrees());
+        let lon_dir = if self.longitude >= 0.0 { "E" } else { "W" };
+        format!("{}°{}, {}°{}", lat, lat_dir, lon, lon_dir)
+    }
 }
 
 /// Greenwich Mean Sidereal Time in radians
