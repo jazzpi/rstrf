@@ -61,11 +61,11 @@ impl AppShared {
             .collect()
     }
 
-    pub fn site(&self) -> Option<Site> {
+    pub fn default_site(&self) -> Option<&Site> {
         if self.config.follow_strf_site {
-            self.strf_site.clone()
+            self.strf_site.as_ref()
         } else {
-            self.config.site.clone()
+            self.config.site.as_ref()
         }
     }
 

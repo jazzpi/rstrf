@@ -15,7 +15,8 @@ use rstrf::{
     colormap::Colormap,
     coord::{data_absolute, data_normalized, plot_area},
     menu::MenuItem,
-    orbit, signal,
+    orbit::{self, Site},
+    signal,
     spectrogram::Spectrogram,
     util::DebugRgbaImage,
 };
@@ -253,11 +254,20 @@ pub(crate) struct State {
     pub interaction: Interaction,
     #[serde(skip)]
     pub prediction_cache: AsyncCache<predictions::PredictionKey, orbit::Predictions>,
+    /// Site override for predictions. Do not use directly; use [`State::site()`] instead.
+    site: Option<Site>,
 }
 
 impl State {
     pub fn spectrogram(&self) -> Option<&Spectrogram> {
         self.spectrogram.as_ref()
+    }
+
+    /// Returns the site to use for predictions.
+    ///
+    /// If no site override is set, the default site from the app is used.
+    pub fn site<'a>(&'a self, app: &'a AppShared) -> Option<&'a Site> {
+        self.site.as_ref().or(app.default_site())
     }
 
     pub fn set_spectrogram(
