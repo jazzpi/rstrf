@@ -30,7 +30,7 @@ pub(crate) struct PredictionKey {
 
 fn prediction_key(state: &State, app: &AppShared) -> Option<PredictionKey> {
     let spectrogram = state.spectrogram()?;
-    let site = app.site()?;
+    let site = state.site(app)?.clone();
     let satellites = app.active_satellite_ids();
     if satellites.is_empty() {
         return None;
@@ -53,7 +53,7 @@ impl State {
             Some("No satellites")
         } else if self.prediction_cache.busy() {
             Some("Predicting satellite passes...")
-        } else if app.site().is_none() {
+        } else if self.site(app).is_none() {
             Some("No site configured")
         } else if self.prediction_cache.get_stored().is_none() {
             Some("No passes predicted")

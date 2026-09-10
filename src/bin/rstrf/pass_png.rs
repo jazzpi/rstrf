@@ -96,7 +96,7 @@ impl PassPngMode {
 
                 self.state = State::WaitingForPredictions;
 
-                let Some(site) = app.site() else {
+                let Some(site) = app.default_site() else {
                     log::error!("pass-png: no site available");
                     return iced::exit();
                 };
@@ -104,6 +104,7 @@ impl PassPngMode {
                 let freq_range = spec_bounds.freq_range.clone();
                 let freq_range = (freq_range.start as f64)..(freq_range.end as f64);
                 let transmitters = satellite.transmitters.clone();
+                let site = site.clone();
                 let predict_task = Task::future(async move {
                     tokio::task::spawn_blocking(move || {
                         predict_satellites(&[satellite], time_range, freq_range, &site)
