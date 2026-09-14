@@ -80,6 +80,7 @@ impl State {
                 .await;
                 match result {
                     Ok(predictions) => {
+                        log::debug!("{} predictions ready", predictions.n_satellites());
                         PredictionsMsg::PredictionsReady(key_for_msg, predictions).into()
                     }
                     Err(e) => {
