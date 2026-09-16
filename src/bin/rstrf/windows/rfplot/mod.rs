@@ -628,10 +628,16 @@ impl Window<Message> for RFPlot {
         vec![MenuItem::Submenu {
             label: "File".to_string(),
             msg: Some(Message::Nop.into()),
-            items: vec![MenuItem::Button {
-                label: "Load spectrogram(s)".to_string(),
-                msg: Some(Message::PickSpectrogram.into()),
-            }],
+            items: vec![
+                MenuItem::Button {
+                    label: "Load spectrogram(s)".to_string(),
+                    msg: Some(Message::PickSpectrogram.into()),
+                },
+                MenuItem::Button {
+                    label: "Reload catalog & frequencies".to_string(),
+                    msg: Some(WindowEffect::ReloadCatalog.into()),
+                },
+            ],
         }]
     }
 

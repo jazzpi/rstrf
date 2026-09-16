@@ -1,3 +1,8 @@
+# vNext
+
+## New features
+- **Reload catalog button** in the plot window (under _File_ -> _Reload catalog & frequencies_).
+
 # v0.4.0
 
 ## New features

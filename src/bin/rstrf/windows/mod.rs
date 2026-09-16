@@ -91,6 +91,12 @@ impl From<preferences::Message> for WindowOut<preferences::Message> {
     }
 }
 
+impl<M> From<WindowEffect> for WindowOut<M> {
+    fn from(effect: WindowEffect) -> Self {
+        WindowOut::Effect(effect)
+    }
+}
+
 pub trait Window<M: Clone> {
     fn title(&self) -> String;
     fn menu_bar(&self) -> Vec<MenuItem<WindowOut<M>>> {
