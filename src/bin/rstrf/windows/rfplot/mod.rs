@@ -83,15 +83,16 @@ pub enum ViewMsg {
 }
 
 /// How the plot is presented: which layers are drawn, and in what style.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum DisplayMsg {
-    TogglePredictions,
-    ToggleGrid,
-    ToggleCrosshair,
-    ToggleAbsoluteAxes,
+    SetPredictionsVisible(bool),
+    SetGridVisible(bool),
+    SetCrosshairVisible(bool),
+    SetAbsoluteAxesMode(bool),
     SetControlsVisible(bool),
-    UpdateColormap(Colormap),
-    UpdateAveragePlotting(bool),
+    SetColormap(Colormap),
+    SetAveragePlotting(bool),
 }
 
 /// Track points and signals, plus the detection parameters that produce them.
@@ -291,13 +292,13 @@ impl State {
     pub fn update_display(&mut self, message: DisplayMsg) {
         let display = &mut self.display;
         match message {
-            DisplayMsg::TogglePredictions => display.show_predictions = !display.show_predictions,
-            DisplayMsg::ToggleGrid => display.show_grid = !display.show_grid,
-            DisplayMsg::ToggleCrosshair => display.show_crosshair = !display.show_crosshair,
-            DisplayMsg::ToggleAbsoluteAxes => display.absolute_axes = !display.absolute_axes,
+            DisplayMsg::SetPredictionsVisible(visible) => display.show_predictions = visible,
+            DisplayMsg::SetGridVisible(visible) => display.show_grid = visible,
+            DisplayMsg::SetCrosshairVisible(visible) => display.show_crosshair = visible,
+            DisplayMsg::SetAbsoluteAxesMode(absolute) => display.absolute_axes = absolute,
             DisplayMsg::SetControlsVisible(visible) => display.show_controls = visible,
-            DisplayMsg::UpdateColormap(colormap) => display.colormap = colormap,
-            DisplayMsg::UpdateAveragePlotting(average) => display.average_plotting = average,
+            DisplayMsg::SetColormap(colormap) => display.colormap = colormap,
+            DisplayMsg::SetAveragePlotting(average) => display.average_plotting = average,
         }
     }
 }
@@ -567,9 +568,8 @@ impl RFPlot {
     // TODO
     pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
         if matches!(event, AppEvent::ConfigUpdated) {
-            self.state.update_display(DisplayMsg::UpdateAveragePlotting(
-                app.config.average_plotting,
-            ));
+            self.state
+                .update_display(DisplayMsg::SetAveragePlotting(app.config.average_plotting));
         }
         // Trigger a prediction refresh (in case we e.g. changed the site coordinates)
         self.state
@@ -609,10 +609,9 @@ fn apply_initial_view(state: &mut State, iv: &InitialView) {
 impl Window<Message> for RFPlot {
     fn init(&mut self, id: window::Id, app: &AppShared) -> Task<WindowOut<Message>> {
         self.state
-            .update_display(DisplayMsg::UpdateColormap(app.config.default_colormap));
-        self.state.update_display(DisplayMsg::UpdateAveragePlotting(
-            app.config.average_plotting,
-        ));
+            .update_display(DisplayMsg::SetColormap(app.config.default_colormap));
+        self.state
+            .update_display(DisplayMsg::SetAveragePlotting(app.config.average_plotting));
         if self.state.spectrogram_files.is_empty() {
             Task::none()
         } else {

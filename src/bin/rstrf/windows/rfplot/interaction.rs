@@ -295,7 +295,10 @@ impl State {
                 return (Status::Captured, Some(MarksMsg::FindSignals.into()));
             }
             keyboard::Key::Character("p") => {
-                return (Status::Captured, Some(DisplayMsg::TogglePredictions.into()));
+                return (
+                    Status::Captured,
+                    Some(DisplayMsg::SetPredictionsVisible(!self.display.show_predictions).into()),
+                );
             }
             keyboard::Key::Named(Named::ArrowLeft) => {
                 return (
