@@ -17,18 +17,36 @@ use crate::app::AppModel;
 pub struct CliArgs {
     #[command(subcommand)]
     pub command: Option<Command>,
+    #[command(flatten)]
+    pub load: LoadArgs,
     /// Increase rstrf log level (-v: debug, -vv: trace); RUST_LOG overrides
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
-    /// Frequency range to load in Hz: MIN MAX (channels outside this range are skipped)
-    #[arg(long, value_name = "FREQ", num_args = 2, global = true)]
-    pub freq_range: Option<Vec<f64>>,
     /// Window width in pixels
     #[arg(short = 'W', long, default_value_t = 800, global = true)]
     pub width: u32,
     /// Window height in pixels
     #[arg(short = 'H', long, default_value_t = 600, global = true)]
     pub height: u32,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct LoadArgs {
+    /// Frequency range to load in Hz: MIN MAX (channels outside this range are skipped)
+    #[arg(long, value_name = "FREQ", num_args = 2, global = true)]
+    pub freq_range: Option<Vec<f64>>,
+    /// Spectrogram files to display
+    #[arg(value_name = "SPECTROGRAMS", required = true)]
+    pub spectrograms: Vec<PathBuf>,
+    /// Catalog file (TLE, OMM JSON or OMM CSV)
+    #[arg(short = 'c', long, global = true)]
+    pub catalog: Option<PathBuf>,
+    /// Classified catalog file (TLE, OMM JSON or OMM CSV)
+    #[arg(short = 's', long, global = true)]
+    pub classfd: Option<PathBuf>,
+    /// Path to frequencies.txt
+    #[arg(short = 'F', long, value_name = "FREQLIST", global = true)]
+    pub freqs: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -40,19 +58,19 @@ pub enum Command {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct RenderArgs {
+    /// Minimum power (dB)
+    #[arg(long, allow_hyphen_values = true)]
+    pub zmin: Option<f32>,
+    /// Maximum power (dB)
+    #[arg(long, allow_hyphen_values = true)]
+    pub zmax: Option<f32>,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct PlotArgs {
-    /// Spectrogram files to display
-    #[arg(value_name = "SPECTROGRAMS", required = true)]
-    pub spectrograms: Vec<PathBuf>,
-    /// Catalog file (TLE, OMM JSON or OMM CSV)
-    #[arg(short = 'c', long)]
-    pub catalog: Option<PathBuf>,
-    /// Classified catalog file (TLE, OMM JSON or OMM CSV)
-    #[arg(short = 's', long)]
-    pub classfd: Option<PathBuf>,
-    /// Path to frequencies.txt
-    #[arg(short = 'F', long, value_name = "FREQLIST")]
-    pub freqs: Option<PathBuf>,
+    #[command(flatten)]
+    pub common: RenderArgs,
     /// Lower frequency limit for initial zoom (Hz)
     #[arg(long, allow_hyphen_values = true)]
     pub fmin: Option<f64>,
@@ -65,12 +83,6 @@ pub struct PlotArgs {
     /// Right time limit for initial zoom (seconds since start of spectrogram)
     #[arg(long, allow_hyphen_values = true)]
     pub tmax: Option<f64>,
-    /// Minimum power (dB)
-    #[arg(long, allow_hyphen_values = true)]
-    pub zmin: Option<f32>,
-    /// Maximum power (dB)
-    #[arg(long, allow_hyphen_values = true)]
-    pub zmax: Option<f32>,
     /// Site ID written to .dat files. Used for site lookup if "Follow STRF site" is enabled in
     /// preferences.
     #[arg(short = 'C', long, value_name = "SITE_ID")]
@@ -80,30 +92,14 @@ pub struct PlotArgs {
 #[derive(Args, Debug, Clone)]
 #[command(group(ArgGroup::new("freq_source").required(true).args(["freq", "freqs"])))]
 pub struct PassPngArgs {
-    /// Spectrogram files to display
-    #[arg(value_name = "SPECTROGRAMS", required = true)]
-    pub spectrograms: Vec<PathBuf>,
-    /// Catalog file (TLE, OMM JSON or OMM CSV)
-    #[arg(short = 'c', long)]
-    pub catalog: PathBuf,
-    /// Classified catalog file (TLE, OMM JSON or OMM CSV)
-    #[arg(short = 's', long)]
-    pub classfd: Option<PathBuf>,
+    #[command(flatten)]
+    pub common: RenderArgs,
     /// Satellite to generate pass images for
     #[arg(short = 'i', long)]
     pub norad_id: u64,
     /// Transmitter frequency (Hz), may be specified multiple times
     #[arg(short = 'f', long, allow_hyphen_values = true)]
     pub freq: Vec<f64>,
-    /// Path to frequencies.txt
-    #[arg(short = 'F', long, value_name = "FREQLIST")]
-    pub freqs: Option<PathBuf>,
-    /// Minimum power (dB)
-    #[arg(long, allow_hyphen_values = true)]
-    pub zmin: Option<f32>,
-    /// Maximum power (dB)
-    #[arg(long, allow_hyphen_values = true)]
-    pub zmax: Option<f32>,
     /// Output path prefix; files are named <prefix>_000.png, <prefix>_001.png, ...
     #[arg(short = 'o', long)]
     pub output: std::path::PathBuf,

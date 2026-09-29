@@ -5,7 +5,7 @@ use crate::pass_png::{self, PassPngMode};
 use crate::windows::rfplot::{InitialView, RFPlot};
 use crate::windows::sat_manager::SatManager;
 use crate::windows::{self, AnyWindow, WindowEffect};
-use crate::{CliArgs, Command, PassPngArgs, PlotArgs};
+use crate::{CliArgs, Command, LoadArgs, PassPngArgs, PlotArgs};
 use anyhow::Context;
 use iced::widget::{self, space};
 use iced::window::Settings;
@@ -103,8 +103,8 @@ pub enum Message {
     #[allow(clippy::enum_variant_names)]
     WindowMessage(window::Id, windows::Message),
     Event(AppEvent),
-    WindowOpenedRFPlotWith(window::Id, Box<PlotArgs>),
-    WindowOpenedPassPng(window::Id, Box<PassPngArgs>),
+    WindowOpenedRFPlotWith(window::Id, Box<PlotArgs>, Box<LoadArgs>),
+    WindowOpenedPassPng(window::Id, Box<PassPngArgs>, Box<LoadArgs>),
     ReloadCatalog,
     CatalogLoaded {
         satellites: Vec<(Satellite, bool)>,
@@ -160,31 +160,51 @@ impl AppModel {
         tasks.push(Task::done(Message::UpdateConfig(config)));
 
         let window_size = Some(iced::Size::new(flags.width as f32, flags.height as f32));
+        let freq_range = flags
+            .load
+            .freq_range
+            .clone()
+            .map(|v| (v[0].round() as u64, v[1].round() as u64));
+        let mut app = AppModel {
+            config_path,
+            shared_state: AppShared {
+                freq_range,
+                catalog_path: flags.load.catalog.clone(),
+                classfd_path: flags.load.classfd.clone(),
+                freqs_path: flags.load.freqs.clone(),
+                ..Default::default()
+            },
+            windows: HashMap::default(),
+            pass_png: None,
+        };
 
-        let (catalog_path, classfd_path, freqs_path, initial_freqs, site_id) = match flags.command {
+        match flags.command {
             Some(Command::Plot(args)) => {
                 tasks.push(Task::done(Message::ReloadCatalog));
                 let a = args.clone();
-                tasks.push(
-                    Self::open_window(window_size)
-                        .map(move |id| Message::WindowOpenedRFPlotWith(id, Box::new(a.clone()))),
-                );
-                (
-                    args.catalog.clone(),
-                    args.classfd.clone(),
-                    args.freqs.clone(),
-                    HashMap::new(),
-                    args.site_id,
-                )
+                tasks.push(Self::open_window(window_size).map(move |id| {
+                    Message::WindowOpenedRFPlotWith(
+                        id,
+                        Box::new(a.clone()),
+                        Box::new(flags.load.clone()),
+                    )
+                }));
+                app.shared_state.site_id = args.site_id;
             }
             Some(Command::PassPng(args)) => {
-                let frequencies = HashMap::from([(args.norad_id, args.freq.clone())]);
+                if flags.load.catalog.is_none() {
+                    log::error!("No catalog specified -- cannot predict passes");
+                    return (app, iced::exit());
+                }
+
+                app.shared_state.initial_freqs =
+                    HashMap::from([(args.norad_id, args.freq.clone())]);
                 tasks.push(
                     Self::load_catalog(
-                        Some(args.catalog.clone()),
-                        args.classfd.clone(),
-                        args.freqs.clone(),
-                        frequencies.clone(),
+                        flags.load.catalog.clone(),
+                        flags.load.classfd.clone(),
+                        flags.load.freqs.clone(),
+                        app.shared_state.initial_freqs.clone(),
                     )
                     .map(move |(satellites, frequencies)| {
                         Message::CatalogLoaded {
@@ -197,40 +217,18 @@ impl AppModel {
                     }),
                 );
                 let a = args.clone();
-                tasks.push(
-                    Self::open_window(window_size)
-                        .map(move |id| Message::WindowOpenedPassPng(id, Box::new(a.clone()))),
-                );
-                (
-                    Some(args.catalog.clone()),
-                    args.classfd.clone(),
-                    args.freqs.clone(),
-                    frequencies,
-                    None,
-                )
+                tasks.push(Self::open_window(window_size).map(move |id| {
+                    Message::WindowOpenedPassPng(
+                        id,
+                        Box::new(a.clone()),
+                        Box::new(flags.load.clone()),
+                    )
+                }));
             }
             None => {
                 tasks.push(Task::done(Message::OpenRFPlot));
-                (None, None, None, HashMap::new(), None)
             }
-        };
-
-        let app = AppModel {
-            config_path,
-            shared_state: AppShared {
-                freq_range: flags
-                    .freq_range
-                    .map(|v| (v[0].round() as u64, v[1].round() as u64)),
-                catalog_path,
-                classfd_path,
-                freqs_path,
-                initial_freqs,
-                site_id,
-                ..Default::default()
-            },
-            windows: HashMap::default(),
-            pass_png: None,
-        };
+        }
 
         (app, Task::batch(tasks))
     }
@@ -316,17 +314,17 @@ impl AppModel {
                     .insert(id, AnyWindow::RFPlot(Box::new(RFPlot::new())));
                 Task::none()
             }
-            Message::WindowOpenedRFPlotWith(id, args) => {
+            Message::WindowOpenedRFPlotWith(id, args, load) => {
                 self.shared_state.site_id = args.site_id;
                 let view = InitialView {
                     fmin: args.fmin,
                     fmax: args.fmax,
                     tmin: args.tmin,
                     tmax: args.tmax,
-                    zmin: args.zmin,
-                    zmax: args.zmax,
+                    zmin: args.common.zmin,
+                    zmax: args.common.zmax,
                 };
-                let rfplot_task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
+                let rfplot_task = self.open_rfplot_with(id, load.spectrograms.clone(), view);
                 if self.shared_state.config.follow_strf_site {
                     let strf_site_task = self.update_strf_site();
                     Task::batch([rfplot_task, strf_site_task])
@@ -334,16 +332,16 @@ impl AppModel {
                     rfplot_task
                 }
             }
-            Message::WindowOpenedPassPng(id, args) => {
+            Message::WindowOpenedPassPng(id, args, load) => {
                 let view = InitialView {
                     fmin: None,
                     fmax: None,
                     tmin: None,
                     tmax: None,
-                    zmin: args.zmin,
-                    zmax: args.zmax,
+                    zmin: args.common.zmin,
+                    zmax: args.common.zmax,
                 };
-                let task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
+                let task = self.open_rfplot_with(id, load.spectrograms.clone(), view);
                 self.pass_png = Some(PassPngMode::new(id, *args));
                 task
             }
