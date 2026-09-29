@@ -565,11 +565,17 @@ impl RFPlot {
         rfplot
     }
 
-    // TODO
     pub fn app_event(&mut self, event: AppEvent, app: &AppShared) -> Task<WindowOut<Message>> {
-        if matches!(event, AppEvent::ConfigUpdated) {
-            self.state
-                .update_display(DisplayMsg::SetAveragePlotting(app.config.average_plotting));
+        match event {
+            AppEvent::ConfigUpdated => self
+                .state
+                .update_display(DisplayMsg::SetAveragePlotting(app.config.average_plotting)),
+            AppEvent::SatellitesChanged => {
+                // If we're changing satellites (e.g. by reloading the catalog), we probably want
+                // to see the predictions update
+                self.state
+                    .update_display(DisplayMsg::SetPredictionsVisible(true))
+            }
         }
         // Trigger a prediction refresh (in case we e.g. changed the site coordinates)
         self.state

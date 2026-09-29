@@ -2,6 +2,9 @@
 
 ## New features
 - **Reload catalog button** in the plot window (under _File_ -> _Reload catalog & frequencies_).
+- **Satellite/prediction changes force predictions to show**. This is mostly useful for the above
+  reload catalog button. But it also means e.g. using the satellite manager with predictions hidden
+  will trigger the predictions to be shown.
 
 # v0.4.0
 
