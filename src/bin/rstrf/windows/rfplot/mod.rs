@@ -307,19 +307,15 @@ impl State {
     pub fn update_marks(&mut self, message: MarksMsg, app: &AppShared) -> Task<Message> {
         match message {
             MarksMsg::MarkTrackpoints => {
-                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
-                    self.interaction
-                        .mouse_state
-                        .set(MouseState::Marking(MarkAction::Trackpoint));
-                }
+                self.interaction
+                    .mouse_state
+                    .set(MouseState::Marking(MarkAction::Trackpoint));
                 Task::none()
             }
             MarksMsg::MarkSignals => {
-                if matches!(self.interaction.mouse_state.get(), MouseState::Idle) {
-                    self.interaction
-                        .mouse_state
-                        .set(MouseState::Marking(MarkAction::Signal));
-                }
+                self.interaction
+                    .mouse_state
+                    .set(MouseState::Marking(MarkAction::Signal));
                 Task::none()
             }
             MarksMsg::AddTrackPoint(pos) => {

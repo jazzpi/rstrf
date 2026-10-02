@@ -7,6 +7,8 @@
   will trigger the predictions to be shown.
 - **Mouse states are no longer cancelled by all hotkeys**. E.g., if you are in _Mark signals_ mode
   (`D`), pressing the arrow keys will no longer cancel the mode.
+- **Mouse state can be changed in non-idle states**. E.g., if you are in _Mark signals_ mode (`D`),
+  you can press `d` to go to _Delete signals_ mode directly without having to first press `ESC`.
 
 # v0.4.0
 

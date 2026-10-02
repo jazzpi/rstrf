@@ -216,9 +216,12 @@ impl State {
                 _ => {}
             },
             MouseState::Marking(kind) => {
-                if matches!(event, mouse::Event::ButtonReleased(mouse::Button::Left))
-                    && cursor.is_over(bounds)
-                {
+                if matches!(event, mouse::Event::ButtonReleased(mouse::Button::Left)) {
+                    if !cursor.is_over(bounds) {
+                        self.interaction.mouse_state.set(MouseState::Idle);
+                        return (Status::Captured, None);
+                    }
+
                     let Some(spectrogram) = &self.spectrogram else {
                         return (Status::Captured, None);
                     };
@@ -232,11 +235,6 @@ impl State {
                         MarkAction::Signal => MarksMsg::AddSignal(da_pos).into(),
                     };
                     return (Status::Captured, Some(msg));
-                } else if matches!(event, mouse::Event::ButtonPressed(mouse::Button::Left))
-                    && !cursor.is_over(bounds)
-                {
-                    self.interaction.mouse_state.set(MouseState::Idle);
-                    return (Status::Captured, None);
                 }
             }
         };
@@ -330,11 +328,7 @@ impl State {
         let plot_pos = pos * ScreenToPlotArea::new(&screen::Size(bounds.size()));
 
         match key.as_ref() {
-            keyboard::Key::Character("d")
-                if !modifiers.shift()
-                    && matches!(self.interaction.mouse_state.get(), MouseState::Idle)
-                    && self.spectrogram.is_some() =>
-            {
+            keyboard::Key::Character("d") if !modifiers.shift() && self.spectrogram.is_some() => {
                 self.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Delete,
                     corner1: plot_pos,
@@ -342,10 +336,7 @@ impl State {
                 });
                 (Status::Captured, None)
             }
-            keyboard::Key::Character("z")
-                if matches!(self.interaction.mouse_state.get(), MouseState::Idle)
-                    && self.spectrogram.is_some() =>
-            {
+            keyboard::Key::Character("z") if self.spectrogram.is_some() => {
                 self.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::Zoom,
                     corner1: plot_pos,
@@ -353,10 +344,7 @@ impl State {
                 });
                 (Status::Captured, None)
             }
-            keyboard::Key::Character("m")
-                if matches!(self.interaction.mouse_state.get(), MouseState::Idle)
-                    && self.spectrogram.is_some() =>
-            {
+            keyboard::Key::Character("m") if self.spectrogram.is_some() => {
                 self.interaction.mouse_state.set(MouseState::DrawingRect {
                     action: RectAction::MarkCentroid,
                     corner1: plot_pos,
