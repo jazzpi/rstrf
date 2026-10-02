@@ -11,12 +11,9 @@ use iced::{
     keyboard::{self, key::Named},
     mouse,
 };
-use rstrf::{
-    coord::{
-        DataAbsoluteToDataNormalized, DataAbsoluteToScreen, PlotAreaToDataAbsolute,
-        ScreenToPlotArea, data_absolute, plot_area, screen,
-    },
-    util::is_modifier,
+use rstrf::coord::{
+    DataAbsoluteToDataNormalized, DataAbsoluteToScreen, PlotAreaToDataAbsolute, ScreenToPlotArea,
+    data_absolute, plot_area, screen,
 };
 
 use super::{DisplayMsg, MarksMsg, State, ViewMsg, marks::MarkAction};
@@ -263,11 +260,6 @@ impl State {
         };
         let modifiers = self.interaction.modifiers.get();
 
-        if matches!(self.interaction.mouse_state.get(), MouseState::Marking(_)) && !is_modifier(key)
-        {
-            self.interaction.mouse_state.set(MouseState::Idle);
-        }
-
         // Some keys should work regardless of cursor position...
         let pan = if modifiers.shift() { 0.5 } else { 1.0 };
         match key.as_ref() {
@@ -289,6 +281,7 @@ impl State {
                 return (Status::Captured, Some(MarksMsg::MarkSignals.into()));
             }
             keyboard::Key::Character("r") => {
+                self.interaction.mouse_state.set(MouseState::Idle);
                 return (Status::Captured, Some(ViewMsg::ResetView.into()));
             }
             keyboard::Key::Character("f") => {

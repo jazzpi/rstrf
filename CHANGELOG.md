@@ -5,6 +5,8 @@
 - **Satellite/prediction changes force predictions to show**. This is mostly useful for the above
   reload catalog button. But it also means e.g. using the satellite manager with predictions hidden
   will trigger the predictions to be shown.
+- **Mouse states are no longer cancelled by all hotkeys**. E.g., if you are in _Mark signals_ mode
+  (`D`), pressing the arrow keys will no longer cancel the mode.
 
 # v0.4.0
 
