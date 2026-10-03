@@ -42,6 +42,7 @@ pub enum Icon {
     Delete,
     Save,
     Screenshot,
+    ScreenshotCopy,
     Colormap(Colormap),
 }
 
@@ -98,6 +99,9 @@ impl From<Icon> for svg::Handle {
                     "../../../../resources/icons/\
                      material-symbols--screenshot-monitor-outline-rounded.svg"
                 )
+            }
+            Icon::ScreenshotCopy => {
+                include_bytes!("../../../../resources/icons/screenshot-copy.svg")
             }
             Icon::Colormap(colormap) => match colormap {
                 Colormap::Magma => include_bytes!("../../../../resources/icons/cmap-magma.svg"),

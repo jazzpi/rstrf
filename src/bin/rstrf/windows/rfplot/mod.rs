@@ -44,6 +44,23 @@ use viewport::Viewport;
 pub enum ScreenshotTarget {
     File(PathBuf),
     Dialog,
+    Clipboard,
+}
+
+fn copy_to_clipboard(
+    clipboard: &std::sync::Mutex<Option<arboard::Clipboard>>,
+    img: RgbaImage,
+) -> Result<(), arboard::Error> {
+    let mut clipboard = clipboard.lock().unwrap_or_else(|e| e.into_inner());
+    if clipboard.is_none() {
+        *clipboard = Some(arboard::Clipboard::new()?);
+    }
+    let clipboard = clipboard.as_mut().expect("initialized above");
+    clipboard.set_image(arboard::ImageData {
+        width: img.width() as usize,
+        height: img.height() as usize,
+        bytes: img.into_raw().into(),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -849,6 +866,20 @@ impl Window<Message> for RFPlot {
                         Some(file) => Message::SaveScreenshot(img, file.path().to_path_buf()),
                         None => Message::Nop,
                     }
+                })
+            }
+            Message::CapturedScreenshot(Ok((img, ScreenshotTarget::Clipboard))) => {
+                let clipboard = app.clipboard.clone();
+                Task::future(async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || copy_to_clipboard(&clipboard, img.0))
+                            .await;
+                    match result {
+                        Ok(Ok(())) => log::info!("Copied screenshot to clipboard"),
+                        Ok(Err(e)) => log::error!("Failed to copy screenshot to clipboard: {e}"),
+                        Err(e) => log::error!("Failed to copy screenshot to clipboard: {e}"),
+                    }
+                    Message::Nop
                 })
             }
             Message::SetView(rect) => {

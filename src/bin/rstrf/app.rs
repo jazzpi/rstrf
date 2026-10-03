@@ -44,6 +44,9 @@ pub struct AppShared {
     pub classfd_path: Option<PathBuf>,
     pub freqs_path: Option<PathBuf>,
     pub initial_freqs: HashMap<u64, Vec<f64>>,
+    /// Created on first use and kept for the rest of the run: on X11, copied content can only be
+    /// pasted while the `Clipboard` that set it is alive.
+    pub clipboard: Arc<std::sync::Mutex<Option<arboard::Clipboard>>>,
 }
 
 impl AppShared {

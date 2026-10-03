@@ -46,6 +46,7 @@ space_track = { git = "https://github.com/jazzpi/space_track", branch = "predica
 rayon = "1.12.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 csv-async = { version = "1.3.1", features = ["tokio"] }
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
 
 [profile.release-with-debug]
 inherits = "release"

@@ -124,6 +124,13 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
             enabled: true,
             style: widget::button::primary,
         },
+        ToolbarButton::Icon {
+            icon: Icon::ScreenshotCopy,
+            tooltip: "Copy screenshot to clipboard",
+            msg: rfplot::Message::CaptureScreenshot(rfplot::ScreenshotTarget::Clipboard),
+            enabled: true,
+            style: widget::button::primary,
+        },
         ToolbarButton::Submenu {
             toplevel: Box::new(ToolbarButton::Icon {
                 icon: Icon::Colormap(state.display.colormap),
