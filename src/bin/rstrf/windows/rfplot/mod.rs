@@ -2,9 +2,9 @@ use std::{path::PathBuf, pin::Pin, sync::Arc};
 
 use futures_util::{SinkExt, Stream};
 use iced::{
-    Element, Length, Padding, Subscription, Task,
+    Element, Length, Padding, Rectangle, Size, Subscription, Task,
     alignment::{Horizontal, Vertical},
-    widget::{self, button, container},
+    widget::{self, button, container, selector},
     window,
 };
 use image::RgbaImage;
@@ -45,6 +45,36 @@ pub enum ScreenshotTarget {
     File(PathBuf),
     Dialog,
     Clipboard,
+}
+
+/// Falls back to the whole window if the plot can't be located in the screenshot.
+fn crop_to_plot(
+    screenshot: window::Screenshot,
+    plot_bounds: Option<Rectangle>,
+) -> window::Screenshot {
+    let Some(plot_bounds) = plot_bounds else {
+        log::warn!("Plot not found, not cropping screenshot");
+        return screenshot;
+    };
+    let full = Rectangle::with_size(Size::new(
+        screenshot.size.width as f32,
+        screenshot.size.height as f32,
+    ));
+    // Widget bounds are in logical pixels, the screenshot is in physical pixels.
+    let Some(region) = (plot_bounds * screenshot.scale_factor)
+        .intersection(&full)
+        .and_then(Rectangle::snap)
+    else {
+        log::warn!("Plot {plot_bounds:?} is outside the screenshot, not cropping");
+        return screenshot;
+    };
+    match screenshot.crop(region) {
+        Ok(cropped) => cropped,
+        Err(e) => {
+            log::warn!("Failed to crop screenshot to {region:?}: {e:?}");
+            screenshot
+        }
+    }
 }
 
 fn copy_to_clipboard(
@@ -548,6 +578,9 @@ pub struct RFPlot {
     gpu_watcher: Option<GpuDoneWatcher>,
     /// Handle given to `Primitive` so `prepare()` can fire the wakeup.
     pub gpu_notify: Option<Arc<tokio::sync::Notify>>,
+    /// Lets screenshots be cropped to the plot. Unique per window because widget queries search
+    /// all windows.
+    plot_id: widget::Id,
 }
 
 impl RFPlot {
@@ -565,6 +598,7 @@ impl RFPlot {
             pending_paths: Vec::new(),
             gpu_watcher: None,
             gpu_notify: None,
+            plot_id: widget::Id::unique(),
         }
     }
 
@@ -742,7 +776,7 @@ impl Window<Message> for RFPlot {
             .into();
             stack = stack.push(indicator);
         }
-        let plot_area: Element<'_, Message> = stack.into();
+        let plot_area: Element<'_, Message> = container(stack).id(self.plot_id.clone()).into();
 
         let contents: Element<'_, Message> = widget::column![controls, plot_area]
             .padding(8)
@@ -838,15 +872,22 @@ impl Window<Message> for RFPlot {
                     Message::Nop
                 }
             }),
-            Message::CaptureScreenshot(target) => window::screenshot(id).map(move |screenshot| {
-                let width = screenshot.size.width;
-                let height = screenshot.size.height;
-                Message::CapturedScreenshot(
-                    RgbaImage::from_raw(width, height, screenshot.rgba.to_vec())
-                        .map(|img| (img.into(), target.clone()))
-                        .ok_or_else(|| "Screenshot buffer size mismatch".to_string()),
-                )
-            }),
+            Message::CaptureScreenshot(target) => {
+                selector::find(selector::id(self.plot_id.clone())).then(move |plot| {
+                    let plot_bounds = plot.map(|plot| plot.bounds());
+                    let target = target.clone();
+                    window::screenshot(id).map(move |screenshot| {
+                        let screenshot = crop_to_plot(screenshot, plot_bounds);
+                        let width = screenshot.size.width;
+                        let height = screenshot.size.height;
+                        Message::CapturedScreenshot(
+                            RgbaImage::from_raw(width, height, screenshot.rgba.to_vec())
+                                .map(|img| (img.into(), target.clone()))
+                                .ok_or_else(|| "Screenshot buffer size mismatch".to_string()),
+                        )
+                    })
+                })
+            }
             Message::CapturedScreenshot(Err(err)) => {
                 log::error!("Failed to capture screenshot: {err}");
                 Task::none()
