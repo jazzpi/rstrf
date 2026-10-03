@@ -776,11 +776,20 @@ impl Window<Message> for RFPlot {
             .into();
             stack = stack.push(indicator);
         }
-        let plot_area: Element<'_, Message> = container(stack).id(self.plot_id.clone()).into();
+        // The padding belongs to the plot container (not the surrounding column) so that cropped
+        // screenshots include it.
+        let plot_area: Element<'_, Message> =
+            container(stack).padding(8).id(self.plot_id.clone()).into();
+        let controls: Element<'_, Message> = container(controls)
+            .padding(Padding {
+                top: 8.0,
+                right: 8.0,
+                bottom: 0.0,
+                left: 8.0,
+            })
+            .into();
 
         let contents: Element<'_, Message> = widget::column![controls, plot_area]
-            .padding(8)
-            .spacing(4)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
