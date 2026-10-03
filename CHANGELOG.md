@@ -1,7 +1,13 @@
 # vNext
 
 ## New features
+- **Copy screenshot to clipboard** button in the plot toolbar.
 - **Reload catalog button** in the plot window (under _File_ -> _Reload catalog & frequencies_).
+
+## Changes
+- **Screenshots are now cropped to the plot itself**, i.e. they don't include the toolbar etc.
+  anymore. This applies to screenshots saved to disk, copied to clipboard, and generated with
+  `pass-png`.
 - **Satellite/prediction changes force predictions to show**. This is mostly useful for the above
   reload catalog button. But it also means e.g. using the satellite manager with predictions hidden
   will trigger the predictions to be shown.
