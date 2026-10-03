@@ -19,7 +19,6 @@ use rstrf::{
     spectrogram::Spectrogram,
     util::DebugRgbaImage,
 };
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -148,7 +147,7 @@ impl From<PredictionsMsg> for Message {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub(crate) struct Display {
     show_predictions: bool,
     show_grid: bool,
@@ -174,7 +173,7 @@ impl Default for Display {
 }
 
 /// The displayable power range, clamped to the possible range of the loaded spectrogram.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct PowerRange {
     /// Possible power range
     bounds: (f32, f32),
@@ -222,7 +221,7 @@ impl PowerRange {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Detection {
     /// Threshold for signal detection
     signal_sigma: f32,
@@ -239,21 +238,18 @@ impl Default for Detection {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Default, Clone)]
 pub(crate) struct State {
     pub viewport: Viewport,
     pub power: PowerRange,
     pub detection: Detection,
     pub spectrogram_files: Vec<PathBuf>,
-    #[serde(skip)]
     spectrogram: Option<Spectrogram>,
     /// The margin on the left/bottom of the plot area (for axes/labels)
     pub plot_area_margin: f32,
     pub display: Display,
     pub marks: Marks,
-    #[serde(skip)]
     pub interaction: Interaction,
-    #[serde(skip)]
     pub prediction_cache: AsyncCache<predictions::PredictionKey, orbit::Predictions>,
 }
 
@@ -518,21 +514,16 @@ fn gpu_done_stream(
     }))
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub struct RFPlot {
     state: State,
     id: Uuid,
-    #[serde(skip)]
     initial_view: Option<Box<InitialView>>,
-    #[serde(skip)]
     loading_state: LoadingState,
-    #[serde(skip)]
     pending_paths: Vec<PathBuf>,
     /// Watcher passed to the GPU-done subscription; keyed by `spec_id`.
-    #[serde(skip)]
     gpu_watcher: Option<GpuDoneWatcher>,
     /// Handle given to `Primitive` so `prepare()` can fire the wakeup.
-    #[serde(skip)]
     pub gpu_notify: Option<Arc<tokio::sync::Notify>>,
 }
 

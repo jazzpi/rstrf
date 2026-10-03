@@ -2,7 +2,6 @@
 
 use chrono::{DateTime, Utc};
 use rstrf::{coord::data_absolute, util::sec_to_duration};
-use serde::{Deserialize, Serialize};
 
 /// Which of the two mark collections a mark belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,7 +10,7 @@ pub enum MarkAction {
     Signal,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Marks {
     /// Sorted by time.
     track_points: Vec<data_absolute::Point>,

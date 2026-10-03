@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```sh
 cargo build --release
-cargo run --release [-- <WORKSPACE_FILE>]
+cargo run --release [-- plot <SPECTROGRAMS>...]
 cargo run --release -- pass-png --help   # batch pass-PNG subcommand
 cargo run --bin rsmedfilt -- --help
 cargo +nightly fmt --all  # Always use nightly rustfmt
@@ -92,8 +92,6 @@ AppModel
 **`AnyWindow` over `Box<dyn Window>` (`windows/mod.rs`):** Windows are stored as a concrete enum (`AnyWindow`) rather than trait objects. This lets each window define its own message type without boxing or lifting internally — the lift to `windows::Message` is done via `From<WindowOut<M>>` impls, not inside each window.
 
 **Coordinate type safety (`coord.rs`):** The `duplicate` macro generates newtyped point types (`screen::Point`, `plot_area::Point`, `data_normalized::Point`, `data_absolute::Point`) and typed transform structs for all 12 pairwise combinations. Coordinate conversion is `point * transform`. This makes coordinate space errors compile errors.
-
-**Serde for persistence:** `Config`, `RFPlot`, `SatManager`, `State`, `Satellite`, `Site` are all `Serialize`/`Deserialize`. Transient state (loaded spectrogram data, computed predictions) uses `#[serde(skip)]`.
 
 **Async I/O:** All file loading and Space-Track API calls use `Task::future(async { ... })`. CPU-intensive work uses `tokio::task::spawn_blocking`.
 

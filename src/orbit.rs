@@ -209,33 +209,11 @@ const RADIUS_EARTH: f64 = 6378.137; // km
 const SPEED_OF_LIGHT: f64 = 299792.458; // km/s
 const MAX_RANGE_RATE: f64 = 8.0; // km/s
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Satellite {
     pub elements: sgp4::Elements,
-    #[serde(skip)]
     pub constants: sgp4::Constants,
     pub transmitters: Vec<f64>,
-}
-
-impl<'de> Deserialize<'de> for Satellite {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct SatelliteHelper {
-            elements: sgp4::Elements,
-            transmitters: Vec<f64>,
-        }
-        let helper = SatelliteHelper::deserialize(deserializer)?;
-        let constants =
-            sgp4::Constants::from_elements(&helper.elements).map_err(serde::de::Error::custom)?;
-        Ok(Satellite {
-            elements: helper.elements,
-            constants,
-            transmitters: helper.transmitters,
-        })
-    }
 }
 
 impl PartialEq for Satellite {

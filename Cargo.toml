@@ -16,7 +16,7 @@ futures-util = "0.3.31"
 regex = "1.11"
 tokio = { version = "1.48.0", features = ["full"] }
 ndarray = "0.17.2"
-glam = { version = "0.30.10", features = ["bytemuck", "serde"] }
+glam = { version = "0.30.10", features = ["bytemuck"] }
 bytemuck = "1.24.0"
 env_logger = "0.11.8"
 log = "0.4.29"
@@ -38,7 +38,6 @@ iced_aw = { version = "0.13.0", features = [
 rfd = "0.17.2"
 serde = "1.0.228"
 serde_json = "1.0.149"
-serde_with = "3.16.1"
 uuid = { version = "1.20.0", features = ["v4"] }
 strum = { version = "0.27.2", features = ["derive"] }
 dirs = "6.0.0"

@@ -16,8 +16,6 @@ use rstrf::{
     orbit::Satellite,
     util::{pick_file, spacetrack_to_sgp4},
 };
-use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
 use space_track::{GeneralPerturbationField, Predicate, SpaceTrack};
 use strum::{EnumIter, IntoEnumIterator};
 use tokio::sync::Mutex;
@@ -48,7 +46,7 @@ pub enum Message {
     SpaceTrackUpdateVisible,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum TableColumn {
     NoradId,
     Epoch,
@@ -135,13 +133,11 @@ impl TableColumn {
     }
 }
 
-#[serde_as]
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct SatManager {
     show_all: bool,
     show_column_controls: bool,
     show_spacetrack: bool,
-    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     sat_buffer: HashMap<usize, Satellite>,
     columns: HashMap<TableColumn, bool>,
 }

@@ -3,7 +3,6 @@ use rstrf::coord::{
     DataAbsoluteToDataNormalized, PlotAreaToDataNormalized, data_absolute, data_normalized,
     plot_area,
 };
-use serde::{Deserialize, Serialize};
 
 const ZOOM_MIN: f32 = 0.0;
 const ZOOM_MAX: f32 = 8.0;
@@ -17,7 +16,7 @@ const ZOOM_WHEEL_SCALE: f32 = 0.2;
 ///
 /// Every mutator clamps zoom to `[0, zoom_max]` and snaps the resulting view back inside
 /// `[0, 1]` on both axes before returning, so `bounds()` never needs to be checked by callers.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewport {
     /// Per-axis zoom ceiling
     zoom_max: Vec2,
