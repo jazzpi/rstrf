@@ -41,6 +41,12 @@ use marks::{MarkAction, Marks, signals_filename};
 use viewport::Viewport;
 
 #[derive(Debug, Clone)]
+pub enum ScreenshotTarget {
+    File(PathBuf),
+    Dialog,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     View(ViewMsg),
     Display(DisplayMsg),
@@ -60,8 +66,8 @@ pub enum Message {
     },
     GpuUploadDone,
     SetView(data_normalized::Rectangle),
-    CaptureScreenshot(Option<PathBuf>),
-    CapturedScreenshot(Result<(DebugRgbaImage, Option<PathBuf>), String>),
+    CaptureScreenshot(ScreenshotTarget),
+    CapturedScreenshot(Result<(DebugRgbaImage, ScreenshotTarget), String>),
     SaveScreenshot(DebugRgbaImage, PathBuf),
     Nop,
 }
@@ -815,12 +821,12 @@ impl Window<Message> for RFPlot {
                     Message::Nop
                 }
             }),
-            Message::CaptureScreenshot(path) => window::screenshot(id).map(move |screenshot| {
+            Message::CaptureScreenshot(target) => window::screenshot(id).map(move |screenshot| {
                 let width = screenshot.size.width;
                 let height = screenshot.size.height;
                 Message::CapturedScreenshot(
                     RgbaImage::from_raw(width, height, screenshot.rgba.to_vec())
-                        .map(|img| (img.into(), path.clone()))
+                        .map(|img| (img.into(), target.clone()))
                         .ok_or_else(|| "Screenshot buffer size mismatch".to_string()),
                 )
             }),
@@ -828,21 +834,23 @@ impl Window<Message> for RFPlot {
                 log::error!("Failed to capture screenshot: {err}");
                 Task::none()
             }
-            Message::CapturedScreenshot(Ok((img, Some(path)))) => {
+            Message::CapturedScreenshot(Ok((img, ScreenshotTarget::File(path)))) => {
                 Task::done(Message::SaveScreenshot(img, path))
             }
-            Message::CapturedScreenshot(Ok((img, None))) => Task::future(async move {
-                match AsyncFileDialog::new()
-                    .add_filter("PNG image", &["png"])
-                    .add_filter("All files", &["*"])
-                    .set_file_name("screenshot.png")
-                    .save_file()
-                    .await
-                {
-                    Some(file) => Message::SaveScreenshot(img, file.path().to_path_buf()),
-                    None => Message::Nop,
-                }
-            }),
+            Message::CapturedScreenshot(Ok((img, ScreenshotTarget::Dialog))) => {
+                Task::future(async move {
+                    match AsyncFileDialog::new()
+                        .add_filter("PNG image", &["png"])
+                        .add_filter("All files", &["*"])
+                        .set_file_name("screenshot.png")
+                        .save_file()
+                        .await
+                    {
+                        Some(file) => Message::SaveScreenshot(img, file.path().to_path_buf()),
+                        None => Message::Nop,
+                    }
+                })
+            }
             Message::SetView(rect) => {
                 self.state.update_view(ViewMsg::ZoomToRect(rect));
                 Task::none()

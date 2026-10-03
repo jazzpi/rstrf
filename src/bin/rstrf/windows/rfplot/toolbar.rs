@@ -120,7 +120,7 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
         ToolbarButton::Icon {
             icon: Icon::Screenshot,
             tooltip: "Save screenshot",
-            msg: rfplot::Message::CaptureScreenshot(None),
+            msg: rfplot::Message::CaptureScreenshot(rfplot::ScreenshotTarget::Dialog),
             enabled: true,
             style: widget::button::primary,
         },

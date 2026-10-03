@@ -226,9 +226,9 @@ impl PassPngMode {
                 self.state = State::WaitingForCapture(path.clone(), queue.clone());
                 Task::done(app::Message::WindowMessage(
                     id,
-                    windows::Message::RFPlot(windows::rfplot::Message::CaptureScreenshot(Some(
-                        path.clone(),
-                    ))),
+                    windows::Message::RFPlot(windows::rfplot::Message::CaptureScreenshot(
+                        windows::rfplot::ScreenshotTarget::File(path.clone()),
+                    )),
                 ))
             }
             Message::ScreenshotSaved(saved_path) => {
