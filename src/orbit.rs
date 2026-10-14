@@ -4,7 +4,6 @@ use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use futures_util::StreamExt;
 use ndarray::{Array1, ArrayView1, Zip, arr1, s};
-use ndarray_linalg::Norm;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -292,7 +291,7 @@ impl Satellite {
                 let site_prediction = site.at_time(&t);
                 let site_pos = arr1(&site_prediction.position);
                 let delta_pos = arr1(&prediction.position) - &site_pos;
-                let range = delta_pos.norm();
+                let range = delta_pos.dot(&delta_pos).sqrt();
                 *angle = (delta_pos.dot(&site_pos) / (range * RADIUS_EARTH)).acos();
                 if below_horizon(*angle) {
                     return;

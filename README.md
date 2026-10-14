@@ -26,7 +26,7 @@ regularly for my day job.
 
 ```sh
 sudo apt install build-essential libssl-dev pkg-config fontconfig \
-  libfontconfig1-dev libopenblas-dev
+  libfontconfig1-dev
 ```
 
 ### Nix
@@ -42,20 +42,7 @@ that is built from the CI of this repository.
 
 ### Windows
 
-Building on Windows is slightly more involved than on an average Linux system,
-mainly due to [`vcpkg`](https://vcpkg.io). If you don't have it installed, you
-can find instructions to do so
-[here](https://learn.microsoft.com/en-us/vcpkg/get_started/overview).
-
-After installing `vcpkg` (or if you already had it installed), it should be as
-simple as running:
-```sh
-vcpkg install openblas --triplet x64-windows
-```
-
-> [!TIP]
-> See [`openblas-src` repository README][openblas-src-readme] for more
-> information.
+No additional setup is required, see [Build](#build).
 
 ### Build
 
@@ -212,5 +199,3 @@ nix run github.com:jazzpi/rstrf#rsmedfilt --help
 # Other systems
 cargo run --bin rsmedfilt -- --help
 ```
-
-[openblas-src-readme]: https://github.com/blas-lapack-rs/openblas-src/blob/openblas-src-v0.10.14/README.md#windows-and-vcpkg
