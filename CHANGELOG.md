@@ -4,6 +4,11 @@
 - **Script for applying frequency correction to STRF recordings**. See `scripts/ppm.py -h` for
   details.
 
+## Other changes
+- **Drop OpenBLAS dependency**. This makes the Windows build significantly easier (no more `vcpkg`
+  needed).
+- **Windows build in CI**. There should now be a Windows build (`.exe`) attached to every release.
+
 # v0.5.0
 
 ## New features
