@@ -1,4 +1,4 @@
-# vNext
+# v0.5.1
 
 ## New features
 - **Script for applying frequency correction to STRF recordings**. See `scripts/ppm.py -h` for
