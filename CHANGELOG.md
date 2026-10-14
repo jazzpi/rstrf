@@ -1,10 +1,14 @@
 # vNext
 
 ## New features
-- **Copy screenshot to clipboard** button in the plot toolbar.
-- **Reload catalog button** in the plot window (under _File_ -> _Reload catalog & frequencies_).
 - **Script for applying frequency correction to STRF recordings**. See `scripts/ppm.py -h` for
   details.
+
+# v0.5.0
+
+## New features
+- **Copy screenshot to clipboard** button in the plot toolbar.
+- **Reload catalog button** in the plot window (under _File_ -> _Reload catalog & frequencies_).
 
 ## Changes
 - **Screenshots are now cropped to the plot itself**, i.e. they don't include the toolbar etc.
