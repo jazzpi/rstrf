@@ -1,4 +1,4 @@
-# vNext
+# v0.5.0
 
 ## New features
 - **Copy screenshot to clipboard** button in the plot toolbar.
