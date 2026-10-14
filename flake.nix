@@ -23,7 +23,6 @@
           libglvnd
           vulkan-loader
           udev
-          openblas
           dbus
         ];
         runtimeDependenciesPath = pkgs.lib.makeLibraryPath runtimeDependencies;
@@ -36,7 +35,6 @@
           vulkan-loader
           udev
           fontconfig
-          openblas
         ];
       in
       with pkgs;

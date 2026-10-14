@@ -16,7 +16,7 @@ cargo test
 
 Notable CLI flags (most are global across subcommands): `-v`/`--verbose` (repeatable), `--freq-range MIN MAX` (skip channels outside range at load time), `-W`/`-H` (window size).
 
-System dependencies (Ubuntu): `build-essential libssl-dev pkg-config fontconfig libfontconfig1-dev libopenblas-dev`
+System dependencies (Ubuntu): `build-essential libssl-dev pkg-config fontconfig libfontconfig1-dev`
 
 A Nix flake is provided for reproducible builds; a Cachix cache at `rstrf.cachix.org` (built from CI) is available so rstrf does not need to be built locally.
 

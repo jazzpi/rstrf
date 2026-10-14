@@ -23,7 +23,6 @@ log = "0.4.29"
 plotters = "0.3.7"
 duplicate = "2.0.1"
 sgp4 = "2.4.0"
-ndarray-linalg = { version = "0.18.1", features = ["openblas-system"] }
 itertools = "0.14.0"
 copy-range = "0.1.1"
 ndarray-stats = "0.7.0"

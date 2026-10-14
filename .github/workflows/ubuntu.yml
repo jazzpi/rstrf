@@ -22,7 +22,6 @@ jobs:
             pkg-config \
             fontconfig \
             libfontconfig1-dev \
-            libopenblas-dev
       - name: Install nightly rustfmt
         uses: dtolnay/rust-toolchain@nightly
         with:
