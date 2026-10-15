@@ -3,18 +3,21 @@
 //!
 //! The shader code is in [shader.wgsl](shader.wgsl).
 //!
-//! The shader uses four buffers:
+//! The shader uses five buffers:
 //! - `color_map`: storage buffer containing the colormap
 //! - `uniforms`: uniform buffer containing bounds, viewport information, buffer sizes etc.
 //! - `spec_data`: storage buffer containing the spectrogram data itself (`array<f32>`), **mipmapped
 //!   on the frequency axis**.
 //! - `x_ranges`: storage buffer containing the x coordinates of each slice (`array<vec2<f32>>`, for
 //!   left and right edge)
+//! - `y_ranges`: storage buffer containing the y coordinates of each slice (`array<vec2<f32>>`, for
+//!   bottom and top edge). This is `(0, 1)` unless the slices are shifted, e.g. for Doppler
+//!   correction.
 //!
 //! The spectrogram data is chunked to not exceed `max_storage_buffer_binding_size` (128MiB by
 //! default, which iced currently leaves it at). There are two binding groups:
 //! - `bind_group(0)`: contains the colormap buffer and is switched per primitive (i.e. per RFPlot)
-//! - `bind_group(1)`: contains the other three buffers and is switched per spectrogram chunk.
+//! - `bind_group(1)`: contains the other four buffers and is switched per spectrogram chunk.
 //!
 //! # Vertex shader
 //! Each slice is rendered as a quad (i.e. two triangles). This allows rendering each slice at the
@@ -22,7 +25,8 @@
 //! are eliminated via pixel snapping).
 //!
 //! The vertex shader gets the corner coordinates ([01], [01]). It transforms the coordinates to the
-//! correct slice position using the `x_ranges` buffer & view bounds, and sets the u/v coordinates
+//! correct slice position using the `x_ranges`/`y_ranges` buffers & view bounds, and sets the u/v
+//! coordinates
 //! for texture mapping.
 //!
 //! The transformation can leave slices off-screen, which should then be clipped before the fragment
@@ -186,6 +190,9 @@ pub struct Uniforms {
 
 const _: () = assert!(std::mem::size_of::<Uniforms>() % std::mem::size_of::<Vec2>() == 0);
 
+/// `y_ranges` entry for a slice drawn at its recorded frequencies.
+const UNSHIFTED: Vec2 = vec2(0.0, 1.0);
+
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 struct DepthTarget {
@@ -209,6 +216,7 @@ struct SpectrogramChunk {
     instances: wgpu::Buffer,
     /// Retained so the mode toggle can patch mipmap levels in place.
     spectrogram: wgpu::Buffer,
+    y_ranges: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     mipmap: Option<ChunkMipmap>,
     nslices: u32,
@@ -225,6 +233,8 @@ struct PrimitiveData {
     spectrogram_id: Uuid,
     colormap: Colormap,
     average: bool,
+    /// What `y_ranges` was last uploaded from; `None` means unshifted.
+    y_ranges: Option<Arc<[Vec2]>>,
     depth: DepthTarget,
 }
 
@@ -428,6 +438,7 @@ impl Pipeline {
             queue.write_buffer(&chunk.uniform, 0, bytemuck::bytes_of(&uniforms));
         }
 
+        let mut buffers_recreated = is_new_entry;
         // TODO: do we need to track primitive ID & spectrogram ID separately?
         if is_new_entry {
             // Buffers were already created inside create_buffers; just signal upload done.
@@ -445,10 +456,25 @@ impl Pipeline {
             );
             primitive_data.spectrogram_id = spectrogram.id;
             primitive_data.average = primitive.average_plotting;
+            buffers_recreated = true;
             if let Some(notify) = &primitive.gpu_notify {
                 notify.notify_one();
             }
         }
+        let y_ranges_changed = match (&primitive_data.y_ranges, &primitive.y_ranges) {
+            (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
+            (None, None) => false,
+            _ => true,
+        };
+        if buffers_recreated || y_ranges_changed {
+            Self::upload_y_ranges(
+                queue,
+                &primitive_data.buffers.spectrogram,
+                primitive.y_ranges.as_deref(),
+            );
+            primitive_data.y_ranges = primitive.y_ranges.clone();
+        }
+
         if primitive_data.depth.size != physical_size {
             primitive_data.depth = Self::create_depth_target(
                 device,
@@ -485,6 +511,42 @@ impl Pipeline {
                 ),
             }
             primitive_data.average = average;
+        }
+    }
+
+    fn upload_y_ranges(
+        queue: &wgpu::Queue,
+        chunks: &[SpectrogramChunk],
+        y_ranges: Option<&[Vec2]>,
+    ) {
+        let nslices: usize = chunks.iter().map(|chunk| chunk.nslices as usize).sum();
+        let y_ranges = y_ranges.filter(|y_ranges| {
+            let matches = y_ranges.len() == nslices;
+            if !matches {
+                log::warn!(
+                    "Got {} y ranges for {} slices, drawing unshifted",
+                    y_ranges.len(),
+                    nslices
+                );
+            }
+            matches
+        });
+        let mut start = 0;
+        for chunk in chunks {
+            let end = start + chunk.nslices as usize;
+            match y_ranges {
+                Some(y_ranges) => queue.write_buffer(
+                    &chunk.y_ranges,
+                    0,
+                    bytemuck::cast_slice(&y_ranges[start..end]),
+                ),
+                None => queue.write_buffer(
+                    &chunk.y_ranges,
+                    0,
+                    bytemuck::cast_slice(&vec![UNSHIFTED; chunk.nslices as usize]),
+                ),
+            }
+            start = end;
         }
     }
 
@@ -533,6 +595,7 @@ impl Pipeline {
             spectrogram_id,
             colormap: primitive.colormap,
             average: primitive.average_plotting,
+            y_ranges: None,
             depth: Self::create_depth_target(device, physical_size, &prefix),
         }
     }
@@ -626,6 +689,12 @@ impl Pipeline {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
+            let y_ranges_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(format!("{prefix}.buffer.y_ranges").as_str()),
+                contents: bytemuck::cast_slice(&vec![UNSHIFTED; nslices as usize]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+
             let bind_group_layout = pipeline.get_bind_group_layout(1);
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(format!("{prefix}.bind_group.spectrogram").as_str()),
@@ -642,6 +711,10 @@ impl Pipeline {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: x_ranges_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: y_ranges_buffer.as_entire_binding(),
                     },
                 ],
             });
@@ -689,6 +762,7 @@ impl Pipeline {
                 vertices: vertex_buffer,
                 instances: instance_buffer,
                 spectrogram: spectrogram_buffer,
+                y_ranges: y_ranges_buffer,
                 bind_group,
                 mipmap,
                 nslices: nslices as u32,
@@ -989,29 +1063,8 @@ pub struct Primitive {
     colormap: Colormap,
     average_plotting: bool,
     spectrogram: Option<Spectrogram>,
+    y_ranges: Option<Arc<[Vec2]>>,
     gpu_notify: Option<Arc<tokio::sync::Notify>>,
-}
-
-impl Primitive {
-    fn new(
-        id: uuid::Uuid,
-        bounds: data_normalized::Rectangle,
-        power_range: (f32, f32),
-        colormap: Colormap,
-        average_plotting: bool,
-        spectrogram: Option<Spectrogram>,
-        gpu_notify: Option<Arc<tokio::sync::Notify>>,
-    ) -> Self {
-        Self {
-            id,
-            bounds,
-            power_range,
-            colormap,
-            average_plotting,
-            spectrogram,
-            gpu_notify,
-        }
-    }
 }
 
 impl shader::Primitive for Primitive {
@@ -1049,15 +1102,16 @@ impl shader::Program<Message> for RFPlot {
         _cursor: mouse::Cursor,
         _bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(
-            self.id,
-            self.state.viewport.bounds(),
-            self.state.power.range(),
-            self.state.display.colormap,
-            self.state.display.average_plotting,
-            self.state.spectrogram().cloned(),
-            self.gpu_notify.clone(),
-        )
+        Primitive {
+            id: self.id,
+            bounds: self.state.viewport.bounds(),
+            power_range: self.state.power.range(),
+            colormap: self.state.display.colormap,
+            average_plotting: self.state.display.average_plotting,
+            spectrogram: self.state.spectrogram().cloned(),
+            y_ranges: None,
+            gpu_notify: self.gpu_notify.clone(),
+        }
     }
 }
 

@@ -14,6 +14,7 @@ struct Uniforms {
 @group(1) @binding(0) var<uniform> uniforms: Uniforms;
 @group(1) @binding(1) var<storage, read> spec_data: array<f32>;
 @group(1) @binding(2) var<storage, read> x_ranges: array<vec2f>;
+@group(1) @binding(3) var<storage, read> y_ranges: array<vec2f>;
 
 struct VertexIn {
     @location(0) corner: vec2f, // Vertex buffer
@@ -48,7 +49,8 @@ fn vs_main(in: VertexIn) -> VertexOut {
 
     let x_snapped = px_snapped / uniforms.viewport_width;
 
-    let y = unmix(uniforms.freq_bounds, in.corner.y);
+    let y_range = y_ranges[in.time_idx];
+    let y = unmix(uniforms.freq_bounds, mix(y_range.x, y_range.y, in.corner.y));
     // Gaps can only happen in time, not frequency, so no need to snap y
     let pos = vec2f(x_snapped, y) * 2.0 - 1.0;
     return VertexOut(vec4f(pos, 0.0, 1.0), in.time_idx, in.corner.y);
