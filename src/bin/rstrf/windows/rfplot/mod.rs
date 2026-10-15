@@ -310,6 +310,7 @@ pub(crate) struct State {
     pub prediction_cache: AsyncCache<predictions::PredictionKey, orbit::Predictions>,
     /// Satellite to Doppler-correct the plot for
     pub doppler_target: Option<DopplerTarget>,
+    pub doppler_options: widget::combo_box::State<doppler::DopplerOption>,
     pub doppler_cache: AsyncCache<doppler::DopplerKey, doppler::DopplerCorrection>,
     /// Site override for predictions. Do not use directly; use [`State::site()`] instead.
     site: Option<Site>,
@@ -546,10 +547,12 @@ impl State {
             PredictionsMsg::PredictionsReady(key, predictions) => {
                 log::debug!("Using {} satellite predictions", predictions.n_satellites());
                 self.prediction_cache.store(key, predictions);
+                self.refresh_doppler_options(app);
                 Task::none()
             }
             PredictionsMsg::SetDopplerTarget(target) => {
                 self.doppler_target = target;
+                self.refresh_doppler_options(app);
                 self.check_doppler_cache(app)
             }
             PredictionsMsg::DopplerReady(key, correction) => {
@@ -786,7 +789,7 @@ impl Window<Message> for RFPlot {
             .into();
         }
 
-        let controls = toolbar::view(&self.state, app).map(Message::from);
+        let controls = toolbar::view(&self.state).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)

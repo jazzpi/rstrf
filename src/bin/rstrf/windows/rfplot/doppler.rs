@@ -4,7 +4,7 @@ use std::{ops::Range, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use glam::{Vec2, vec2};
-use iced::Task;
+use iced::{Task, widget::combo_box};
 use ndarray::Array1;
 use rstrf::{
     orbit::{self, Satellite, Site},
@@ -235,27 +235,27 @@ impl State {
         })
     }
 
-    pub(super) fn doppler_options(&self, app: &AppShared) -> Vec<DopplerOption> {
+    /// Rebuilds the target combo box. Its options are stored rather than built in `view()`, so
+    /// this must be called whenever the predictions or the target change.
+    pub(super) fn refresh_doppler_options(&mut self, app: &AppShared) {
         let predictions = self.prediction_cache.get_stored().map(|(_, p)| p);
         let band = self.spectrogram().map(|s| {
             let band = s.absolute_bounds().freq_range;
             band.start as f64..band.end as f64
         });
-        doppler_options(
+        let options = doppler_options(
             self.doppler_target.as_ref(),
             predictions.zip(band),
             &app.satellites,
-        )
+        );
+        self.doppler_options = combo_box::State::new(options);
     }
 
-    pub(super) fn selected_doppler_option(
-        &self,
-        options: &[DopplerOption],
-    ) -> Option<DopplerOption> {
-        options
+    pub(super) fn selected_doppler_option(&self) -> Option<&DopplerOption> {
+        self.doppler_options
+            .options()
             .iter()
             .find(|o| o.target == self.doppler_target)
-            .cloned()
     }
 
     fn doppler_key(&self, app: &AppShared) -> Option<(DopplerKey, Satellite)> {
