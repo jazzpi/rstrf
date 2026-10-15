@@ -3,14 +3,15 @@
 use iced::{
     Element, Length,
     alignment::Vertical,
-    widget::{self, Row, slider, text},
+    widget::{self, Row, pick_list, slider, text},
 };
 use rstrf::{colormap::Colormap, coord::DataNormalizedToDataAbsolute};
 use strum::IntoEnumIterator;
 
 use crate::{
+    app::AppShared,
     widgets::{Icon, ToolbarButton, toolbar},
-    windows::rfplot::{self, DisplayMsg, MarksMsg, ViewMsg},
+    windows::rfplot::{self, DisplayMsg, MarksMsg, PredictionsMsg, ViewMsg},
 };
 
 const ZOOM_MIN: f32 = 0.0;
@@ -35,7 +36,7 @@ fn control<'a>(
     .align_y(Vertical::Center)
 }
 
-pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
+pub fn view<'a>(state: &'a super::State, app: &AppShared) -> Element<'a, rfplot::Message> {
     let marks_editable = state.doppler_correction().is_none();
     let colormaps = Colormap::iter()
         .map(|c| ToolbarButton::LabeledIcon {
@@ -143,7 +144,16 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
             submenu: colormaps,
         },
     ]);
-    let mut result = widget::column![buttons].spacing(8);
+    let doppler_options = state.doppler_options(app);
+    let selected = state.selected_doppler_option(&doppler_options);
+    let doppler_target = pick_list(doppler_options, selected, |o| {
+        PredictionsMsg::SetDopplerTarget(o.target).into()
+    })
+    .placeholder("Doppler target");
+    let top_row = widget::row![buttons, doppler_target]
+        .spacing(8)
+        .align_y(Vertical::Center);
+    let mut result = widget::column![top_row].spacing(8);
     if state.display.show_controls
         && let Some(spectrogram) = &state.spectrogram()
     {

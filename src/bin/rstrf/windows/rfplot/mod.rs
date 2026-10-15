@@ -175,6 +175,7 @@ pub enum PredictionsMsg {
     /// Force a prediction cache check without any other side effects.
     RefreshCache,
     PredictionsReady(predictions::PredictionKey, orbit::Predictions),
+    SetDopplerTarget(Option<DopplerTarget>),
     DopplerReady(doppler::DopplerKey, doppler::DopplerCorrection),
     PredictionFailed,
 }
@@ -547,6 +548,10 @@ impl State {
                 self.prediction_cache.store(key, predictions);
                 Task::none()
             }
+            PredictionsMsg::SetDopplerTarget(target) => {
+                self.doppler_target = target;
+                self.check_doppler_cache(app)
+            }
             PredictionsMsg::DopplerReady(key, correction) => {
                 let (lo, hi) = correction.extent_y();
                 log::debug!("Doppler correction ready, y extent {lo}..{hi}");
@@ -781,7 +786,7 @@ impl Window<Message> for RFPlot {
             .into();
         }
 
-        let controls = toolbar::view(&self.state).map(Message::from);
+        let controls = toolbar::view(&self.state, app).map(Message::from);
 
         let spectrogram: Element<'_, Message> = container(
             widget::shader(self)

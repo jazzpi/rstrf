@@ -24,6 +24,36 @@ pub struct DopplerTarget {
     pub freq: Option<f64>,
 }
 
+/// An entry in the Doppler target pick list; `None` turns correction off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DopplerOption {
+    pub target: Option<DopplerTarget>,
+    label: String,
+}
+
+impl DopplerOption {
+    const OFF: &str = "No Doppler correction";
+
+    fn new(target: DopplerTarget, name: Option<&str>) -> Self {
+        let name = name.map(|n| format!(" {n}")).unwrap_or_default();
+        let freq = match target.freq {
+            Some(freq) => format!("{:.3} MHz", freq / 1e6),
+            None => "first transmitter".to_owned(),
+        };
+        let label = format!("{}{} @ {}", target.norad_id, name, freq);
+        Self {
+            target: Some(target),
+            label,
+        }
+    }
+}
+
+impl std::fmt::Display for DopplerOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DopplerKey {
     norad_id: u64,
@@ -113,6 +143,60 @@ fn resolve_freq(target: &DopplerTarget, sat: &Satellite) -> Option<f64> {
     }
 }
 
+/// Pick list entries: "off", one per transmitter with a predicted pass inside the band, and the
+/// current target if it isn't among those.
+fn doppler_options(
+    current: Option<&DopplerTarget>,
+    predictions_in_band: Option<(&orbit::Predictions, Range<f64>)>,
+    satellites: &[(Satellite, bool)],
+) -> Vec<DopplerOption> {
+    let find_sat = |norad_id| satellites.iter().find(|(s, _)| s.norad_id() == norad_id);
+    let mut targets = Vec::new();
+    if let Some((predictions, band)) = predictions_in_band {
+        for (norad_id, passes) in predictions.iter_satellites() {
+            let Some((sat, _)) = find_sat(norad_id) else {
+                continue;
+            };
+            for (i, &freq) in sat.transmitters.iter().enumerate() {
+                let in_band = passes.iter().any(|pass| {
+                    pass.frequencies
+                        .get(i)
+                        .is_some_and(|f| f.iter().any(|f| band.contains(f)))
+                });
+                if in_band {
+                    let target = DopplerTarget {
+                        norad_id,
+                        freq: Some(freq),
+                    };
+                    targets.push((target, sat.elements.object_name.as_deref()));
+                }
+            }
+        }
+    }
+    targets.sort_by(|(a, _), (b, _)| {
+        (a.norad_id, a.freq)
+            .partial_cmp(&(b.norad_id, b.freq))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut options = vec![DopplerOption {
+        target: None,
+        label: DopplerOption::OFF.to_owned(),
+    }];
+    if let Some(current) = current
+        && !targets.iter().any(|(t, _)| t == current)
+    {
+        let name = find_sat(current.norad_id).and_then(|(s, _)| s.elements.object_name.as_deref());
+        options.push(DopplerOption::new(current.clone(), name));
+    }
+    options.extend(
+        targets
+            .into_iter()
+            .map(|(t, name)| DopplerOption::new(t, name)),
+    );
+    options
+}
+
 impl State {
     /// The Doppler correction to apply, if one is requested and has been computed for the current
     /// spectrogram.
@@ -149,6 +233,29 @@ impl State {
                 }
             })
         })
+    }
+
+    pub(super) fn doppler_options(&self, app: &AppShared) -> Vec<DopplerOption> {
+        let predictions = self.prediction_cache.get_stored().map(|(_, p)| p);
+        let band = self.spectrogram().map(|s| {
+            let band = s.absolute_bounds().freq_range;
+            band.start as f64..band.end as f64
+        });
+        doppler_options(
+            self.doppler_target.as_ref(),
+            predictions.zip(band),
+            &app.satellites,
+        )
+    }
+
+    pub(super) fn selected_doppler_option(
+        &self,
+        options: &[DopplerOption],
+    ) -> Option<DopplerOption> {
+        options
+            .iter()
+            .find(|o| o.target == self.doppler_target)
+            .cloned()
     }
 
     fn doppler_key(&self, app: &AppShared) -> Option<(DopplerKey, Satellite)> {
@@ -189,10 +296,14 @@ mod tests {
     const TX_FREQ: f64 = 437.525e6;
 
     fn iss() -> Satellite {
+        iss_with_transmitters(vec![TX_FREQ])
+    }
+
+    fn iss_with_transmitters(transmitters: Vec<f64>) -> Satellite {
         // ISS TLE from Wikipedia (epoch 2008-09-20)
         let line1 = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
         let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
-        let freqs = HashMap::from([(25544u64, vec![TX_FREQ])]);
+        let freqs = HashMap::from([(25544u64, transmitters)]);
         Satellite::from_tle(Some("ISS (ZARYA)".to_string()), line1, line2, &freqs).unwrap()
     }
 
@@ -279,5 +390,42 @@ mod tests {
         }
         let (lo, hi) = correction.extent_y();
         assert!(lo < 0.0 && hi > 1.0, "{lo}..{hi}");
+    }
+
+    #[test]
+    fn options_list_in_band_transmitters_and_current_target() {
+        let sat = iss_with_transmitters(vec![145.8e6, TX_FREQ]);
+        let spectrogram = spectrogram();
+        let bounds = spectrogram.absolute_bounds();
+        let band = bounds.freq_range.start as f64..bounds.freq_range.end as f64;
+        let predictions = orbit::predict_satellites(
+            std::slice::from_ref(&sat),
+            bounds.time_range,
+            band.clone(),
+            &Site::default(),
+        );
+        let satellites = [(sat, true)];
+        let targets = |current: Option<&DopplerTarget>| {
+            doppler_options(current, Some((&predictions, band.clone())), &satellites)
+                .into_iter()
+                .map(|o| o.target)
+                .collect::<Vec<_>>()
+        };
+        let in_band = DopplerTarget {
+            norad_id: 25544,
+            freq: Some(TX_FREQ),
+        };
+
+        assert_eq!(targets(None), [None, Some(in_band.clone())]);
+        assert_eq!(targets(Some(&in_band)), [None, Some(in_band.clone())]);
+
+        let from_cli = DopplerTarget {
+            norad_id: 25544,
+            freq: None,
+        };
+        assert_eq!(
+            targets(Some(&from_cli)),
+            [None, Some(from_cli), Some(in_band)]
+        );
     }
 }
