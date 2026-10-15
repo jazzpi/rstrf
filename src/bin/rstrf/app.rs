@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::pass_png::{self, PassPngMode};
-use crate::windows::rfplot::{InitialView, RFPlot};
+use crate::windows::rfplot::{DopplerTarget, InitialView, RFPlot};
 use crate::windows::sat_manager::SatManager;
 use crate::windows::{self, AnyWindow, WindowEffect};
 use crate::{CliArgs, Command, PassPngArgs, PlotArgs};
@@ -328,6 +328,10 @@ impl AppModel {
                     tmax: args.tmax,
                     zmin: args.zmin,
                     zmax: args.zmax,
+                    doppler: args.doppler_id.map(|norad_id| DopplerTarget {
+                        norad_id,
+                        freq: args.doppler_freq,
+                    }),
                 };
                 let rfplot_task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
                 if self.shared_state.config.follow_strf_site {
@@ -345,6 +349,7 @@ impl AppModel {
                     tmax: None,
                     zmin: args.zmin,
                     zmax: args.zmax,
+                    doppler: None,
                 };
                 let task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
                 self.pass_png = Some(PassPngMode::new(id, *args));

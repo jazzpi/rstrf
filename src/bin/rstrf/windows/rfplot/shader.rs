@@ -1109,7 +1109,10 @@ impl shader::Program<Message> for RFPlot {
             colormap: self.state.display.colormap,
             average_plotting: self.state.display.average_plotting,
             spectrogram: self.state.spectrogram().cloned(),
-            y_ranges: None,
+            y_ranges: self
+                .state
+                .doppler_correction()
+                .map(|correction| correction.y_ranges.clone()),
             gpu_notify: self.gpu_notify.clone(),
         }
     }

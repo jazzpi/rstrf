@@ -75,6 +75,13 @@ pub struct PlotArgs {
     /// preferences.
     #[arg(short = 'C', long, value_name = "SITE_ID")]
     pub site_id: Option<i32>,
+    /// Doppler-correct the plot for this satellite
+    #[arg(long, value_name = "NORAD_ID")]
+    pub doppler_id: Option<u64>,
+    /// Transmitter frequency (Hz) to Doppler-correct for. Defaults to the satellite's first
+    /// transmitter.
+    #[arg(long, value_name = "FREQ", requires = "doppler_id")]
+    pub doppler_freq: Option<f64>,
 }
 
 #[derive(Args, Debug, Clone)]

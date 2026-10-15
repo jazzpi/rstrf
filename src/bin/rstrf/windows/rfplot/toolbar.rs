@@ -36,6 +36,7 @@ fn control<'a>(
 }
 
 pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
+    let marks_editable = state.doppler_correction().is_none();
     let colormaps = Colormap::iter()
         .map(|c| ToolbarButton::LabeledIcon {
             icon: Icon::Colormap(c),
@@ -93,21 +94,21 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
             icon: Icon::MarkTrackpoint,
             tooltip: "Mark track points",
             msg: MarksMsg::MarkTrackpoints.into(),
-            enabled: true,
+            enabled: marks_editable,
             style: widget::button::primary,
         },
         ToolbarButton::Icon {
             icon: Icon::MarkSignal,
             tooltip: "Mark signals",
             msg: MarksMsg::MarkSignals.into(),
-            enabled: true,
+            enabled: marks_editable,
             style: widget::button::primary,
         },
         ToolbarButton::Icon {
             icon: Icon::Delete,
             tooltip: "Clear signals & track points",
             msg: MarksMsg::ClearAll.into(),
-            enabled: true,
+            enabled: marks_editable,
             style: widget::button::primary,
         },
         ToolbarButton::Icon {

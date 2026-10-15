@@ -198,8 +198,12 @@ impl State {
             }
         }
 
+        let doppler = self.doppler_correction();
+        // Predictions on a different time grid than the correction are stale and about to be
+        // replaced
         if self.display.show_predictions
             && let Some((_, predictions)) = self.prediction_cache.get_stored()
+            && doppler.is_none_or(|d| d.pred_shift_hz.len() == predictions.times.len())
         {
             let time = &predictions.times;
             for prediction in predictions.iter_satellites() {
@@ -208,9 +212,14 @@ impl State {
                 log::trace!("Plotting {} passes for satellite {}", passes.len(), id);
                 for pass in passes {
                     let time = time.slice(s![pass.time_range.clone()]);
+                    let shift = doppler.map(|d| d.pred_shift_hz.slice(s![pass.time_range.clone()]));
                     // First, check only x to find possibly visible time frames
                     let visible_x = time.iter().map(|&t| x.contains(&(t as f32))).collect_vec();
                     for freq in pass.frequencies.iter() {
+                        let freq = match &shift {
+                            Some(shift) => freq - shift,
+                            None => freq.clone(),
+                        };
                         let first_visible =
                             izip!(visible_x.iter(), freq.iter()).position(|(&visible, &f)| {
                                 visible && y.contains(&(f as f32 - spectrogram.freq))
@@ -249,59 +258,68 @@ impl State {
             }
         }
 
-        chart
-            .draw_series(self.marks.track_points().iter().filter_map(|pos| {
-                if bounds.contains(*pos) {
-                    Some(Circle::new(pos.into(), 5, YELLOW.filled()))
-                } else {
-                    None
-                }
-            }))
-            .map_err(|e| format!("Could not draw track points: {:?}", e))?;
-        chart
-            .draw_series(LineSeries::new(
-                clamp_line_to_plot(
-                    &bounds,
-                    self.marks.track_points().iter().map(|pos| {
-                        data_absolute::Point::new(pos.0.x, pos.0.y + self.detection.track_bw / 2.0)
-                    }),
-                )
-                .map(|v| v.into()),
-                &YELLOW,
-            ))
-            .map_err(|e| {
-                format!(
-                    "Could not draw lines connecting track points (above): {:?}",
-                    e
-                )
-            })?;
-        chart
-            .draw_series(LineSeries::new(
-                clamp_line_to_plot(
-                    &bounds,
-                    self.marks.track_points().iter().map(|pos| {
-                        data_absolute::Point::new(pos.0.x, pos.0.y - self.detection.track_bw / 2.0)
-                    }),
-                )
-                .map(|v| v.into()),
-                &YELLOW,
-            ))
-            .map_err(|e| {
-                format!(
-                    "Could not draw lines connecting track points (below): {:?}",
-                    e
-                )
-            })?;
+        // Marks are at observed frequencies, which a Doppler-corrected plot doesn't show
+        if doppler.is_none() {
+            chart
+                .draw_series(self.marks.track_points().iter().filter_map(|pos| {
+                    if bounds.contains(*pos) {
+                        Some(Circle::new(pos.into(), 5, YELLOW.filled()))
+                    } else {
+                        None
+                    }
+                }))
+                .map_err(|e| format!("Could not draw track points: {:?}", e))?;
+            chart
+                .draw_series(LineSeries::new(
+                    clamp_line_to_plot(
+                        &bounds,
+                        self.marks.track_points().iter().map(|pos| {
+                            data_absolute::Point::new(
+                                pos.0.x,
+                                pos.0.y + self.detection.track_bw / 2.0,
+                            )
+                        }),
+                    )
+                    .map(|v| v.into()),
+                    &YELLOW,
+                ))
+                .map_err(|e| {
+                    format!(
+                        "Could not draw lines connecting track points (above): {:?}",
+                        e
+                    )
+                })?;
+            chart
+                .draw_series(LineSeries::new(
+                    clamp_line_to_plot(
+                        &bounds,
+                        self.marks.track_points().iter().map(|pos| {
+                            data_absolute::Point::new(
+                                pos.0.x,
+                                pos.0.y - self.detection.track_bw / 2.0,
+                            )
+                        }),
+                    )
+                    .map(|v| v.into()),
+                    &YELLOW,
+                ))
+                .map_err(|e| {
+                    format!(
+                        "Could not draw lines connecting track points (below): {:?}",
+                        e
+                    )
+                })?;
 
-        chart
-            .draw_series(self.marks.signals().iter().filter_map(|pos| {
-                if bounds.contains(*pos) {
-                    Some(Circle::new(pos.into(), 5, WHITE.filled()))
-                } else {
-                    None
-                }
-            }))
-            .map_err(|e| format!("Could not draw track points: {:?}", e))?;
+            chart
+                .draw_series(self.marks.signals().iter().filter_map(|pos| {
+                    if bounds.contains(*pos) {
+                        Some(Circle::new(pos.into(), 5, WHITE.filled()))
+                    } else {
+                        None
+                    }
+                }))
+                .map_err(|e| format!("Could not draw track points: {:?}", e))?;
+        }
         if self.display.show_crosshair
             && let Some(crosshair) = &self.interaction.crosshair.get()
             && bounds.contains(*crosshair)

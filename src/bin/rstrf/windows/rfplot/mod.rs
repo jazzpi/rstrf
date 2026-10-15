@@ -29,6 +29,7 @@ use crate::{
 };
 
 mod chart;
+mod doppler;
 mod interaction;
 mod marks;
 mod predictions;
@@ -37,6 +38,7 @@ mod toolbar;
 mod viewport;
 
 use chart::PlotChart;
+pub use doppler::DopplerTarget;
 use interaction::{Interaction, MouseState, RectAction};
 use marks::{MarkAction, Marks, signals_filename};
 use viewport::Viewport;
@@ -173,6 +175,7 @@ pub enum PredictionsMsg {
     /// Force a prediction cache check without any other side effects.
     RefreshCache,
     PredictionsReady(predictions::PredictionKey, orbit::Predictions),
+    DopplerReady(doppler::DopplerKey, doppler::DopplerCorrection),
     PredictionFailed,
 }
 
@@ -304,6 +307,9 @@ pub(crate) struct State {
     pub marks: Marks,
     pub interaction: Interaction,
     pub prediction_cache: AsyncCache<predictions::PredictionKey, orbit::Predictions>,
+    /// Satellite to Doppler-correct the plot for
+    pub doppler_target: Option<DopplerTarget>,
+    pub doppler_cache: AsyncCache<doppler::DopplerKey, doppler::DopplerCorrection>,
     /// Site override for predictions. Do not use directly; use [`State::site()`] instead.
     site: Option<Site>,
 }
@@ -334,7 +340,11 @@ impl State {
         self.spectrogram_files = paths;
         self.marks.clear();
         self.interaction.crosshair.set(None);
-        self.check_cache(app)
+        self.check_caches(app)
+    }
+
+    fn check_caches(&mut self, app: &AppShared) -> Task<Message> {
+        Task::batch([self.check_cache(app), self.check_doppler_cache(app)])
     }
 
     pub fn update_view(&mut self, message: ViewMsg) {
@@ -369,6 +379,24 @@ impl State {
     }
 
     pub fn update_marks(&mut self, message: MarksMsg, app: &AppShared) -> Task<Message> {
+        // Marks are stored at observed frequencies, which the corrected plot doesn't show, so they
+        // are hidden and can't be edited while correction is on.
+        let edits_marks = matches!(
+            message,
+            MarksMsg::MarkTrackpoints
+                | MarksMsg::MarkSignals
+                | MarksMsg::AddTrackPoint(_)
+                | MarksMsg::AddSignal(_)
+                | MarksMsg::DeleteMark(..)
+                | MarksMsg::DeleteInRect(_)
+                | MarksMsg::MarkCentroid(_)
+                | MarksMsg::ClearAll
+                | MarksMsg::FindSignals
+        );
+        if edits_marks && self.doppler_correction().is_some() {
+            log::debug!("Ignoring {message:?} while Doppler correction is on");
+            return Task::none();
+        }
         match message {
             MarksMsg::MarkTrackpoints => {
                 self.interaction
@@ -511,11 +539,21 @@ impl State {
         match message {
             PredictionsMsg::RefreshCache => {
                 self.prediction_cache.reset();
-                self.check_cache(app)
+                self.doppler_cache.reset();
+                self.check_caches(app)
             }
             PredictionsMsg::PredictionsReady(key, predictions) => {
                 log::debug!("Using {} satellite predictions", predictions.n_satellites());
                 self.prediction_cache.store(key, predictions);
+                Task::none()
+            }
+            PredictionsMsg::DopplerReady(key, correction) => {
+                let (lo, hi) = correction.extent_y();
+                log::debug!("Doppler correction ready, y extent {lo}..{hi}");
+                self.doppler_cache.store(key, correction);
+                if self.doppler_correction().is_some() {
+                    self.viewport.set_extent_y(lo, hi);
+                }
                 Task::none()
             }
             PredictionsMsg::PredictionFailed => {
@@ -536,6 +574,7 @@ pub struct InitialView {
     pub tmax: Option<f64>,
     pub zmin: Option<f32>,
     pub zmax: Option<f32>,
+    pub doppler: Option<DopplerTarget>,
 }
 
 #[derive(Default, Clone, PartialEq)]
@@ -615,6 +654,7 @@ impl RFPlot {
     pub fn with_initial_view(files: Vec<PathBuf>, view: InitialView) -> Self {
         let mut rfplot = Self::new();
         rfplot.state.spectrogram_files = files;
+        rfplot.state.doppler_target = view.doppler.clone();
         rfplot.initial_view = Some(Box::new(view));
         rfplot
     }
