@@ -166,6 +166,7 @@ impl PassPngMode {
                     .unwrap_or(std::path::Path::new("."))
                     .to_owned();
 
+                let doppler = self.args.doppler;
                 let queue = passes
                     .iter()
                     .enumerate()
@@ -192,6 +193,14 @@ impl PassPngMode {
 
                                 let freq_margin = (f_hi - f_lo) * 0.25;
 
+                                // Corrected, the target sits at its transmitter frequency for the
+                                // whole pass
+                                let (f_lo, f_hi) = if doppler {
+                                    let half_span = (f_hi - f_lo) / 2.0;
+                                    (tx_freq - half_span, tx_freq + half_span)
+                                } else {
+                                    (f_lo, f_hi)
+                                };
                                 let f_min = (f_lo as f32 - center_freq) - freq_margin as f32;
                                 let f_max = (f_hi as f32 - center_freq) + freq_margin as f32;
 

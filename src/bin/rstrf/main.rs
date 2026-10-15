@@ -114,6 +114,9 @@ pub struct PassPngArgs {
     /// Output path prefix; files are named <prefix>_000.png, <prefix>_001.png, ...
     #[arg(short = 'o', long)]
     pub output: std::path::PathBuf,
+    /// Doppler-correct the plot for the satellite's first transmitter
+    #[arg(long)]
+    pub doppler: bool,
 }
 
 fn main() -> iced::Result {

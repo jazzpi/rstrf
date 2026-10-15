@@ -349,7 +349,10 @@ impl AppModel {
                     tmax: None,
                     zmin: args.zmin,
                     zmax: args.zmax,
-                    doppler: None,
+                    doppler: args.doppler.then(|| DopplerTarget {
+                        norad_id: args.norad_id,
+                        freq: args.freq.first().copied(),
+                    }),
                 };
                 let task = self.open_rfplot_with(id, args.spectrograms.clone(), view);
                 self.pass_png = Some(PassPngMode::new(id, *args));
