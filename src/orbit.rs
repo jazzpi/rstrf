@@ -208,6 +208,12 @@ const RADIUS_EARTH: f64 = 6378.137; // km
 const SPEED_OF_LIGHT: f64 = 299792.458; // km/s
 const MAX_RANGE_RATE: f64 = 8.0; // km/s
 
+/// Doppler shift (Hz) of a transmitter at `tx_freq` (Hz) observed with range rate `range_rate`
+/// (km/s, positive when receding).
+pub fn doppler_shift(range_rate: f64, tx_freq: f64) -> f64 {
+    -range_rate / SPEED_OF_LIGHT * tx_freq
+}
+
 #[derive(Debug, Clone)]
 pub struct Satellite {
     pub elements: sgp4::Elements,
@@ -248,27 +254,35 @@ impl Satellite {
         Ok(prediction)
     }
 
-    pub fn predict_passes(
+    /// Range rate (km/s) of the satellite relative to `site` at each of `times` (seconds after
+    /// `start`), regardless of whether the satellite is above the horizon.
+    pub fn range_rates(
         &self,
         start: DateTime<Utc>,
         times: ArrayView1<f64>,
         site: &Site,
-    ) -> Vec<PassPrediction> {
-        if self.transmitters.is_empty() {
-            log::warn!(
-                "Predicting pass for {} which has no transmitters",
-                self.norad_id()
-            );
-        }
-
+    ) -> Array1<f64> {
         let n = times.len();
         let mut range_rates = Array1::zeros(n);
         let mut angles = Array1::zeros(n);
+        self.look_angles(start, times, site, &mut range_rates, &mut angles);
+        range_rates
+    }
+
+    /// Fills in range rate (km/s) and zenith angle (radians) at each of `times`, or NaN where SGP4
+    /// fails.
+    fn look_angles(
+        &self,
+        start: DateTime<Utc>,
+        times: ArrayView1<f64>,
+        site: &Site,
+        range_rates: &mut Array1<f64>,
+        angles: &mut Array1<f64>,
+    ) {
         let mut warned = false;
-        let below_horizon = |angle: f64| angle.is_nan() || angle > std::f64::consts::FRAC_PI_2;
         Zip::from(&times)
-            .and(&mut range_rates)
-            .and(&mut angles)
+            .and(range_rates)
+            .and(angles)
             .for_each(|&t, rr, angle| {
                 let t = (start + sec_to_duration(t)).naive_utc();
                 let prediction = match self.predict(&t) {
@@ -293,13 +307,29 @@ impl Satellite {
                 let delta_pos = arr1(&prediction.position) - &site_pos;
                 let range = delta_pos.dot(&delta_pos).sqrt();
                 *angle = (delta_pos.dot(&site_pos) / (range * RADIUS_EARTH)).acos();
-                if below_horizon(*angle) {
-                    return;
-                }
-
                 let delta_vel = arr1(&prediction.velocity) - arr1(&site_prediction.velocity);
                 *rr = delta_pos.dot(&delta_vel) / range;
             });
+    }
+
+    pub fn predict_passes(
+        &self,
+        start: DateTime<Utc>,
+        times: ArrayView1<f64>,
+        site: &Site,
+    ) -> Vec<PassPrediction> {
+        if self.transmitters.is_empty() {
+            log::warn!(
+                "Predicting pass for {} which has no transmitters",
+                self.norad_id()
+            );
+        }
+
+        let n = times.len();
+        let mut range_rates = Array1::zeros(n);
+        let mut angles = Array1::zeros(n);
+        self.look_angles(start, times, site, &mut range_rates, &mut angles);
+        let below_horizon = |angle: f64| angle.is_nan() || angle > std::f64::consts::FRAC_PI_2;
         let passes = pred_ranges(&angles, |a| !below_horizon(a));
         passes
             .iter()
@@ -311,7 +341,7 @@ impl Satellite {
                     .map(|&tx_freq| {
                         range_rates
                             .slice(s![time_range.clone()])
-                            .mapv(|rr| (1.0 - rr / SPEED_OF_LIGHT) * tx_freq)
+                            .mapv(|rr| tx_freq + doppler_shift(rr, tx_freq))
                     })
                     .collect(),
                 za: angles.slice(s![time_range.clone()]).to_owned(),
@@ -416,17 +446,23 @@ pub fn gmst_deriv_days(time: &NaiveDateTime) -> f64 {
         - 3.0 * (2.6e-8_f64).to_radians() * t_0 * t_0
 }
 
+/// The sample times (seconds after `time_range.start`, roughly 1 s apart) used by
+/// [`predict_satellites`].
+pub fn prediction_times(time_range: &std::ops::Range<DateTime<Utc>>) -> Array1<f64> {
+    let length_s = time_range
+        .end
+        .signed_duration_since(time_range.start)
+        .as_seconds_f64();
+    Array1::linspace(0.0, length_s, length_s.round() as usize)
+}
+
 pub fn predict_satellites(
     satellites: &[Satellite],
     time_range: std::ops::Range<DateTime<Utc>>,
     freq_range: std::ops::Range<f64>,
     site: &Site,
 ) -> Predictions {
-    let length_s = time_range
-        .end
-        .signed_duration_since(time_range.start)
-        .as_seconds_f64();
-    let times = ndarray::Array1::linspace(0.0, length_s, length_s.round() as usize);
+    let times = prediction_times(&time_range);
     // TODO: Parallelize predictions?
     let passes = satellites
         .par_iter()
@@ -655,6 +691,32 @@ mod tests {
                 w[0].time_range,
                 w[1].time_range
             );
+        }
+    }
+
+    #[test]
+    fn range_rates_match_pass_frequencies() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        let tx_freq = 437.525e6;
+        let freqs = HashMap::from([(25544u64, vec![tx_freq])]);
+        let sat =
+            Satellite::from_tle(Some("ISS (ZARYA)".to_string()), line1, line2, &freqs).unwrap();
+        let site = Site::default();
+        use chrono::TimeZone;
+        let start = Utc.with_ymd_and_hms(2008, 9, 20, 12, 25, 40).unwrap();
+        let times = Array1::linspace(0.0, 86400.0, 86401);
+
+        let passes = sat.predict_passes(start, times.view(), &site);
+        assert!(!passes.is_empty());
+        let range_rates = sat.range_rates(start, times.view(), &site);
+        assert!(range_rates.iter().all(|rr| rr.is_finite()));
+        for pass in &passes {
+            let expected = &pass.frequencies[0];
+            let actual = range_rates
+                .slice(s![pass.time_range.clone()])
+                .mapv(|rr| tx_freq + doppler_shift(rr, tx_freq));
+            assert_eq!(actual, expected);
         }
     }
 
