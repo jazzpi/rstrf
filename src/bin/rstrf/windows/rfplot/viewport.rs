@@ -14,14 +14,20 @@ const ZOOM_WHEEL_SCALE: f32 = 0.2;
 
 /// The visible region of the spectrogram, in data-normalized (unit-square) coordinates.
 ///
-/// Every mutator clamps zoom to `[0, zoom_max]` and snaps the resulting view back inside
-/// `[0, 1]` on both axes before returning, so `bounds()` never needs to be checked by callers.
+/// Every mutator clamps zoom to `[0, zoom_max]` and snaps the resulting view back inside the
+/// extent (`[0, 1]` on x, `extent_y` on y) before returning, so `bounds()` never needs to be
+/// checked by callers. Zoom 0 shows the whole extent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewport {
     /// Per-axis zoom ceiling
     zoom_max: Vec2,
     log_scale: Vec2,
     center: data_normalized::Point,
+    /// Total time (s) and bandwidth (Hz) spanned by data-normalized `[0, 1]`
+    data_span: Vec2,
+    /// Lower and upper edge of the pannable range on the y axis. Wider than `[0, 1]` when the
+    /// slices are shifted (e.g. by Doppler correction).
+    extent_y: Vec2,
 }
 
 impl Viewport {
@@ -70,7 +76,7 @@ impl Viewport {
 
     pub fn reset(&mut self) {
         self.log_scale = Vec2::new(ZOOM_MIN, ZOOM_MIN);
-        self.center = data_normalized::Point::new(0.5, 0.5);
+        self.center = data_normalized::Point::new(0.5, self.extent_y.element_sum() / 2.0);
     }
 
     /// Set the view to show `rect`, clamping zoom to the allowed range.
@@ -93,9 +99,30 @@ impl Viewport {
     }
 
     pub fn set_data_bounds(&mut self, total_time_s: f32, total_bw_hz: f32) {
+        self.data_span = Vec2::new(total_time_s, total_bw_hz);
+        self.update_zoom_max();
+    }
+
+    /// Set the pannable y range in data-normalized coordinates. Must contain `[0, 1]`.
+    pub fn set_extent_y(&mut self, lo: f32, hi: f32) {
+        let was_zoomed_out = self.log_scale.y <= ZOOM_MIN;
+        self.extent_y = Vec2::new(lo.min(0.0), hi.max(1.0));
+        if was_zoomed_out {
+            self.center.0.y = self.extent_y.element_sum() / 2.0;
+        }
+        self.update_zoom_max();
+    }
+
+    fn extent_height(&self) -> f32 {
+        self.extent_y.y - self.extent_y.x
+    }
+
+    fn update_zoom_max(&mut self) {
         self.zoom_max = Vec2::new(
-            (total_time_s / MIN_TIME_SPAN_S).log2().max(ZOOM_MIN),
-            (total_bw_hz / MIN_FREQ_SPAN_HZ).log2().max(ZOOM_MIN),
+            (self.data_span.x / MIN_TIME_SPAN_S).log2().max(ZOOM_MIN),
+            (self.data_span.y * self.extent_height() / MIN_FREQ_SPAN_HZ)
+                .log2()
+                .max(ZOOM_MIN),
         );
         // Reapply zoom_max
         self.set_scale(self.log_scale);
@@ -109,7 +136,7 @@ impl Viewport {
     pub fn size(&self) -> data_normalized::Size {
         data_normalized::Size::new(
             1.0 / 2.0_f32.powf(self.log_scale.x),
-            1.0 / 2.0_f32.powf(self.log_scale.y),
+            self.extent_height() / 2.0_f32.powf(self.log_scale.y),
         )
     }
 
@@ -136,7 +163,7 @@ impl Viewport {
         self.zoom_max
     }
 
-    /// Ensure that the current view bounds are within [0, 1] in both axes.
+    /// Ensure that the current view bounds are within the extent on both axes.
     fn snap_to_bounds(&mut self) {
         let bounds = self.bounds().0;
         let dx = if bounds.x < 0.0 {
@@ -146,10 +173,11 @@ impl Viewport {
         } else {
             0.0
         };
-        let dy = if bounds.y < 0.0 {
-            -bounds.y
-        } else if bounds.y + bounds.height > 1.0 {
-            1.0 - (bounds.y + bounds.height)
+        let (lo, hi) = self.extent_y.into();
+        let dy = if bounds.y < lo {
+            lo - bounds.y
+        } else if bounds.y + bounds.height > hi {
+            hi - (bounds.y + bounds.height)
         } else {
             0.0
         };
@@ -164,6 +192,11 @@ impl Default for Viewport {
             log_scale: Vec2::new(ZOOM_MIN, ZOOM_MIN),
             center: data_normalized::Point::new(0.5, 0.5),
             zoom_max: Vec2::splat(ZOOM_MAX),
+            data_span: Vec2::new(
+                MIN_TIME_SPAN_S * 2.0_f32.powf(ZOOM_MAX),
+                MIN_FREQ_SPAN_HZ * 2.0_f32.powf(ZOOM_MAX),
+            ),
+            extent_y: Vec2::new(0.0, 1.0),
         }
     }
 }
@@ -264,6 +297,43 @@ mod tests {
         v.pan_by(plot_area::Vector::new(0.0, -10.0));
         v.zoom_y_at(plot_area::Point::new(0.0, 0.0), -1000.0);
         assert_bounds_in_unit_square(v.bounds());
+    }
+
+    #[test]
+    fn extended_y_zoomed_out_shows_whole_extent() {
+        let mut v = Viewport::default();
+        v.set_extent_y(-0.2, 1.1);
+        let b = v.bounds();
+        assert!((b.0.y + 0.2).abs() < 1e-6, "y={}", b.0.y);
+        assert!((b.0.height - 1.3).abs() < 1e-6, "height={}", b.0.height);
+
+        v.set_extent_y(0.0, 1.0);
+        assert_bounds_in_unit_square(v.bounds());
+        assert!((v.size().0.height - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extended_y_pans_into_extent_but_not_past_it() {
+        let mut v = Viewport::default();
+        v.set_extent_y(-0.2, 1.1);
+        v.set_zoom_y(3.0);
+        v.pan_by(plot_area::Vector::new(0.0, -10.0));
+        let b = v.bounds();
+        assert!(
+            (b.0.y + b.0.height - 1.1).abs() < 1e-5,
+            "top={}",
+            b.0.y + b.0.height
+        );
+        v.pan_by(plot_area::Vector::new(0.0, 10.0));
+        assert!((v.bounds().0.y + 0.2).abs() < 1e-5, "y={}", v.bounds().0.y);
+    }
+
+    #[test]
+    fn extent_y_always_contains_unit_range() {
+        let mut v = Viewport::default();
+        v.set_extent_y(0.1, 0.9);
+        assert_bounds_in_unit_square(v.bounds());
+        assert!((v.size().0.height - 1.0).abs() < 1e-6);
     }
 
     #[test]
