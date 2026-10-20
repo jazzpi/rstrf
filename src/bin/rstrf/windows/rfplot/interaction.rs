@@ -253,9 +253,20 @@ impl State {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (Status, Option<super::Message>) {
-        let keyboard::Event::KeyReleased { key, .. } = event else {
+        // Text inputs (e.g. doppler target selection) capture KeyPressed. If we listened to
+        // KeyReleased, we would receive it even when the text input has focus.
+        let keyboard::Event::KeyPressed { key, repeat, .. } = event else {
             return (Status::Ignored, None);
         };
+        let is_arrow = matches!(
+            key,
+            keyboard::Key::Named(
+                Named::ArrowLeft | Named::ArrowRight | Named::ArrowUp | Named::ArrowDown
+            )
+        );
+        if *repeat && !is_arrow {
+            return (Status::Ignored, None);
+        }
         let modifiers = self.interaction.modifiers.get();
 
         // Some keys should work regardless of cursor position...
