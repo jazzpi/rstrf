@@ -1,3 +1,14 @@
+# vNext
+
+## New features
+- **Show site coordinates** used for predictions in the plot window.
+- **Apply doppler correction to the plot**. Select a target satellite in the controls panel, or pass
+  `--doppler-id` on the command line.
+
+## Other changes
+- **Hotkeys are now handled on press, not release**. This means holding down the arrow keys will now
+  pan repeatedly.
+
 # v0.5.1
 
 ## New features
