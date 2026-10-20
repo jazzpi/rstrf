@@ -13,7 +13,7 @@ use rfd::AsyncFileDialog;
 use rstrf::{
     async_cache::AsyncCache,
     colormap::Colormap,
-    coord::{data_absolute, data_normalized, plot_area},
+    coord::{DataAbsoluteToDataNormalized, data_absolute, data_normalized, plot_area},
     menu::MenuItem,
     orbit::{self, Site},
     signal,
@@ -552,6 +552,17 @@ impl State {
             }
             PredictionsMsg::SetDopplerTarget(target) => {
                 self.doppler_target = target;
+                if let Some(ref target) = self.doppler_target
+                    && let Some(freq) = target.freq
+                    && let Some(spec) = self.spectrogram()
+                {
+                    let freq = freq as f32 - spec.freq;
+                    let freq_center = data_absolute::Point::new(0.0, freq);
+                    let mut freq_center =
+                        freq_center * DataAbsoluteToDataNormalized::new(&spec.bounds());
+                    freq_center.0.x = self.viewport.center().0.x;
+                    self.viewport.set_center(freq_center)
+                }
                 self.refresh_doppler_options(app);
                 self.check_doppler_cache(app)
             }

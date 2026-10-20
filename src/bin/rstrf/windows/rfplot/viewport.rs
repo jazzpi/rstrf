@@ -41,6 +41,11 @@ impl Viewport {
         self.snap_to_bounds();
     }
 
+    pub fn set_center(&mut self, center: data_normalized::Point) {
+        self.center = center;
+        self.snap_to_bounds();
+    }
+
     pub fn pan_by(&mut self, delta: plot_area::Vector) {
         self.center -= delta * self.data_normalized();
         self.snap_to_bounds();
@@ -163,6 +168,10 @@ impl Viewport {
         self.zoom_max
     }
 
+    pub fn center(&self) -> data_normalized::Point {
+        self.center
+    }
+
     /// Ensure that the current view bounds are within the extent on both axes.
     fn snap_to_bounds(&mut self) {
         let bounds = self.bounds().0;
@@ -267,6 +276,36 @@ mod tests {
             "top edge={}",
             b.0.y + b.0.height
         );
+    }
+
+    #[test]
+    fn set_center_snaps_back_in_bounds() {
+        let mut v = Viewport::default();
+        v.set_center(data_normalized::Point::new(-10.0, -10.0));
+        assert_bounds_in_unit_square(v.bounds());
+    }
+
+    #[test]
+    fn set_center_sets_center() {
+        let mut v = Viewport::default();
+        v.set_zoom_x(2.0);
+        v.set_zoom_y(2.0);
+        v.set_center(data_normalized::Point::new(0.2, 0.3));
+        assert!((v.center.0.x - 0.2).abs() < 1e-6);
+        assert!((v.center.0.y - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn set_center_leaves_zoom_unchanged() {
+        let mut v = Viewport::default();
+        v.set_zoom_y(1.0);
+        v.set_center(data_normalized::Point::new(0.5, 0.9));
+        assert!(v.log_scale.y == 1.0);
+        // Zoomed to 2^1=2x scale, so view height is 0.5, and the center should be at 0.75
+        assert!(v.center.0 == (0.5, 0.75).into());
+        v.set_center(data_normalized::Point::new(0.5, 1.9));
+        assert!(v.center.0.x == 0.5);
+        assert!((v.center.0.y - 0.75).abs() < 1e-6);
     }
 
     #[test]
