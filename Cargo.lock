@@ -3666,7 +3666,7 @@ dependencies = [
 [[package]]
 name = "plotters-iced2"
 version = "0.14.0"
-source = "git+https://github.com/GyulyVGC/plotters-iced#14527adeb18f5e836180bac2b0e576935d233482"
+source = "git+https://github.com/jazzpi/plotters-iced#ff1d5d6b37b12d4d504570d19c0fc1a527f99b68"
 dependencies = [
  "iced_graphics",
  "iced_widget",
