@@ -198,6 +198,13 @@ fn doppler_options(
 }
 
 impl State {
+    pub(super) fn doppler_status(&self) -> String {
+        let Some((key, _)) = self.doppler_cache.get_stored() else {
+            return "No correction".into();
+        };
+        format!("{} @ {:.3} MHz", key.norad_id, key.freq / 1e6)
+    }
+
     /// The Doppler correction to apply, if one is requested and has been computed for the current
     /// spectrogram.
     pub(super) fn doppler_correction(&self) -> Option<&DopplerCorrection> {

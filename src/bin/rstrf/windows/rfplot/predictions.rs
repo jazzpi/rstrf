@@ -47,16 +47,16 @@ fn prediction_key(state: &State, app: &AppShared) -> Option<PredictionKey> {
 impl State {
     pub(super) fn prediction_status(&self, app: &AppShared) -> String {
         if !self.display.show_predictions {
-            "Predictions disabled".to_owned()
+            "Disabled".to_owned()
         } else if app.satellites.is_empty() {
             "No satellites".to_owned()
         } else if self.prediction_cache.busy() {
-            "Predicting satellite passes...".to_owned()
+            "Predicting passes...".to_owned()
         } else if let Some(site) = self.site(app) {
             if self.prediction_cache.get_stored().is_none() {
                 "No passes predicted".to_owned()
             } else {
-                format!("Predictions for {}", site.coord_string())
+                format!("For {}", site.coord_string())
             }
         } else {
             "No site configured".to_owned()

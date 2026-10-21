@@ -2,8 +2,9 @@ use std::{path::PathBuf, pin::Pin, sync::Arc};
 
 use futures_util::{SinkExt, Stream};
 use iced::{
-    Element, Length, Padding, Rectangle, Size, Subscription, Task,
+    Element, Font, Length, Padding, Rectangle, Size, Subscription, Task,
     alignment::{Horizontal, Vertical},
+    font::Weight,
     widget::{self, button, container, selector},
     window,
 };
@@ -1023,12 +1024,34 @@ fn view_loading_state(plot: &RFPlot) -> Option<Element<'_, WindowOut<Message>>> 
 }
 
 fn view_status_indicator<'a>(plot: &'a RFPlot, app: &'a AppShared) -> Element<'a, Message> {
-    let prediction_status = plot.state.prediction_status(app);
-    let prediction_status: Element<'a, Message> = widget::text(prediction_status).size(12).into();
-    let content = vec![prediction_status];
+    let description = |text: &'a str| -> Element<'a, Message> {
+        widget::text(text)
+            .size(12)
+            .font(Font {
+                weight: Weight::Bold,
+                ..Default::default()
+            })
+            .width(Length::FillPortion(1))
+            .into()
+    };
+    let status = |text: String| -> Element<'a, Message> {
+        widget::text(text)
+            .size(12)
+            .width(Length::FillPortion(2))
+            .into()
+    };
+
+    let prediction_status = widget::row![
+        description("Predictions:"),
+        status(plot.state.prediction_status(app))
+    ];
+    let doppler_status = widget::row![description("Doppler:"), status(plot.state.doppler_status())];
+    let content = widget::column![prediction_status, doppler_status]
+        .width(Length::Fill)
+        .spacing(2);
 
     container(
-        container(widget::Column::from_vec(content))
+        container(content)
             .style(container::secondary)
             .padding(Padding {
                 left: 8.0,
@@ -1037,7 +1060,7 @@ fn view_status_indicator<'a>(plot: &'a RFPlot, app: &'a AppShared) -> Element<'a
                 bottom: 4.0,
             })
             .height(Length::Shrink)
-            .width(Length::Shrink),
+            .width(300),
     )
     .align_x(Horizontal::Left)
     .align_y(Vertical::Bottom)
