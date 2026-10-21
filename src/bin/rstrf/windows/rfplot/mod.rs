@@ -760,103 +760,26 @@ impl Window<Message> for RFPlot {
     }
 
     fn view<'a>(&'a self, app: &'a AppShared) -> Element<'a, WindowOut<Message>> {
-        match &self.loading_state {
-            LoadingState::LoadingFiles { loaded, total } => {
-                return container(widget::text(format!(
-                    "Loading spectrograms... {loaded}/{total}"
-                )))
-                .center(Length::Fill)
-                .into();
-            }
-            LoadingState::GpuUploading => {
-                // The shader must be in the tree so prepare() fires and creates GPU buffers.
-                // The text overlay communicates loading status on top.
-                let shader: Element<'_, Message> = widget::shader(self)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into();
-                let loading_text: Element<'_, Message> =
-                    container(widget::text("Uploading to GPU..."))
-                        .center(Length::Fill)
-                        .into();
-                let stack: Element<'_, Message> = widget::stack![shader, loading_text]
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into();
-                return stack.map(WindowOut::Msg);
-            }
-            LoadingState::Idle => {}
-        }
-
-        // The plot is implemented as a stack of two layers: the spectrogram itself (see
-        // `shader.rs`) and the overlay (see `overlay.rs`).
-        if self.state.spectrogram().is_none() {
-            return container(
-                button("Open Spectrogram")
-                    .style(button::primary)
-                    .on_press(Message::PickSpectrogram.into()),
-            )
-            .center(Length::Fill)
-            .into();
+        if let Some(loading_view) = view_loading_state(self) {
+            return loading_view;
         }
 
         let controls = toolbar::view(&self.state).map(Message::from);
-
-        let spectrogram: Element<'_, Message> = container(
-            widget::shader(self)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .padding(Padding {
-            top: 0.0,
-            right: 0.0,
-            bottom: self.state.plot_area_margin,
-            left: self.state.plot_area_margin,
-        })
-        .into();
-        let plot_overlay: Element<'_, Message> = ChartWidget::new(PlotChart {
-            state: &self.state,
-            app,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into();
-
-        let status = self.state.status(app);
-
-        let mut stack = widget::stack![spectrogram, plot_overlay];
-        if let Some(status) = status {
-            let indicator: Element<'_, Message> = container(
-                container(widget::text(status).size(12))
-                    .style(container::secondary)
-                    .padding(Padding {
-                        left: 8.0,
-                        right: 8.0,
-                        top: 4.0,
-                        bottom: 4.0,
-                    })
-                    .height(Length::Shrink)
-                    .width(Length::Shrink),
-            )
-            .align_x(Horizontal::Left)
-            .align_y(Vertical::Bottom)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
-            stack = stack.push(indicator);
-        }
-        // The padding belongs to the plot container (not the surrounding column) so that cropped
-        // screenshots include it.
-        let plot_area: Element<'_, Message> =
-            container(stack).padding(8).id(self.plot_id.clone()).into();
         let controls: Element<'_, Message> = container(controls)
             .padding(Padding {
                 top: 8.0,
                 right: 8.0,
+                // Leave out bottom padding since the plot below already has top padding
                 bottom: 0.0,
                 left: 8.0,
             })
             .into();
+
+        let plot = view_plot(self, app);
+        // The padding belongs to the plot container (not the surrounding column) so that cropped
+        // screenshots include it.
+        let plot_area: Element<'_, Message> =
+            container(plot).padding(8).id(self.plot_id.clone()).into();
 
         let contents: Element<'_, Message> = widget::column![controls, plot_area]
             .width(Length::Fill)
@@ -1041,6 +964,103 @@ impl Window<Message> for RFPlot {
                 .unwrap_or("Loading...".to_string())
         )
     }
+}
+
+fn view_shader(plot: &RFPlot) -> Element<'_, Message> {
+    container(
+        widget::shader(plot)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .padding(Padding {
+        top: 0.0,
+        right: 0.0,
+        bottom: plot.state.plot_area_margin,
+        left: plot.state.plot_area_margin,
+    })
+    .into()
+}
+
+/// Show a loading message if the plot is loading, or an "Open Spectrogram" button if no spectrogram
+/// is loaded or loading.
+fn view_loading_state(plot: &RFPlot) -> Option<Element<'_, WindowOut<Message>>> {
+    match plot.loading_state {
+        LoadingState::LoadingFiles { loaded, total } => {
+            return Some(
+                container(widget::text(format!(
+                    "Loading spectrograms... {loaded}/{total}"
+                )))
+                .center(Length::Fill)
+                .into(),
+            );
+        }
+        LoadingState::GpuUploading => {
+            let loading_text: Element<'_, Message> = container(widget::text("Uploading to GPU..."))
+                .center(Length::Fill)
+                .into();
+            // The shader must be in the tree so prepare() fires and creates GPU buffers.
+            // The text overlay communicates loading status on top.
+            let stack: Element<'_, Message> = widget::stack![view_shader(plot), loading_text]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+            return Some(stack.map(WindowOut::Msg));
+        }
+        LoadingState::Idle => (),
+    };
+    if plot.state.spectrogram().is_none() {
+        return Some(
+            container(
+                button("Open Spectrogram")
+                    .style(button::primary)
+                    .on_press(Message::PickSpectrogram.into()),
+            )
+            .center(Length::Fill)
+            .into(),
+        );
+    }
+    None
+}
+
+fn view_status_indicator<'a>(plot: &'a RFPlot, app: &'a AppShared) -> Element<'a, Message> {
+    let prediction_status = plot.state.prediction_status(app);
+    let prediction_status: Element<'a, Message> = widget::text(prediction_status).size(12).into();
+    let content = vec![prediction_status];
+
+    container(
+        container(widget::Column::from_vec(content))
+            .style(container::secondary)
+            .padding(Padding {
+                left: 8.0,
+                right: 8.0,
+                top: 4.0,
+                bottom: 4.0,
+            })
+            .height(Length::Shrink)
+            .width(Length::Shrink),
+    )
+    .align_x(Horizontal::Left)
+    .align_y(Vertical::Bottom)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn view_plot<'a>(plot: &'a RFPlot, app: &'a AppShared) -> Element<'a, Message> {
+    // The plot is implemented as a stack of three layers: the spectrogram itself (see `shader.rs`),
+    // the plot overlay (see `overlay.rs`), and the status indicator in the bottom left.
+    let spectrogram = view_shader(plot);
+
+    let plot_overlay = ChartWidget::new(PlotChart {
+        state: &plot.state,
+        app,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill);
+
+    let status = view_status_indicator(plot, app);
+
+    widget::stack![spectrogram, plot_overlay, status].into()
 }
 
 #[cfg(test)]
