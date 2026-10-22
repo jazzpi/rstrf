@@ -220,7 +220,7 @@ impl DataNormalizedToDataRelative {
 
 impl ScreenToDataNormalized {
     pub fn new(size: &screen::Size, bounds: &data_normalized::Rectangle) -> Self {
-        Self(ScreenToPlotArea::new(size).0 * PlotAreaToDataNormalized::new(bounds).0)
+        Self(PlotAreaToDataNormalized::new(bounds).0 * ScreenToPlotArea::new(size).0)
     }
 }
 impl ScreenToDataRelative {
@@ -383,6 +383,20 @@ mod tests {
         let roundtrip = data_pt * backward;
         assert!((roundtrip.0.x - p.0.x).abs() < 0.01, "x={}", roundtrip.0.x);
         assert!((roundtrip.0.y - p.0.y).abs() < 0.01, "y={}", roundtrip.0.y);
+    }
+
+    #[test]
+    fn screen_to_data_normalized_applies_scale_and_translation() {
+        let size = screen_size(800.0, 600.0);
+        let nb = norm_bounds(0.1, 0.2, 0.4, 0.6);
+        let tf = ScreenToDataNormalized::new(&size, &nb);
+        // 1/4 from the left, 1/4 from the top
+        let p = screen::Point::new(200.0, 150.0);
+        let result = p * tf;
+        // 0.1 + 1/4 * 0.4
+        assert!((result.0.x - 0.2).abs() < 1e-4, "x={}", result.0.x);
+        // 0.2 + 0.6 - 1/4 * 0.6
+        assert!((result.0.y - 0.65).abs() < 1e-4, "y={}", result.0.y);
     }
 
     #[test]
