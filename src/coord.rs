@@ -7,7 +7,14 @@ use duplicate::{duplicate, duplicate_item};
 
 use crate::spectrogram::SpectrogramBounds;
 
-#[duplicate_item(name; [screen]; [plot_area]; [data_normalized]; [data_relative])]
+#[duplicate_item(
+    name mod_doc;
+    [screen] ["Pixels in the spectrogram drawing area (i.e. sans axis labels). Origin top-left, y grows downward."];
+    [plot_area] ["Normalized coordinates in the spectrogram drawing area. Origin bottom-left, y grows upward."];
+    [data_normalized] ["Normalized coordinates in the full spectrogram bounds. Origin `(start_time, center_freq - bw/2)`, y increases with frequency."];
+    [data_relative] ["`(sec, Hz)` coordinates. Origin `(start_time, center_freq)`, y increases with frequency."]
+)]
+#[doc = mod_doc]
 pub mod name {
     use duplicate::duplicate_item;
     #[derive(Debug, Clone, Copy, PartialEq)]
