@@ -85,13 +85,13 @@ AppModel
 1. `widget::shader(rfplot)` — wgpu pipeline uploading spectrogram as chunked storage buffers; colormap lookup in fragment shader (`shader.wgsl`)
 2. `ChartWidget` (plotters-iced2) — wraps `PlotChart<'a>` (`chart.rs`), a view-model struct borrowing `&State` and `&AppShared` so the `Chart` trait impl can reach both; its methods delegate to inherent methods on `State` (`build_chart` in `chart.rs`, `handle_mouse`/`handle_keyboard` in `interaction.rs`). Draws axes, grid, Doppler curves coloured by TLE classification, track points (yellow), signal points (white), crosshair readout; supports absolute-axes mode where the y-axis shows raw frequency and grid snaps to absolute-frequency multiples
 
-**Marks (`marks.rs`):** `Marks` owns two `Vec<data_absolute::Point>`. Track points are kept sorted by time — `insert_track_point` is the only way in, and the fields are private to the module so the ordering cannot be broken from outside. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `interaction.rs`.
+**Marks (`marks.rs`):** `Marks` owns two `Vec<data_relative::Point>`. Track points are kept sorted by time — `insert_track_point` is the only way in, and the fields are private to the module so the ordering cannot be broken from outside. Right-clicking the plot deletes the closest mark within `DELETE_TOLERANCE_PX` screen pixels, found via `closest_mark()` in `interaction.rs`.
 
 ## Key Patterns
 
 **`AnyWindow` over `Box<dyn Window>` (`windows/mod.rs`):** Windows are stored as a concrete enum (`AnyWindow`) rather than trait objects. This lets each window define its own message type without boxing or lifting internally — the lift to `windows::Message` is done via `From<WindowOut<M>>` impls, not inside each window.
 
-**Coordinate type safety (`coord.rs`):** The `duplicate` macro generates newtyped point types (`screen::Point`, `plot_area::Point`, `data_normalized::Point`, `data_absolute::Point`) and typed transform structs for all 12 pairwise combinations. Coordinate conversion is `point * transform`. This makes coordinate space errors compile errors.
+**Coordinate type safety (`coord.rs`):** The `duplicate` macro generates newtyped point types (`screen::Point`, `plot_area::Point`, `data_normalized::Point`, `data_relative::Point`) and typed transform structs for all 12 pairwise combinations. Coordinate conversion is `point * transform`. This makes coordinate space errors compile errors.
 
 **Async I/O:** All file loading and Space-Track API calls use `Task::future(async { ... })`. CPU-intensive work uses `tokio::task::spawn_blocking`.
 

@@ -3,7 +3,7 @@ use std::{collections::VecDeque, path::PathBuf};
 use iced::{Subscription, Task, window};
 use ndarray::Array1;
 use rstrf::{
-    coord::{DataAbsoluteToDataNormalized, data_absolute, data_normalized},
+    coord::{DataRelativeToDataNormalized, data_normalized, data_relative},
     orbit::{PassPrediction, predict_satellites},
     spectrogram::SpectrogramBounds,
     util::minmax,
@@ -149,7 +149,7 @@ impl PassPngMode {
                 transmitters,
                 passes,
             } => {
-                let to_norm = DataAbsoluteToDataNormalized::from_absolute(&spec_bounds);
+                let to_norm = DataRelativeToDataNormalized::from_absolute(&spec_bounds);
                 let center_freq = spec_bounds.freq_range.start
                     + (spec_bounds.freq_range.end - spec_bounds.freq_range.start) / 2.0;
                 let mut output = self.args.output.clone();
@@ -204,15 +204,15 @@ impl PassPngMode {
                                 let f_min = (f_lo as f32 - center_freq) - freq_margin as f32;
                                 let f_max = (f_hi as f32 - center_freq) + freq_margin as f32;
 
-                                let rect_da = data_absolute::Rectangle::new(
-                                    data_absolute::Point::new(t_start, f_min),
-                                    data_absolute::Size::new(
+                                let rect_dr = data_relative::Rectangle::new(
+                                    data_relative::Point::new(t_start, f_min),
+                                    data_relative::Size::new(
                                         (t_end - t_start).max(1.0),
                                         (f_max - f_min).max(1.0),
                                     ),
                                 );
                                 Some(PassJob {
-                                    view: rect_da * to_norm,
+                                    view: rect_dr * to_norm,
                                     path: parent.join(format!(
                                         "{stem}_{pass_idx:03}_tx_{tx_freq:.0}Hz.png"
                                     )),

@@ -12,8 +12,8 @@ use iced::{
     mouse,
 };
 use rstrf::coord::{
-    DataAbsoluteToDataNormalized, DataAbsoluteToScreen, PlotAreaToDataAbsolute, ScreenToPlotArea,
-    data_absolute, plot_area, screen,
+    DataRelativeToDataNormalized, DataRelativeToScreen, PlotAreaToDataRelative, ScreenToPlotArea,
+    data_relative, plot_area, screen,
 };
 
 use super::{DisplayMsg, MarksMsg, State, ViewMsg, marks::MarkAction};
@@ -40,7 +40,7 @@ pub enum MouseState {
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Interaction {
-    pub crosshair: Cell<Option<data_absolute::Point>>,
+    pub crosshair: Cell<Option<data_relative::Point>>,
     pub mouse_state: Cell<MouseState>,
     pub modifiers: Cell<keyboard::Modifiers>,
 }
@@ -115,7 +115,7 @@ impl State {
                 && let Some(spectrogram) = &self.spectrogram
             {
                 let pos = plot_pos
-                    * PlotAreaToDataAbsolute::new(&self.viewport.bounds(), &spectrogram.bounds());
+                    * PlotAreaToDataRelative::new(&self.viewport.bounds(), &spectrogram.bounds());
                 self.interaction.crosshair.set(Some(pos));
             } else {
                 self.interaction.crosshair.set(None);
@@ -137,7 +137,7 @@ impl State {
                         && let Some(spectrogram) = &self.spectrogram
                         && let Some((action, point)) = closest_mark(
                             pos,
-                            &DataAbsoluteToScreen::new(
+                            &DataRelativeToScreen::new(
                                 &screen::Size(bounds.size()),
                                 &self.viewport.bounds(),
                                 &spectrogram.bounds(),
@@ -188,15 +188,15 @@ impl State {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     self.interaction.mouse_state.set(MouseState::Idle);
                     if let Some(spectrogram) = &self.spectrogram {
-                        let pa_to_da = PlotAreaToDataAbsolute::new(
+                        let pa_to_dr = PlotAreaToDataRelative::new(
                             &self.viewport.bounds(),
                             &spectrogram.bounds(),
                         );
-                        let c1 = corner1 * pa_to_da;
-                        let c2 = plot_pos * pa_to_da;
-                        let rect = data_absolute::Rectangle::new(
-                            data_absolute::Point::new(c1.0.x.min(c2.0.x), c1.0.y.min(c2.0.y)),
-                            data_absolute::Size::new(
+                        let c1 = corner1 * pa_to_dr;
+                        let c2 = plot_pos * pa_to_dr;
+                        let rect = data_relative::Rectangle::new(
+                            data_relative::Point::new(c1.0.x.min(c2.0.x), c1.0.y.min(c2.0.y)),
+                            data_relative::Size::new(
                                 (c1.0.x - c2.0.x).abs(),
                                 (c1.0.y - c2.0.y).abs(),
                             ),
@@ -204,7 +204,7 @@ impl State {
                         let msg: super::Message = match action {
                             RectAction::Delete => MarksMsg::DeleteInRect(rect).into(),
                             RectAction::Zoom => ViewMsg::ZoomToRect(
-                                rect * DataAbsoluteToDataNormalized::new(&spectrogram.bounds()),
+                                rect * DataRelativeToDataNormalized::new(&spectrogram.bounds()),
                             )
                             .into(),
                             RectAction::MarkCentroid => MarksMsg::MarkCentroid(rect).into(),
@@ -225,14 +225,14 @@ impl State {
                     let Some(spectrogram) = &self.spectrogram else {
                         return (Status::Captured, None);
                     };
-                    let da_pos = plot_pos
-                        * PlotAreaToDataAbsolute::new(
+                    let dr_pos = plot_pos
+                        * PlotAreaToDataRelative::new(
                             &self.viewport.bounds(),
                             &spectrogram.bounds(),
                         );
                     let msg = match kind {
-                        MarkAction::Trackpoint => MarksMsg::AddTrackPoint(da_pos).into(),
-                        MarkAction::Signal => MarksMsg::AddSignal(da_pos).into(),
+                        MarkAction::Trackpoint => MarksMsg::AddTrackPoint(dr_pos).into(),
+                        MarkAction::Signal => MarksMsg::AddSignal(dr_pos).into(),
                     };
                     return (Status::Captured, Some(msg));
                 }
@@ -369,20 +369,20 @@ impl State {
 }
 
 /// Finds the mark (track point or signal) nearest to `pos`, measured in screen pixels via
-/// `da_to_screen`, and returns it tagged with which collection it belongs to. Returns `None` if
+/// `dr_to_screen`, and returns it tagged with which collection it belongs to. Returns `None` if
 /// there are no marks, or the nearest is farther than [`DELETE_TOLERANCE_PX`].
 fn closest_mark(
     pos: screen::Point,
-    da_to_screen: &DataAbsoluteToScreen,
-    track_points: &[data_absolute::Point],
-    signals: &[data_absolute::Point],
-) -> Option<(MarkAction, data_absolute::Point)> {
+    dr_to_screen: &DataRelativeToScreen,
+    track_points: &[data_relative::Point],
+    signals: &[data_relative::Point],
+) -> Option<(MarkAction, data_relative::Point)> {
     track_points
         .iter()
         .map(|p| (MarkAction::Trackpoint, p))
         .chain(signals.iter().map(|p| (MarkAction::Signal, p)))
         .map(|(action, &point)| {
-            let offset = point * *da_to_screen - pos;
+            let offset = point * *dr_to_screen - pos;
             let dist = offset.0.x.hypot(offset.0.y);
             (action, point, dist)
         })
@@ -396,14 +396,14 @@ mod tests {
     use super::*;
     use rstrf::coord::data_normalized;
 
-    fn pt(x: f32, y: f32) -> data_absolute::Point {
-        data_absolute::Point::new(x, y)
+    fn pt(x: f32, y: f32) -> data_relative::Point {
+        data_relative::Point::new(x, y)
     }
 
-    /// A `DataAbsoluteToScreen` transform that maps data-absolute coordinates 1:1 onto screen
+    /// A `DataRelativeToScreen` transform that maps data-relative coordinates 1:1 onto screen
     /// pixels, so marks in these tests can be positioned directly in pixel space.
-    fn identity_da_to_screen() -> DataAbsoluteToScreen {
-        DataAbsoluteToScreen::new(
+    fn identity_dr_to_screen() -> DataRelativeToScreen {
+        DataRelativeToScreen::new(
             &screen::Size::new(100.0, 100.0),
             &data_normalized::Rectangle::new(
                 data_normalized::Point::new(0.0, 0.0),
@@ -411,7 +411,7 @@ mod tests {
             ),
             // y is flipped (screen y grows downward) so an identity x/y mapping needs a
             // negative-height bounds anchored at the top.
-            &data_absolute::Rectangle::new(pt(0.0, 100.0), data_absolute::Size::new(100.0, -100.0)),
+            &data_relative::Rectangle::new(pt(0.0, 100.0), data_relative::Size::new(100.0, -100.0)),
         )
     }
 
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn identity_transform_maps_data_to_pixels() {
         // Sanity check that the test fixture really is an identity x/y mapping.
-        let screen = pt(30.0, 40.0) * identity_da_to_screen();
+        let screen = pt(30.0, 40.0) * identity_dr_to_screen();
         assert!((screen.0.x - 30.0).abs() < 1e-3, "x = {}", screen.0.x);
         assert!((screen.0.y - 40.0).abs() < 1e-3, "y = {}", screen.0.y);
     }
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn closest_mark_none_when_no_marks() {
         assert_eq!(
-            closest_mark(sp(50.0, 50.0), &identity_da_to_screen(), &[], &[]),
+            closest_mark(sp(50.0, 50.0), &identity_dr_to_screen(), &[], &[]),
             None
         );
     }
@@ -440,7 +440,7 @@ mod tests {
         let track_points = [pt(10.0, 10.0), pt(50.0, 50.0)];
         // Cursor 5 px from the second point, far from the first.
         assert_eq!(
-            closest_mark(sp(53.0, 54.0), &identity_da_to_screen(), &track_points, &[]),
+            closest_mark(sp(53.0, 54.0), &identity_dr_to_screen(), &track_points, &[]),
             Some((MarkAction::Trackpoint, pt(50.0, 50.0)))
         );
     }
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(
             closest_mark(
                 sp(13.0, 13.0),
-                &identity_da_to_screen(),
+                &identity_dr_to_screen(),
                 &track_points,
                 &signals
             ),
@@ -466,7 +466,7 @@ mod tests {
         let track_points = [pt(0.0, 0.0)];
         // ~70 px away, well beyond DELETE_TOLERANCE_PX.
         assert_eq!(
-            closest_mark(sp(50.0, 50.0), &identity_da_to_screen(), &track_points, &[]),
+            closest_mark(sp(50.0, 50.0), &identity_dr_to_screen(), &track_points, &[]),
             None
         );
     }
@@ -476,7 +476,7 @@ mod tests {
         let signals = [pt(DELETE_TOLERANCE_PX, 0.0)];
         // Exactly DELETE_TOLERANCE_PX away → still deleted.
         assert_eq!(
-            closest_mark(sp(0.0, 0.0), &identity_da_to_screen(), &[], &signals),
+            closest_mark(sp(0.0, 0.0), &identity_dr_to_screen(), &[], &signals),
             Some((MarkAction::Signal, pt(DELETE_TOLERANCE_PX, 0.0)))
         );
     }

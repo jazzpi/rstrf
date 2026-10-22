@@ -7,8 +7,7 @@ use duplicate::{duplicate, duplicate_item};
 
 use crate::spectrogram::SpectrogramBounds;
 
-// TODO: data_absolute is really data_relative (to (start_time, center_freq))
-#[duplicate_item(name; [screen]; [plot_area]; [data_normalized]; [data_absolute])]
+#[duplicate_item(name; [screen]; [plot_area]; [data_normalized]; [data_relative])]
 pub mod name {
     use duplicate::duplicate_item;
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,7 +55,7 @@ pub mod name {
 }
 
 duplicate! {
-    [name; [screen]; [plot_area]; [data_normalized]; [data_absolute]]
+    [name; [screen]; [plot_area]; [data_normalized]; [data_relative]]
 
     // Point
     impl Sub for name::Point {
@@ -113,10 +112,10 @@ duplicate! {
 
 #[duplicate_item(
     name;
-    [ScreenToPlotArea]; [ScreenToDataNormalized]; [ScreenToDataAbsolute];
-    [PlotAreaToScreen]; [PlotAreaToDataNormalized]; [PlotAreaToDataAbsolute];
-    [DataNormalizedToScreen]; [DataNormalizedToPlotArea]; [DataNormalizedToDataAbsolute];
-    [DataAbsoluteToScreen]; [DataAbsoluteToPlotArea]; [DataAbsoluteToDataNormalized]
+    [ScreenToPlotArea]; [ScreenToDataNormalized]; [ScreenToDataRelative];
+    [PlotAreaToScreen]; [PlotAreaToDataNormalized]; [PlotAreaToDataRelative];
+    [DataNormalizedToScreen]; [DataNormalizedToPlotArea]; [DataNormalizedToDataRelative];
+    [DataRelativeToScreen]; [DataRelativeToPlotArea]; [DataRelativeToDataNormalized]
 )]
 #[derive(Debug, Clone, Copy)]
 pub struct name(Mat4);
@@ -125,16 +124,16 @@ duplicate! {
     [from to transform;
     [screen] [plot_area] [ScreenToPlotArea];
     [screen] [data_normalized] [ScreenToDataNormalized];
-    [screen] [data_absolute] [ScreenToDataAbsolute];
+    [screen] [data_relative] [ScreenToDataRelative];
     [plot_area] [screen] [PlotAreaToScreen];
     [plot_area] [data_normalized] [PlotAreaToDataNormalized];
-    [plot_area] [data_absolute] [PlotAreaToDataAbsolute];
+    [plot_area] [data_relative] [PlotAreaToDataRelative];
     [data_normalized] [screen] [DataNormalizedToScreen];
     [data_normalized] [plot_area] [DataNormalizedToPlotArea];
-    [data_normalized] [data_absolute] [DataNormalizedToDataAbsolute];
-    [data_absolute] [screen] [DataAbsoluteToScreen];
-    [data_absolute] [plot_area] [DataAbsoluteToPlotArea];
-    [data_absolute] [data_normalized] [DataAbsoluteToDataNormalized]]
+    [data_normalized] [data_relative] [DataNormalizedToDataRelative];
+    [data_relative] [screen] [DataRelativeToScreen];
+    [data_relative] [plot_area] [DataRelativeToPlotArea];
+    [data_relative] [data_normalized] [DataRelativeToDataNormalized]]
     // Would be real nice if we could just use iced's impl Mul<Transformation> here... But we can't
     // construct arbitrary Transformations, so we need to use Mat4s instead and re-implement the
     // Muls here.
@@ -200,8 +199,8 @@ impl PlotAreaToDataNormalized {
         ))
     }
 }
-impl DataNormalizedToDataAbsolute {
-    pub fn new(bounds: &data_absolute::Rectangle) -> Self {
+impl DataNormalizedToDataRelative {
+    pub fn new(bounds: &data_relative::Rectangle) -> Self {
         let scale = Vec3::new(bounds.0.width, bounds.0.height, 1.0);
         let translation = Vec3::new(bounds.0.x, bounds.0.y, 0.0);
         Self(Mat4::from_scale_rotation_translation(
@@ -217,14 +216,14 @@ impl ScreenToDataNormalized {
         Self(ScreenToPlotArea::new(size).0 * PlotAreaToDataNormalized::new(bounds).0)
     }
 }
-impl ScreenToDataAbsolute {
+impl ScreenToDataRelative {
     pub fn new(
         size: &screen::Size,
         norm_bounds: &data_normalized::Rectangle,
-        abs_bounds: &data_absolute::Rectangle,
+        rel_bounds: &data_relative::Rectangle,
     ) -> Self {
         Self(
-            DataNormalizedToDataAbsolute::new(abs_bounds).0
+            DataNormalizedToDataRelative::new(rel_bounds).0
                 * PlotAreaToDataNormalized::new(norm_bounds).0
                 * ScreenToPlotArea::new(size).0,
         )
@@ -235,13 +234,13 @@ impl PlotAreaToScreen {
         Self(ScreenToPlotArea::new(size).0.inverse())
     }
 }
-impl PlotAreaToDataAbsolute {
+impl PlotAreaToDataRelative {
     pub fn new(
         norm_bounds: &data_normalized::Rectangle,
-        abs_bounds: &data_absolute::Rectangle,
+        rel_bounds: &data_relative::Rectangle,
     ) -> Self {
         Self(
-            DataNormalizedToDataAbsolute::new(abs_bounds).0
+            DataNormalizedToDataRelative::new(rel_bounds).0
                 * PlotAreaToDataNormalized::new(norm_bounds).0,
         )
     }
@@ -256,46 +255,46 @@ impl DataNormalizedToPlotArea {
         Self(PlotAreaToDataNormalized::new(bounds).0.inverse())
     }
 }
-impl DataAbsoluteToScreen {
+impl DataRelativeToScreen {
     pub fn new(
         size: &screen::Size,
         norm_bounds: &data_normalized::Rectangle,
-        abs_bounds: &data_absolute::Rectangle,
+        rel_bounds: &data_relative::Rectangle,
     ) -> Self {
         Self(
-            ScreenToDataAbsolute::new(size, norm_bounds, abs_bounds)
+            ScreenToDataRelative::new(size, norm_bounds, rel_bounds)
                 .0
                 .inverse(),
         )
     }
 }
-impl DataAbsoluteToPlotArea {
+impl DataRelativeToPlotArea {
     pub fn new(
         norm_bounds: &data_normalized::Rectangle,
-        abs_bounds: &data_absolute::Rectangle,
+        rel_bounds: &data_relative::Rectangle,
     ) -> Self {
         Self(
-            PlotAreaToDataAbsolute::new(norm_bounds, abs_bounds)
+            PlotAreaToDataRelative::new(norm_bounds, rel_bounds)
                 .0
                 .inverse(),
         )
     }
 }
-impl DataAbsoluteToDataNormalized {
-    pub fn new(bounds: &data_absolute::Rectangle) -> Self {
-        Self(DataNormalizedToDataAbsolute::new(bounds).0.inverse())
+impl DataRelativeToDataNormalized {
+    pub fn new(bounds: &data_relative::Rectangle) -> Self {
+        Self(DataNormalizedToDataRelative::new(bounds).0.inverse())
     }
 
     pub fn from_absolute(bounds: &SpectrogramBounds) -> Self {
         let bw = bounds.freq_range.end - bounds.freq_range.start;
-        let abs_rect = data_absolute::Rectangle::new(
-            data_absolute::Point::new(0.0, -bw / 2.0),
-            data_absolute::Size::new(
+        let relative = data_relative::Rectangle::new(
+            data_relative::Point::new(0.0, -bw / 2.0),
+            data_relative::Size::new(
                 (bounds.time_range.end - bounds.time_range.start).as_seconds_f32(),
                 bw,
             ),
         );
-        Self::new(&abs_rect)
+        Self::new(&relative)
     }
 }
 
@@ -314,10 +313,10 @@ mod tests {
         )
     }
 
-    fn abs_bounds(x: f32, y: f32, w: f32, h: f32) -> data_absolute::Rectangle {
-        data_absolute::Rectangle::new(
-            data_absolute::Point::new(x, y),
-            data_absolute::Size::new(w, h),
+    fn rel_bounds(x: f32, y: f32, w: f32, h: f32) -> data_relative::Rectangle {
+        data_relative::Rectangle::new(
+            data_relative::Point::new(x, y),
+            data_relative::Size::new(w, h),
         )
     }
 
@@ -351,9 +350,9 @@ mod tests {
     }
 
     #[test]
-    fn data_normalized_to_absolute_applies_scale_and_translation() {
-        let bounds = abs_bounds(100.0, 200.0, 50.0, 80.0);
-        let tf = DataNormalizedToDataAbsolute::new(&bounds);
+    fn data_normalized_to_relative_applies_scale_and_translation() {
+        let bounds = rel_bounds(100.0, 200.0, 50.0, 80.0);
+        let tf = DataNormalizedToDataRelative::new(&bounds);
         let p = data_normalized::Point::new(0.0, 0.0);
         let result = p * tf;
         assert!((result.0.x - 100.0).abs() < 1e-4, "x={}", result.0.x);
@@ -366,12 +365,12 @@ mod tests {
     }
 
     #[test]
-    fn screen_to_data_absolute_round_trips() {
+    fn screen_to_data_relative_round_trips() {
         let size = screen_size(800.0, 600.0);
         let nb = norm_bounds(0.0, 0.0, 1.0, 1.0);
-        let ab = abs_bounds(400e6, -50e3, 100e3, 100e3);
-        let forward = ScreenToDataAbsolute::new(&size, &nb, &ab);
-        let backward = DataAbsoluteToScreen::new(&size, &nb, &ab);
+        let ab = rel_bounds(400e6, -50e3, 100e3, 100e3);
+        let forward = ScreenToDataRelative::new(&size, &nb, &ab);
+        let backward = DataRelativeToScreen::new(&size, &nb, &ab);
         let p = screen::Point::new(400.0, 300.0);
         let data_pt = p * forward;
         let roundtrip = data_pt * backward;

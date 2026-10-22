@@ -15,7 +15,7 @@ use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
-use crate::{coord::data_absolute, util::sec_to_duration};
+use crate::{coord::data_relative, util::sec_to_duration};
 
 #[rustfmt::skip]
 static _HEADER_RE_STR: &str = r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END";
@@ -386,14 +386,13 @@ impl Spectrogram {
         self.timestamps[last] + sec_to_duration(self.lengths[last])
     }
 
-    pub fn bounds(&self) -> data_absolute::Rectangle {
-        data_absolute::Rectangle::new(
-            data_absolute::Point::new(0.0, -self.bw / 2.0),
-            data_absolute::Size::new(self.length().as_seconds_f32(), self.bw),
+    pub fn bounds(&self) -> data_relative::Rectangle {
+        data_relative::Rectangle::new(
+            data_relative::Point::new(0.0, -self.bw / 2.0),
+            data_relative::Size::new(self.length().as_seconds_f32(), self.bw),
         )
     }
 
-    // TODO: `bounds()`, which returns `data_absolute`, isn't absolute...
     pub fn absolute_bounds(&self) -> SpectrogramBounds {
         SpectrogramBounds {
             time_range: self.start_time()..self.end_time(),

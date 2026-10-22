@@ -5,7 +5,7 @@ use iced::{
     alignment::Vertical,
     widget::{self, Row, combo_box, slider, text},
 };
-use rstrf::{colormap::Colormap, coord::DataNormalizedToDataAbsolute};
+use rstrf::{colormap::Colormap, coord::DataNormalizedToDataRelative};
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -148,7 +148,7 @@ pub fn view(state: &super::State) -> Element<'_, rfplot::Message> {
         && let Some(spectrogram) = &state.spectrogram()
     {
         let bounds =
-            state.viewport.bounds() * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
+            state.viewport.bounds() * DataNormalizedToDataRelative::new(&spectrogram.bounds());
         let zoom_max = state.viewport.zoom_max();
         let log_scale = state.viewport.log_scale();
         let power_bounds = state.power.bounds();

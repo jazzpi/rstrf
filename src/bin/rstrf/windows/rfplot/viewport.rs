@@ -1,6 +1,6 @@
 use glam::Vec2;
 use rstrf::coord::{
-    DataAbsoluteToDataNormalized, PlotAreaToDataNormalized, data_absolute, data_normalized,
+    DataRelativeToDataNormalized, PlotAreaToDataNormalized, data_normalized, data_relative,
     plot_area,
 };
 
@@ -85,12 +85,12 @@ impl Viewport {
     }
 
     /// Set the view to show `rect`, clamping zoom to the allowed range.
-    pub fn set_view_from_rect_da(
+    pub fn set_view_from_rect_dr(
         &mut self,
-        rect: &data_absolute::Rectangle,
-        spec_bounds: &data_absolute::Rectangle,
+        rect: &data_relative::Rectangle,
+        spec_bounds: &data_relative::Rectangle,
     ) {
-        let to_norm = DataAbsoluteToDataNormalized::new(spec_bounds);
+        let to_norm = DataRelativeToDataNormalized::new(spec_bounds);
         let norm_rect = *rect * to_norm;
         self.set_view_from_rect_dn(&norm_rect);
     }

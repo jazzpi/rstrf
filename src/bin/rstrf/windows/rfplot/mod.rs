@@ -14,7 +14,7 @@ use rfd::AsyncFileDialog;
 use rstrf::{
     async_cache::AsyncCache,
     colormap::Colormap,
-    coord::{DataAbsoluteToDataNormalized, data_absolute, data_normalized, plot_area},
+    coord::{DataRelativeToDataNormalized, data_normalized, data_relative, plot_area},
     menu::MenuItem,
     orbit::{self, Site},
     signal,
@@ -156,14 +156,14 @@ pub enum DisplayMsg {
 pub enum MarksMsg {
     MarkTrackpoints,
     MarkSignals,
-    AddTrackPoint(data_absolute::Point),
-    AddSignal(data_absolute::Point),
-    DeleteMark(MarkAction, data_absolute::Point),
-    DeleteInRect(data_absolute::Rectangle),
-    MarkCentroid(data_absolute::Rectangle),
+    AddTrackPoint(data_relative::Point),
+    AddSignal(data_relative::Point),
+    DeleteMark(MarkAction, data_relative::Point),
+    DeleteInRect(data_relative::Rectangle),
+    MarkCentroid(data_relative::Rectangle),
     ClearAll,
     FindSignals,
-    FoundSignals(Vec<data_absolute::Point>),
+    FoundSignals(Vec<data_relative::Point>),
     SaveSignals,
     WriteSignals(String, Option<PathBuf>),
     UpdateSignalSigma(f32),
@@ -558,9 +558,9 @@ impl State {
                     && let Some(spec) = self.spectrogram()
                 {
                     let freq = freq as f32 - spec.freq;
-                    let freq_center = data_absolute::Point::new(0.0, freq);
+                    let freq_center = data_relative::Point::new(0.0, freq);
                     let mut freq_center =
-                        freq_center * DataAbsoluteToDataNormalized::new(&spec.bounds());
+                        freq_center * DataRelativeToDataNormalized::new(&spec.bounds());
                     freq_center.0.x = self.viewport.center().0.x;
                     self.viewport.set_center(freq_center)
                 }
@@ -714,14 +714,13 @@ fn apply_initial_view(state: &mut State, iv: &InitialView) {
     let f_max = iv.fmax.map(|f| f - center_freq).unwrap_or(bw / 2.0) as f32;
 
     if t_max > t_min && f_max > f_min {
-        use rstrf::coord::data_absolute;
-        let view_rect = data_absolute::Rectangle::new(
-            data_absolute::Point::new(t_min, f_min),
-            data_absolute::Size::new(t_max - t_min, f_max - f_min),
+        let view_rect = data_relative::Rectangle::new(
+            data_relative::Point::new(t_min, f_min),
+            data_relative::Size::new(t_max - t_min, f_max - f_min),
         );
         state
             .viewport
-            .set_view_from_rect_da(&view_rect, &spec_bounds);
+            .set_view_from_rect_dr(&view_rect, &spec_bounds);
     }
     state.power.set_range(iv.zmin, iv.zmax);
 }
@@ -1089,7 +1088,6 @@ fn view_plot<'a>(plot: &'a RFPlot, app: &'a AppShared) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rstrf::coord::data_absolute;
 
     use crate::{app::AppShared, windows::Window};
 
@@ -1126,12 +1124,12 @@ mod tests {
         rfplot
             .state
             .marks
-            .insert_track_point(data_absolute::Point::new(1.0, 2.0));
+            .insert_track_point(data_relative::Point::new(1.0, 2.0));
         rfplot
             .state
             .marks
             .signals_mut()
-            .push(data_absolute::Point::new(3.0, 4.0));
+            .push(data_relative::Point::new(3.0, 4.0));
         rfplot.state.update_view(ViewMsg::UpdateZoomX(5.0));
 
         let app = AppShared::default();

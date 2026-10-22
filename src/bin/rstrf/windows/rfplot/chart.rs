@@ -19,8 +19,8 @@ use plotters_iced2::Chart;
 use rstrf::{
     chart::{ReferenceMode, ReferencedTicks, datetime_referenced_ticks},
     coord::{
-        DataAbsoluteToDataNormalized, DataNormalizedToDataAbsolute, PlotAreaToDataAbsolute,
-        data_absolute, plot_area,
+        DataNormalizedToDataRelative, DataRelativeToDataNormalized, PlotAreaToDataRelative,
+        data_relative, plot_area,
     },
     util::{clip_line, sec_to_duration},
 };
@@ -47,14 +47,14 @@ fn prediction_color(classification: Option<sgp4::Classification>) -> RGBColor {
 }
 
 fn clamp_line_to_plot(
-    bounds: &data_absolute::Rectangle,
-    points: impl Iterator<Item = data_absolute::Point>,
-) -> impl Iterator<Item = data_absolute::Point> {
+    bounds: &data_relative::Rectangle,
+    points: impl Iterator<Item = data_relative::Point>,
+) -> impl Iterator<Item = data_relative::Point> {
     points
         .tuple_windows()
         .filter_map(|(a, b)| clip_line(&bounds.0, a.0, b.0))
         .flat_map(|(a, b)| vec![a, b])
-        .map(data_absolute::Point)
+        .map(data_relative::Point)
 }
 
 /// We want to use `with_key_points()`, which creates a `WithKeyPoints<RangedCoordf32>`. That
@@ -94,7 +94,7 @@ impl State {
             return Err("No spectrogram loaded".to_string());
         };
         let view_norm = self.viewport.bounds();
-        let bounds = view_norm * DataNormalizedToDataAbsolute::new(&spectrogram.bounds());
+        let bounds = view_norm * DataNormalizedToDataRelative::new(&spectrogram.bounds());
         let x = CopyRange::from_std(bounds.0.x..(bounds.0.x + bounds.0.width));
         let y = CopyRange::from_std(bounds.0.y..(bounds.0.y + bounds.0.height));
 
@@ -274,7 +274,7 @@ impl State {
                     clamp_line_to_plot(
                         &bounds,
                         self.marks.track_points().iter().map(|pos| {
-                            data_absolute::Point::new(
+                            data_relative::Point::new(
                                 pos.0.x,
                                 pos.0.y + self.detection.track_bw / 2.0,
                             )
@@ -294,7 +294,7 @@ impl State {
                     clamp_line_to_plot(
                         &bounds,
                         self.marks.track_points().iter().map(|pos| {
-                            data_absolute::Point::new(
+                            data_relative::Point::new(
                                 pos.0.x,
                                 pos.0.y - self.detection.track_bw / 2.0,
                             )
@@ -333,8 +333,8 @@ impl State {
             chart
                 .draw_series(LineSeries::new(
                     vec![
-                        data_absolute::Point::new(crosshair.0.x, bounds.0.y),
-                        data_absolute::Point::new(crosshair.0.x, bounds.0.y + bounds.0.height),
+                        data_relative::Point::new(crosshair.0.x, bounds.0.y),
+                        data_relative::Point::new(crosshair.0.x, bounds.0.y + bounds.0.height),
                     ]
                     .into_iter()
                     .map(|p| p.into()),
@@ -345,8 +345,8 @@ impl State {
             chart
                 .draw_series(LineSeries::new(
                     vec![
-                        data_absolute::Point::new(bounds.0.x, crosshair.0.y),
-                        data_absolute::Point::new(bounds.0.x + bounds.0.width, crosshair.0.y),
+                        data_relative::Point::new(bounds.0.x, crosshair.0.y),
+                        data_relative::Point::new(bounds.0.x + bounds.0.width, crosshair.0.y),
                     ]
                     .into_iter()
                     .map(|p| p.into()),
@@ -354,14 +354,14 @@ impl State {
                 ))
                 .map_err(|e| format!("Could not draw crosshair horizontal line: {:?}", e))?;
             let crosshair_norm =
-                *crosshair * DataAbsoluteToDataNormalized::new(&spectrogram.bounds());
+                *crosshair * DataRelativeToDataNormalized::new(&spectrogram.bounds());
             let dim = spectrogram.data().dim();
             let power = spectrogram.data()[(
                 ((crosshair_norm.0.x * (dim.0 as f32)).floor() as usize).clamp(0, dim.0 - 1),
                 ((crosshair_norm.0.y * (dim.1 as f32)).floor() as usize).clamp(0, dim.1 - 1),
             )];
             let crosshair_pos = plot_area::Point::new(0.01, 0.99)
-                * PlotAreaToDataAbsolute::new(&self.viewport.bounds(), &spectrogram.bounds());
+                * PlotAreaToDataRelative::new(&self.viewport.bounds(), &spectrogram.bounds());
             let crosshair_text = if self.display.absolute_axes {
                 let t = spectrogram.start_time() + sec_to_duration(crosshair.0.x);
                 format!(
@@ -393,10 +393,10 @@ impl State {
             corner2,
         } = self.interaction.mouse_state.get()
         {
-            let pa_to_da =
-                PlotAreaToDataAbsolute::new(&self.viewport.bounds(), &spectrogram.bounds());
-            let c1: (f32, f32) = (corner1 * pa_to_da).into();
-            let c2: (f32, f32) = (corner2 * pa_to_da).into();
+            let pa_to_dr =
+                PlotAreaToDataRelative::new(&self.viewport.bounds(), &spectrogram.bounds());
+            let c1: (f32, f32) = (corner1 * pa_to_dr).into();
+            let c2: (f32, f32) = (corner2 * pa_to_dr).into();
             let (fill_color, border_color) = match action {
                 RectAction::Delete => (RED.mix(0.25), RED.mix(1.0)),
                 RectAction::Zoom => (CYAN.mix(0.15), CYAN.mix(1.0)),

@@ -1,7 +1,7 @@
 //! The marks the user places on the plot: track points and detected signals.
 
 use chrono::{DateTime, Utc};
-use rstrf::{coord::data_absolute, util::sec_to_duration};
+use rstrf::{coord::data_relative, util::sec_to_duration};
 
 /// Which of the two mark collections a mark belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,26 +13,26 @@ pub enum MarkAction {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Marks {
     /// Sorted by time.
-    track_points: Vec<data_absolute::Point>,
-    signals: Vec<data_absolute::Point>,
+    track_points: Vec<data_relative::Point>,
+    signals: Vec<data_relative::Point>,
 }
 
 impl Marks {
-    pub fn track_points(&self) -> &[data_absolute::Point] {
+    pub fn track_points(&self) -> &[data_relative::Point] {
         &self.track_points
     }
 
-    pub fn signals(&self) -> &[data_absolute::Point] {
+    pub fn signals(&self) -> &[data_relative::Point] {
         &self.signals
     }
 
     /// Signals carry no ordering invariant, so callers may mutate them freely.
-    pub fn signals_mut(&mut self) -> &mut Vec<data_absolute::Point> {
+    pub fn signals_mut(&mut self) -> &mut Vec<data_relative::Point> {
         &mut self.signals
     }
 
     /// Inserts a track point in time order. A point at an already-marked time replaces it.
-    pub fn insert_track_point(&mut self, point: data_absolute::Point) {
+    pub fn insert_track_point(&mut self, point: data_relative::Point) {
         match self
             .track_points
             .binary_search_by(|p| p.0.x.partial_cmp(&point.0.x).unwrap())
@@ -42,7 +42,7 @@ impl Marks {
         }
     }
 
-    pub fn remove(&mut self, action: MarkAction, point: data_absolute::Point) {
+    pub fn remove(&mut self, action: MarkAction, point: data_relative::Point) {
         let collection = match action {
             MarkAction::Trackpoint => &mut self.track_points,
             MarkAction::Signal => &mut self.signals,
@@ -53,7 +53,7 @@ impl Marks {
     }
 
     /// Drops marks failing `keep` from both collections.
-    pub fn retain(&mut self, keep: impl Fn(&data_absolute::Point) -> bool) {
+    pub fn retain(&mut self, keep: impl Fn(&data_relative::Point) -> bool) {
         self.track_points.retain(&keep);
         self.signals.retain(&keep);
     }
@@ -70,7 +70,7 @@ impl Marks {
 pub(super) fn signals_filename(
     start_time: DateTime<Utc>,
     center_freq: f64,
-    signals: &[data_absolute::Point],
+    signals: &[data_relative::Point],
 ) -> Option<String> {
     if signals.is_empty() {
         return None;
@@ -91,8 +91,8 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    fn pt(x: f32, y: f32) -> data_absolute::Point {
-        data_absolute::Point::new(x, y)
+    fn pt(x: f32, y: f32) -> data_relative::Point {
+        data_relative::Point::new(x, y)
     }
 
     fn utc(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {

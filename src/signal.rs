@@ -2,9 +2,9 @@ use itertools::Itertools;
 use ndarray::{ArrayView1, s};
 use ndarray_stats::QuantileExt;
 
-use crate::{coord::data_absolute, spectrogram::Spectrogram, util::to_index};
+use crate::{coord::data_relative, spectrogram::Spectrogram, util::to_index};
 
-/// Maps between `data_absolute` coordinates and the `(time_idx, freq_idx)` index space of a
+/// Maps between `data_relative` coordinates and the `(time_idx, freq_idx)` index space of a
 /// spectrogram's data array.
 struct IndexTransform {
     nt: usize,
@@ -29,19 +29,18 @@ impl IndexTransform {
         }
     }
 
-    /// Converts a point in `data_absolute` coordinates to `(time_idx, freq_idx)`, clamping to
+    /// Converts a point in `data_relative` coordinates to `(time_idx, freq_idx)`, clamping to
     /// bounds.
-    fn point_to_index(&self, point: data_absolute::Point) -> (usize, usize) {
+    fn point_to_index(&self, point: data_relative::Point) -> (usize, usize) {
         (
             to_index(point.0.x * self.t_scale, self.nt),
             to_index((point.0.y + self.bw / 2.0) * self.f_scale, self.nf),
         )
     }
 
-    /// Converts a (possibly fractional) `(time_idx, freq_idx)` back to `data_absolute`
-    /// coordinates.
-    fn index_to_point(&self, t_idx: f32, f_idx: f32) -> data_absolute::Point {
-        data_absolute::Point::new(t_idx / self.t_scale, f_idx / self.f_scale - self.bw / 2.0)
+    /// Converts a (possibly fractional) `(time_idx, freq_idx)` back to `data_relative` coordinates.
+    fn index_to_point(&self, t_idx: f32, f_idx: f32) -> data_relative::Point {
+        data_relative::Point::new(t_idx / self.t_scale, f_idx / self.f_scale - self.bw / 2.0)
     }
 }
 
@@ -58,10 +57,10 @@ pub enum SignalDetectionMethod {
 /// Finds signals in a spectrogram.
 pub fn find_signals(
     spectrogram: &Spectrogram,
-    track_points: &[data_absolute::Point],
+    track_points: &[data_relative::Point],
     track_bw: f32,
     method: SignalDetectionMethod,
-) -> anyhow::Result<Vec<data_absolute::Point>> {
+) -> anyhow::Result<Vec<data_relative::Point>> {
     let idx = IndexTransform::new(spectrogram);
     let data = spectrogram.data();
     let nf = idx.nf;
@@ -79,9 +78,9 @@ pub fn find_signals(
         .into_iter()
         .map(|(t_idx, f_idx)| (t_idx - t_range.start, f_idx))
         .tuple_windows()
-        .flat_map(|(a, b)| -> anyhow::Result<Vec<data_absolute::Point>> {
+        .flat_map(|(a, b)| -> anyhow::Result<Vec<data_relative::Point>> {
             let slope = (b.1 as f32 - a.1 as f32) / (b.0 as f32 - a.0 as f32);
-            let signals_nested: anyhow::Result<Vec<Vec<data_absolute::Point>>> = (a.0..=b.0)
+            let signals_nested: anyhow::Result<Vec<Vec<data_relative::Point>>> = (a.0..=b.0)
                 .map(|t_idx| {
                     let center_f = (a.1 as f32 + slope * (t_idx - a.0) as f32).round() as usize;
                     let f_range =
@@ -131,13 +130,13 @@ fn find_signals_ft(data: ArrayView1<f32>, sigma_threshold: f32) -> anyhow::Resul
 
 pub fn centroid(
     spectrogram: &Spectrogram,
-    rect: data_absolute::Rectangle,
-) -> Option<data_absolute::Point> {
+    rect: data_relative::Rectangle,
+) -> Option<data_relative::Point> {
     let idx = IndexTransform::new(spectrogram);
     let data = spectrogram.data();
 
-    let (t_min, f_min) = idx.point_to_index(data_absolute::Point::new(rect.0.x, rect.0.y));
-    let (t_max, f_max) = idx.point_to_index(data_absolute::Point::new(
+    let (t_min, f_min) = idx.point_to_index(data_relative::Point::new(rect.0.x, rect.0.y));
+    let (t_max, f_max) = idx.point_to_index(data_relative::Point::new(
         rect.0.x + rect.0.width,
         rect.0.y + rect.0.height,
     ));
@@ -275,9 +274,9 @@ mod tests {
         let spec = spec_from_db(data, 5.0);
 
         // Rect covering only indices 0..=1 in both dimensions (t in [0, 1], y in [-2.5, -1.5]).
-        let rect = data_absolute::Rectangle::new(
-            data_absolute::Point::new(0.0, -2.5),
-            data_absolute::Size::new(1.0, 1.0),
+        let rect = data_relative::Rectangle::new(
+            data_relative::Point::new(0.0, -2.5),
+            data_relative::Size::new(1.0, 1.0),
         );
         let result = centroid(&spec, rect).unwrap();
 
