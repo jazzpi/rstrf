@@ -61,53 +61,51 @@ pub fn find_signals(
     track_bw: f32,
     method: SignalDetectionMethod,
 ) -> anyhow::Result<Vec<data_relative::Point>> {
-    let idx = IndexTransform::new(spectrogram);
+    let tf = IndexTransform::new(spectrogram);
     let data = spectrogram.data();
-    let nf = idx.nf;
-    let half_bw_idx = (track_bw * 0.5 * idx.f_scale) as usize;
+    let nf = tf.nf;
+
     // TODO: This will clamp x/y to bounds individually -> might change slope for out-of-bounds
     // points
-    let track_points = track_points
-        .iter()
-        .map(|p| idx.point_to_index(*p))
-        .collect_vec();
-    let t_range = track_points.first().unwrap().0..(track_points.last().unwrap().0 + 1);
-    let data = data.slice(s![t_range.clone(), ..]).to_owned();
+    let track_points = track_points.iter().map(|p| tf.point_to_index(*p));
 
-    let signals = track_points
-        .into_iter()
-        .map(|(t_idx, f_idx)| (t_idx - t_range.start, f_idx))
-        .tuple_windows()
-        .flat_map(|(a, b)| -> anyhow::Result<Vec<data_relative::Point>> {
-            let slope = (b.1 as f32 - a.1 as f32) / (b.0 as f32 - a.0 as f32);
-            let signals_nested: anyhow::Result<Vec<Vec<data_relative::Point>>> = (a.0..=b.0)
-                .map(|t_idx| {
-                    let center_f = (a.1 as f32 + slope * (t_idx - a.0) as f32).round() as usize;
-                    let f_range =
-                        center_f.saturating_sub(half_bw_idx)..(center_f + half_bw_idx).min(nf - 1);
-                    let slice = data.slice(s![t_idx, f_range.clone()]);
+    let half_bw_idx = (track_bw * 0.5 * nf as f32 / spectrogram.bw) as usize;
+    let mut signals = Vec::new();
+    // We iterate over each pair of track points...
+    for ((at, af), (bt, bf)) in track_points.tuple_windows() {
+        let df = bf as isize - af as isize;
+        let dt = bt as isize - at as isize;
+        anyhow::ensure!(dt >= 0, "Track points must be in increasing time order");
+        if dt == 0 {
+            log::warn!(
+                "Two track points too close together ({} and {}), skipping",
+                at,
+                bt
+            );
+            continue;
+        }
+        let slope = df as f32 / dt as f32;
 
-                    let slice_signals = match method {
-                        SignalDetectionMethod::FitTrace { sigma } => find_signals_ft(slice, sigma),
-                    }?;
+        for t_idx in at..bt {
+            // ... and slice on the frequency axis to the window around the track line...
+            let center_f = (af as f32 + slope * (t_idx - at) as f32).round() as usize;
+            let f_range =
+                center_f.saturating_sub(half_bw_idx)..(center_f + half_bw_idx).min(nf - 1);
+            let slice = data.slice(s![t_idx, f_range.clone()]);
 
-                    let signals_abs = slice_signals
-                        .iter()
-                        .map(|&f_idx| {
-                            idx.index_to_point(
-                                (t_idx + t_range.start) as f32,
-                                (f_idx + f_range.start) as f32,
-                            )
-                        })
-                        .collect();
-                    Ok(signals_abs)
-                })
-                .collect();
-            let signals = signals_nested?.into_iter().flatten().collect_vec();
-            Ok(signals)
-        })
-        .flatten()
-        .collect_vec();
+            // ... We find signals in each slice independently...
+            let slice_signals = match method {
+                SignalDetectionMethod::FitTrace { sigma } => find_signals_ft(slice, sigma),
+            }?;
+
+            // ... before converting the indices back to `data_relative` coordinates.
+            signals.extend(
+                slice_signals
+                    .iter()
+                    .map(|&f_idx| tf.index_to_point(t_idx as f32, (f_idx + f_range.start) as f32)),
+            );
+        }
+    }
     Ok(signals)
 }
 
@@ -230,6 +228,39 @@ mod tests {
         // With high threshold (20 sigma), this moderate peak should not be detected
         let result = find_signals_ft(data.view(), 20.0).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_signals_finds_peaks_along_track() {
+        // 5 time slices x 6 channels, all bins at -inf dB (zero linear power) except one per slice.
+        let mut data = Array2::from_elem((5, 6), f32::NEG_INFINITY);
+        data[[0, 0]] = 0.0; // linear power 1.0
+        data[[1, 1]] = 0.0;
+        data[[2, 2]] = 0.0;
+        data[[3, 3]] = 0.0;
+        data[[4, 4]] = 0.0;
+        let spec = spec_from_db(data, 6.0);
+
+        let track_points = vec![
+            data_relative::Point::new(1.1, -3.0),
+            data_relative::Point::new(3.9, 3.0),
+        ];
+        let track_bw = 2.0;
+        let result = find_signals(
+            &spec,
+            &track_points,
+            track_bw,
+            SignalDetectionMethod::FitTrace { sigma: 5.0 },
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        let r0 = result[0].0;
+        let r1 = result[1].0;
+        assert!((r0.x - 2.0).abs() < 1e-6, "x0 = {}", r0.x);
+        assert!((r0.y - (2.0 - 3.0)).abs() < 1e-6, "y0 = {}", r0.y);
+        assert!((r1.x - 3.0).abs() < 1e-6, "x1 = {}", r1.x);
+        assert!((r1.y - (3.0 - 3.0)).abs() < 1e-6, "y1 = {}", r1.y);
     }
 
     #[test]
