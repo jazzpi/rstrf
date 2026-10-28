@@ -15,7 +15,10 @@ use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
-use crate::{coord::data_relative, util::sec_to_duration};
+use crate::{
+    coord::{DataNormalizedToObservedNormalized, data_relative, observed_normalized},
+    util::sec_to_duration,
+};
 
 #[rustfmt::skip]
 static _HEADER_RE_STR: &str = r"(?s)HEADER\s+UTC_START\s+(\S+)\s+FREQ\s+([0-9.]+)\s+Hz\s+BW\s+([0-9.]+)\s+Hz\s+LENGTH\s+([0-9.]+)\s+s\s+NCHAN\s+(\d+)\s+(?:NSUB\s+\d+\s+)?END";
@@ -358,6 +361,10 @@ impl Spectrogram {
     pub fn data(&self) -> ArrayView2<'_, f32> {
         self.data.view()
     }
+
+    // pub fn power_at(&self, point: observed_normalized::Point) -> f32 {
+    //     let tf = DataNormalizedToDataObserved::new()
+    // }
 
     pub fn set_data(&mut self, data: ArcArray2<f32>) -> anyhow::Result<()> {
         ensure!(

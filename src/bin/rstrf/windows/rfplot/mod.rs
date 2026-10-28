@@ -433,11 +433,12 @@ impl State {
                 Task::none()
             }
             MarksMsg::MarkCentroid(rect) => {
-                let centroid = self
-                    .spectrogram
-                    .as_ref()
-                    .and_then(|spec| signal::centroid(spec, rect));
-                self.marks.signals_mut().extend(centroid);
+                todo!();
+                // let centroid = self
+                //     .spectrogram
+                //     .as_ref()
+                //     .and_then(|spec| signal::centroid(spec, rect));
+                // self.marks.signals_mut().extend(centroid);
                 Task::none()
             }
             MarksMsg::ClearAll => {
@@ -458,23 +459,24 @@ impl State {
                     let track_bw = self.detection.track_bw;
                     Task::future(async move {
                         tokio::task::spawn_blocking(move || {
-                            let signals = signal::find_signals(
-                                &spectrogram,
-                                &track_points,
-                                track_bw,
-                                signal::SignalDetectionMethod::FitTrace { sigma },
-                            );
-                            let signals = match signals {
-                                Err(e) => {
-                                    log::error!("Error finding signals: {}", e);
-                                    Vec::new()
-                                }
-                                Ok(signals) => {
-                                    log::info!("Found {} signal peaks", signals.len());
-                                    signals
-                                }
-                            };
-                            MarksMsg::FoundSignals(signals).into()
+                            todo!();
+                            // let signals = signal::find_signals(
+                            //     &spectrogram,
+                            //     &track_points,
+                            //     track_bw,
+                            //     signal::SignalDetectionMethod::FitTrace { sigma },
+                            // );
+                            // let signals = match signals {
+                            //     Err(e) => {
+                            //         log::error!("Error finding signals: {}", e);
+                            //         Vec::new()
+                            //     }
+                            //     Ok(signals) => {
+                            //         log::info!("Found {} signal peaks", signals.len());
+                            //         signals
+                            //     }
+                            // };
+                            // MarksMsg::FoundSignals(signals).into()
                         })
                         .await
                         .unwrap()

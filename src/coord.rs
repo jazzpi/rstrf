@@ -1,18 +1,20 @@
 //! This module contains newtype wrappers for the iced Point/Vector types. The wrappers allow
 //! type-stated transformations between different coordinate systems used in RFPlot.
-use glam::{Mat4, Quat, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 use duplicate::{duplicate, duplicate_item};
 
 use crate::spectrogram::SpectrogramBounds;
 
+// TODO: Update docstrings to reflect Doppler-corrected/non-Doppler-corrected coords.
 #[duplicate_item(
     name mod_doc;
     [screen] ["Pixels in the spectrogram drawing area (i.e. sans axis labels). Origin top-left, y grows downward."];
     [plot_area] ["Normalized coordinates in the spectrogram drawing area. Origin bottom-left, y grows upward."];
     [data_normalized] ["Normalized coordinates in the full spectrogram bounds. Origin `(start_time, center_freq - bw/2)`, y increases with frequency."];
-    [data_relative] ["`(sec, Hz)` coordinates. Origin `(start_time, center_freq)`, y increases with frequency."]
+    [data_relative] ["`(sec, Hz)` coordinates. Origin `(start_time, center_freq)`, y increases with frequency."];
+    [observed_normalized] ["Normalized coordinates in the full spectrogram bounds (as recorded, i.e. without Doppler correction). Origin `(start_time, center_freq - bw/2)`, y increases with frequency."]
 )]
 #[doc = mod_doc]
 pub mod name {
@@ -62,7 +64,7 @@ pub mod name {
 }
 
 duplicate! {
-    [name; [screen]; [plot_area]; [data_normalized]; [data_relative]]
+    [name; [screen]; [plot_area]; [data_normalized]; [data_relative]; [observed_normalized]]
 
     // Point
     impl Sub for name::Point {
@@ -181,6 +183,61 @@ duplicate! {
 
             to::Rectangle::new(position * tf, size * tf)
         }
+    }
+}
+
+// These are not affine transforms (unlike the other transforms), because the shift in frequency can
+// be different at each time slice.
+//
+// So they can't be represented by a Mat4; instead, we use [DopplerCorrection]'s `y_ranges`.
+#[derive(Debug, Clone, Copy)]
+pub struct DataNormalizedToObservedNormalized<'a>(Option<&'a [Vec2]>);
+#[derive(Debug, Clone, Copy)]
+pub struct ObservedNormalizedToDataNormalized<'a>(Option<&'a [Vec2]>);
+
+impl Mul<DataNormalizedToObservedNormalized<'_>> for data_normalized::Point {
+    type Output = observed_normalized::Point;
+    fn mul(self, tf: DataNormalizedToObservedNormalized<'_>) -> Self::Output {
+        let offset = tf.0.map_or(0.0, |r| {
+            let idx = slice_index(self.0.x, r.len());
+            if let Some(idx) = idx { r[idx].x } else { 0.0 }
+        });
+        #[allow(clippy::suspicious_arithmetic_impl)]
+        observed_normalized::Point::new(self.0.x, self.0.y - offset)
+    }
+}
+
+impl Mul<ObservedNormalizedToDataNormalized<'_>> for observed_normalized::Point {
+    type Output = data_normalized::Point;
+    fn mul(self, tf: ObservedNormalizedToDataNormalized<'_>) -> Self::Output {
+        let offset = tf.0.map_or(0.0, |r| {
+            let idx = slice_index(self.0.x, r.len());
+            if let Some(idx) = idx { r[idx].x } else { 0.0 }
+        });
+        #[allow(clippy::suspicious_arithmetic_impl)]
+        data_normalized::Point::new(self.0.x, self.0.y + offset)
+    }
+}
+
+fn slice_index(x: f32, len: usize) -> Option<usize> {
+    // TODO: This should take into account the actual slice lengths
+    let idx = (x * len as f32).floor() as isize;
+    if idx < 0 || idx >= len as isize {
+        None
+    } else {
+        Some(idx as usize)
+    }
+}
+
+impl<'a> DataNormalizedToObservedNormalized<'a> {
+    pub fn new(y_ranges: Option<&'a [Vec2]>) -> Self {
+        Self(y_ranges)
+    }
+}
+
+impl<'a> ObservedNormalizedToDataNormalized<'a> {
+    pub fn new(y_ranges: Option<&'a [Vec2]>) -> Self {
+        Self(y_ranges)
     }
 }
 
@@ -397,6 +454,65 @@ mod tests {
         assert!((result.0.x - 0.2).abs() < 1e-4, "x={}", result.0.x);
         // 0.2 + 0.6 - 1/4 * 0.6
         assert!((result.0.y - 0.65).abs() < 1e-4, "y={}", result.0.y);
+    }
+
+    #[test]
+    fn data_normalized_to_observed_normalized_applies_offset() {
+        let y_ranges = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.1, 0.1),
+            Vec2::new(0.2, 0.2),
+        ];
+        let tf = DataNormalizedToObservedNormalized::new(Some(&y_ranges));
+        let p = data_normalized::Point::new(0.5, 0.5);
+        let result = p * tf;
+        // x=0.5 -> index=1 -> offset=0.1
+        assert!((result.0.x - 0.5).abs() < 1e-4, "x={}", result.0.x);
+        assert!((result.0.y - 0.4).abs() < 1e-4, "y={}", result.0.y);
+    }
+
+    #[test]
+    fn data_normalized_to_observed_normalized_with_no_ranges_is_identity() {
+        let tf = DataNormalizedToObservedNormalized::new(None);
+        let p = data_normalized::Point::new(0.5, 0.5);
+        let result = p * tf;
+        assert!((result.0.x - 0.5).abs() < 1e-4, "x={}", result.0.x);
+        assert!((result.0.y - 0.5).abs() < 1e-4, "y={}", result.0.y);
+    }
+
+    #[test]
+    fn data_normalized_to_observed_normalized_with_out_of_bounds_x_is_identity() {
+        let y_ranges = vec![
+            Vec2::new(0.0, 1.0),
+            Vec2::new(0.1, 1.0),
+            Vec2::new(0.2, 1.0),
+        ];
+        let tf = DataNormalizedToObservedNormalized::new(Some(&y_ranges));
+        let p = data_normalized::Point::new(-0.1, 0.5);
+        let result = p * tf;
+        assert!((result.0.x - (-0.1)).abs() < 1e-4, "x={}", result.0.x);
+        assert!((result.0.y - 0.5).abs() < 1e-4, "y={}", result.0.y);
+
+        let p2 = data_normalized::Point::new(1.1, 0.5);
+        let result2 = p2 * tf;
+        assert!((result2.0.x - 1.1).abs() < 1e-4, "x={}", result2.0.x);
+        assert!((result2.0.y - 0.5).abs() < 1e-4, "y={}", result2.0.y);
+    }
+
+    #[test]
+    fn data_normalized_to_observed_normalized_round_trips() {
+        let y_ranges = vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.1, 0.1),
+            Vec2::new(0.2, 0.2),
+        ];
+        let forward = DataNormalizedToObservedNormalized::new(Some(&y_ranges));
+        let backward = ObservedNormalizedToDataNormalized::new(Some(&y_ranges));
+        let p = data_normalized::Point::new(0.5, 0.5);
+        let observed_pt = p * forward;
+        let roundtrip = observed_pt * backward;
+        assert!((roundtrip.0.x - p.0.x).abs() < 1e-4, "x={}", roundtrip.0.x);
+        assert!((roundtrip.0.y - p.0.y).abs() < 1e-4, "y={}", roundtrip.0.y);
     }
 
     #[test]

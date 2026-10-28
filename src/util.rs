@@ -28,6 +28,10 @@ pub fn to_index(value: f32, max: usize) -> usize {
     value.round().clamp(0.0, (max - 1) as f32) as usize
 }
 
+pub fn norm_to_index(value: f32, max: usize) -> usize {
+    to_index(value * (max - 1) as f32, max)
+}
+
 pub fn clip_line(bounds: &Rectangle, a: Point, b: Point) -> Option<(Point, Point)> {
     // https://en.wikipedia.org/wiki/Liang%E2%80%93Barsky_algorithm
     let delta = b - a;
