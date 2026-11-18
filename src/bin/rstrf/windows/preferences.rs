@@ -34,6 +34,8 @@ pub enum Message {
     ThemeSelected(BuiltinTheme),
     ColormapSelected(Colormap),
     AveragePlotting(bool),
+    PredictionSize(u32),
+    PredictionGap(u32),
     FollowStrfSite(bool),
     Submit,
 }
@@ -269,6 +271,18 @@ impl Window {
                     self.working_copy.average_plotting,
                     Some(Message::AveragePlotting)
                 ),
+                Self::number_field(
+                    "Prediction size",
+                    self.working_copy.prediction_size,
+                    0,
+                    Some(Message::PredictionSize)
+                ),
+                Self::number_field(
+                    "Prediction gap",
+                    self.working_copy.prediction_gap,
+                    0,
+                    Some(Message::PredictionGap)
+                ),
             ],
         )
     }
@@ -389,6 +403,14 @@ impl super::Window<Message> for Window {
             }
             Message::AveragePlotting(average) => {
                 self.working_copy.average_plotting = average;
+                Task::none()
+            }
+            Message::PredictionSize(size) => {
+                self.working_copy.prediction_size = size;
+                Task::none()
+            }
+            Message::PredictionGap(gap) => {
+                self.working_copy.prediction_gap = gap;
                 Task::none()
             }
             Message::FollowStrfSite(enable) => {

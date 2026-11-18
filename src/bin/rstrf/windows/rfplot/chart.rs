@@ -223,8 +223,8 @@ impl State {
                             .draw_series(DashedLineSeries::new(
                                 izip!(time.iter(), freq.iter())
                                     .map(|(&t, &f)| (t as f32, (f as f32 - spectrogram.freq))),
-                                2,
-                                4,
+                                app.config.prediction_size,
+                                app.config.prediction_gap,
                                 color.stroke_width(2),
                             ))
                             .map_err(|e| {

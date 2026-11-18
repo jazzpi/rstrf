@@ -83,6 +83,8 @@ pub struct Config {
     pub theme: BuiltinTheme,
     pub default_colormap: Colormap,
     pub average_plotting: bool,
+    pub prediction_size: u32,
+    pub prediction_gap: u32,
 }
 
 impl Default for Config {
@@ -95,6 +97,8 @@ impl Default for Config {
             theme: BuiltinTheme::default(),
             default_colormap: Colormap::Viridis,
             average_plotting: false,
+            prediction_size: 2,
+            prediction_gap: 4,
         }
     }
 }
