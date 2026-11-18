@@ -72,11 +72,11 @@ impl AppShared {
         }
     }
 
-    pub fn satellite_classification(&self, norad_id: u64) -> Option<sgp4::Classification> {
+    pub fn satellite(&self, norad_id: u64) -> Option<&Satellite> {
         self.satellites
             .iter()
             .find(|(sat, _)| sat.norad_id() == norad_id)
-            .map(|(sat, _)| sat.elements.classification.clone())
+            .map(|(sat, _)| sat)
     }
 }
 
@@ -680,18 +680,16 @@ mod tests {
     }
 
     #[test]
-    fn satellite_classification_finds_matching_norad_id() {
+    fn satellite_finds_matching_norad_id() {
         let mut shared = AppShared::default();
         shared.satellites = vec![(test_satellite(), true)];
-        assert_eq!(
-            shared.satellite_classification(5),
-            Some(sgp4::Classification::Unclassified)
-        );
+        let found = shared.satellite(5);
+        assert_eq!(found.cloned(), Some(test_satellite()));
     }
 
     #[test]
-    fn satellite_classification_returns_none_for_unknown_id() {
+    fn satellite_returns_none_for_unknown_id() {
         let shared = AppShared::default();
-        assert_eq!(shared.satellite_classification(99999), None);
+        assert_eq!(shared.satellite(99999), None);
     }
 }

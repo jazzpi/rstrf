@@ -15,7 +15,7 @@ use strum::VariantArray;
 
 use crate::{
     app::AppShared,
-    config::{BuiltinTheme, Config},
+    config::{BuiltinTheme, Config, PredictionLabelMode},
     widgets::form::number_input,
     windows::{WindowEffect, WindowOut},
 };
@@ -36,6 +36,7 @@ pub enum Message {
     AveragePlotting(bool),
     PredictionSize(u32),
     PredictionGap(u32),
+    PredictionLabelsSelected(PredictionLabelMode),
     FollowStrfSite(bool),
     Submit,
 }
@@ -283,6 +284,12 @@ impl Window {
                     0,
                     Some(Message::PredictionGap)
                 ),
+                Self::dropdown_field(
+                    "Prediction labels",
+                    Some(self.working_copy.prediction_labels),
+                    PredictionLabelMode::VARIANTS,
+                    Message::PredictionLabelsSelected
+                )
             ],
         )
     }
@@ -411,6 +418,10 @@ impl super::Window<Message> for Window {
             }
             Message::PredictionGap(gap) => {
                 self.working_copy.prediction_gap = gap;
+                Task::none()
+            }
+            Message::PredictionLabelsSelected(mode) => {
+                self.working_copy.prediction_labels = mode;
                 Task::none()
             }
             Message::FollowStrfSite(enable) => {

@@ -73,6 +73,15 @@ impl From<BuiltinTheme> for Theme {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, strum::VariantArray, strum::Display,
+)]
+pub(crate) enum PredictionLabelMode {
+    NoradId,
+    SatelliteName,
+    Both,
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -85,6 +94,7 @@ pub struct Config {
     pub average_plotting: bool,
     pub prediction_size: u32,
     pub prediction_gap: u32,
+    pub prediction_labels: PredictionLabelMode,
 }
 
 impl Default for Config {
@@ -99,6 +109,7 @@ impl Default for Config {
             average_plotting: false,
             prediction_size: 2,
             prediction_gap: 4,
+            prediction_labels: PredictionLabelMode::NoradId,
         }
     }
 }

@@ -16,6 +16,7 @@ use plotters::coord::{
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters_iced2::Chart;
+use rstrf::orbit::Satellite;
 use rstrf::{
     chart::{ReferenceMode, ReferencedTicks, datetime_referenced_ticks},
     coord::{
@@ -26,6 +27,7 @@ use rstrf::{
 };
 
 use crate::app::AppShared;
+use crate::config::PredictionLabelMode;
 
 use super::{MouseState, RectAction, State};
 
@@ -38,11 +40,20 @@ pub(super) struct PlotChart<'a> {
 
 const ORANGE: RGBColor = RGBColor(255, 165, 0);
 
-fn prediction_color(classification: Option<sgp4::Classification>) -> RGBColor {
+fn prediction_color(classification: sgp4::Classification) -> RGBColor {
     match classification {
-        Some(sgp4::Classification::Secret) => RED,
-        Some(sgp4::Classification::Classified) => ORANGE,
-        Some(sgp4::Classification::Unclassified) | None => GREEN,
+        sgp4::Classification::Secret => RED,
+        sgp4::Classification::Classified => ORANGE,
+        sgp4::Classification::Unclassified => GREEN,
+    }
+}
+
+fn prediction_label(mode: PredictionLabelMode, id: u64, sat: &Satellite) -> String {
+    let name = || sat.elements.object_name.as_deref().unwrap_or("Unknown");
+    match mode {
+        PredictionLabelMode::NoradId => format!("{:06}", id),
+        PredictionLabelMode::SatelliteName => name().to_owned(),
+        PredictionLabelMode::Both => format!("{:06} - {}", id, name()),
     }
 }
 
@@ -204,7 +215,11 @@ impl State {
             let time = &predictions.times;
             for prediction in predictions.iter_satellites() {
                 let (id, passes) = prediction;
-                let color = prediction_color(app.satellite_classification(id));
+                let Some(sat) = app.satellite(id) else {
+                    log::warn!("Could not find satellite {}", id);
+                    continue;
+                };
+                let color = prediction_color(sat.elements.classification.clone());
                 log::trace!("Plotting {} passes for satellite {}", passes.len(), id);
                 for pass in passes {
                     let time = time.slice(s![pass.time_range.clone()]);
@@ -236,7 +251,7 @@ impl State {
                         let first_freq = freq[first_visible] as f32 - spectrogram.freq;
                         chart
                             .draw_series(vec![Text::new(
-                                format!("{:06}", id),
+                                prediction_label(app.config.prediction_labels, id, sat),
                                 (first_time, first_freq),
                                 ("sans-serif", 12)
                                     .into_font()
@@ -473,15 +488,8 @@ mod tests {
 
     #[test]
     fn prediction_color_maps_classification_to_expected_rgb() {
-        assert_eq!(prediction_color(None), GREEN);
-        assert_eq!(
-            prediction_color(Some(sgp4::Classification::Unclassified)),
-            GREEN
-        );
-        assert_eq!(
-            prediction_color(Some(sgp4::Classification::Classified)),
-            ORANGE
-        );
-        assert_eq!(prediction_color(Some(sgp4::Classification::Secret)), RED);
+        assert_eq!(prediction_color(sgp4::Classification::Unclassified), GREEN);
+        assert_eq!(prediction_color(sgp4::Classification::Classified), ORANGE);
+        assert_eq!(prediction_color(sgp4::Classification::Secret), RED);
     }
 }
