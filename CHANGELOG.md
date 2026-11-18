@@ -1,3 +1,8 @@
+# vNext
+
+## Other changes
+- **Predictions are now rendered as dashed lines**.
+
 # v0.5.1
 
 ## New features

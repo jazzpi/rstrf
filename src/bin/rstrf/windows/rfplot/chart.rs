@@ -220,10 +220,12 @@ impl State {
                         };
 
                         chart
-                            .draw_series(LineSeries::new(
+                            .draw_series(DashedLineSeries::new(
                                 izip!(time.iter(), freq.iter())
                                     .map(|(&t, &f)| (t as f32, (f as f32 - spectrogram.freq))),
-                                &color,
+                                2,
+                                4,
+                                color.stroke_width(2),
                             ))
                             .map_err(|e| {
                                 format!("Could not draw line for satellite {}: {:?}", id, e)
